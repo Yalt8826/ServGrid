@@ -35,6 +35,13 @@ module.exports = {
       plugins: ['servgrid-rules'],
       rules: {
         'no-undef': 'off',
+        // The codebase marks intentionally-unused parameters with a
+        // leading underscore (matching tsc's noUnusedParameters
+        // behaviour); teach the lint rule the same convention.
+        '@typescript-eslint/no-unused-vars': [
+          'error',
+          { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+        ],
         // Rule 1 — accent-erosion defence.
         'servgrid-rules/no-accent-hex': 'error',
         // Rule 2 — revenue-leak defence.

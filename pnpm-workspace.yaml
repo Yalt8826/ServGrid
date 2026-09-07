@@ -1,3 +1,9 @@
+# pnpm 11 reads workspace settings from this file. `allowBuilds` was
+# recorded by `pnpm approve-builds esbuild` — esbuild (a vitest
+# dependency) needs its postinstall, and build scripts are blocked
+# unless allowlisted.
+allowBuilds:
+  esbuild: true
 packages:
   - apps/*
   - packages/*

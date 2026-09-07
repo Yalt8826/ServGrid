@@ -1,0 +1,32 @@
+# Cold start with no signal (PLAN-FRONTEND.md §5.1).
+#
+# Airplane mode, an expired access token, and a stored session: the app
+# must open straight onto the role's landing route — no login screen, no
+# spinner that resolves into a logout. A refresh that cannot reach the
+# network is a retry, never a rejection.
+#
+# Runs properly in Phase 1 when there is a mirror to render (PHASE-0
+# spec, T0.11); the flow is written here so the contract is testable the
+# moment the first real screen lands.
+#
+# Setup performed by the driver before this flow runs:
+#   1. Install the app and log in once as a technician (stored session).
+#   2. Force-stop the app.
+#   3. Expire the access token on the server (or wait 15 minutes).
+#   4. Enable airplane mode.
+#   5. Relaunch the app cold.
+
+appId: com.servgrid.app
+name: cold-start-offline — expired token, airplane mode, landing route renders
+---
+- launchApp:
+    clearState: false
+- assertVisible:
+    id: '(app)/dashboard'
+    label: 'the role landing route is rendered — no login screen'
+- assertNotVisible:
+    text: '.*Sign in.*'
+    label: 'login must not appear: a network-failed refresh never logs out'
+- assertNotVisible:
+    text: '.*Session expired.*'
+    label: 'no session-expired banner: the expired access token is not a logged-out state'

@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "scheme": "servgrid",
+    "name": "ServGrid",
+    "slug": "servgrid",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F2C200"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.servgrid.app"
+    },
+    "android": {
+      "package": "com.servgrid.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F2C200"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-font", { "fonts": [] }]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:8787",
+      "router": { "origin": false }
+    }
+  }
+}
