@@ -1,0 +1,89 @@
+name: CI
+
+# Gate for every PR (PLAN-BACKEND.md §13): typecheck, lint (including the
+# three custom rules, each proven by a fixture), unit tests, integration
+# tests against a real Postgres (testcontainers), and migration
+# up → down → up on a clean database. On merge to main: build and push
+# the API image, migrate staging, deploy staging. EAS builds stay manual.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # T0.2 lands docker-compose.yml and the API test suite; until then
+      # the harness must still prove it runs red on a real failure
+      # (tools/fail-check/ fixture package, wired by tools/devnull.mjs).
+      - run: pnpm test
+
+  migrations:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # T0.2 replaces this with the real up → down → up rehearsal against
+      # a clean Postgres 16 (node-pg-migrate, apps/api/src/db/migrate.ts).
+      - run: pnpm migration:check
+
+  deploy-staging:
+    # On merge to main: build and push the API image, migrate staging,
+    # deploy staging. Redacted until T0.16 provisions the VPS.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [typecheck, lint, test, migrations]
+    runs-on: ubuntu-24.04
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging (pending T0.16 infra)
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+        run: |
+          if [ -z "$STAGING_SSH_HOST" ]; then
+            echo "Staging deploy is wired but T0.16 has not provisioned the VPS yet; nothing to do."
+            exit 0
+          fi
+          echo "Deploy step placeholder — filled in by T0.16 (environments, backups, alerting)."

@@ -1,0 +1,23 @@
+{
+  "name": "servgrid",
+  "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "lint": "node tools/lint-proof.mjs",
+    "test": "pnpm -r test && node tools/devnull.mjs",
+    "migration:check": "node tools/migration-check.mjs"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-servgrid-rules": "link:tools/eslint-plugin-servgrid-rules",
+    "prettier": "^3.3.3",
+    "typescript": "~5.5.4"
+  }
+}
