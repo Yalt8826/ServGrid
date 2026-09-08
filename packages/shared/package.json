@@ -7,10 +7,16 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
+    "test": "node --test --experimental-strip-types \"src/*.test.ts\"",
     "lint:fixtures": "node ../../tools/lint-proof.mjs"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "typescript": "~5.5.4"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
   }
 }
