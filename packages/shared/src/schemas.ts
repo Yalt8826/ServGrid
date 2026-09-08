@@ -1,0 +1,244 @@
+/**
+ * Shared zod schemas — request + response, per endpoint (T0.5 build list).
+ * Imported by the API for validation (PLAN-BACKEND.md §3.4: on both request
+ * body and response) and by the app for payload typing. The apps already
+ * depend on zod, so the package declares it as a peer dependency and is
+ * resolved by the workspace install.
+ *
+ * Shape rules the docs pin down:
+ * - Response shape **by role** is enforced by separate schemas, not one
+ *   schema with optional fields — `JobCardTechnician` / `JobCardDispatcher`
+ *   / `JobCardOwner` (§6.3). An optional field is a field that can leak.
+ * - Dispatcher payloads carry no money and no `companyId`; the server
+ *   strips `customers.company_id` rather than merely omitting the form
+ *   field (§5 rule 3).
+ * - `completedAt` is clamped server-side, not in the future and not more
+ *   than 14 days old (§6.2 step 1 and the clamp paragraph).
+ */
+import { z } from 'zod';
+
+import { ACTIONS, RESOURCES } from './permissions.ts';
+import { JOB_STATUSES } from './status.ts';
+import { PING_REJECT_CODES } from './errors.ts';
+
+// ── primitives ──────────────────────────────────────────────────────────────
+
+/** JS numbers lose cents above 2^53/1000; money crosses the wire as a decimal string like "1234.50". */
+export const moneyString = z
+  .string()
+  .regex(/^\d+(\.\d{1,2})?$/, 'decimal amount as a string, e.g. "1234.50"');
+
+export const uuid = z.string().uuid();
+export const isoDateTime = z.string().datetime({ offset: true });
+
+// ── enum mirrors ────────────────────────────────────────────────────────────
+
+export const jobStatusSchema = z.enum(JOB_STATUSES);
+export const resourceSchema = z.enum(RESOURCES);
+export const actionSchema = z.enum(ACTIONS);
+export const pingRejectCodeSchema = z.enum(PING_REJECT_CODES);
+
+// ── jobs (§6) ───────────────────────────────────────────────────────────────
+
+export const jobStatusChangeSchema = z
+  .object({
+    to: jobStatusSchema,
+    occurredAt: isoDateTime,
+  })
+  .strict();
+
+export const jobCompleteSchema = z
+  .object({
+    completedAt: isoDateTime,
+    workSummary: z.string().min(1),
+    /** Absent/zero only; the DB constraint and service rule carry the discount rule. */
+    cost: moneyString.optional(),
+    discountAmount: moneyString.optional(),
+    discountReason: z.string().optional(),
+    amountCollected: moneyString.optional(),
+    collectionMode: z.enum(['cash', 'upi', 'card', 'bank_transfer', 'none']).optional(),
+    paymentReference: z.string().optional(),
+    customerSigned: z.boolean().optional(),
+    stackChanges: z.array(z.record(z.unknown())).max(50).optional(),
+    parts: z.array(z.record(z.unknown())).max(50).optional(),
+  })
+  .strict()
+  .refine(
+    (v) => v.discountAmount === undefined || (v.discountReason !== undefined && v.discountReason.length > 0),
+    { message: 'A discount requires a reason.' },
+  );
+
+export const jobAssignSchema = z
+  .object({ technicianId: uuid })
+  .strict();
+
+export const jobCancelSchema = z
+  .object({
+    reasonCode: z.enum([
+      'customer_unavailable',
+      'customer_cancelled',
+      'duplicate',
+      'wrong_details',
+      'no_access',
+      'parts_unavailable',
+      'rescheduled_by_office',
+      'contract_cancelled',
+      'other',
+    ]),
+    /** `other` requires a note (the DB CHECK carries the same rule). */
+    reasonNote: z.string().optional(),
+    rescheduleTo: z.string().date().optional(),
+  })
+  .strict()
+  .refine((v) => v.reasonCode !== 'other' || (v.reasonNote !== undefined && v.reasonNote.length > 0), {
+    message: 'A cancellation with reason “other” requires a note.',
+  });
+
+// ── job card responses — one schema per role, no optional-field overlaps ────
+
+export const JobCardTechnicianSchema = z
+  .object({
+    id: uuid,
+    jobNumber: z.string(),
+    title: z.string(),
+    status: jobStatusSchema,
+    priority: z.enum(['low', 'normal', 'high', 'urgent']),
+    scheduledFor: isoDateTime.nullable(),
+    customerId: uuid,
+    contactName: z.string().nullable(),
+    contactPhone: z.string().nullable(),
+    description: z.string().nullable(),
+    contract: z
+      .object({
+        number: z.string(),
+        billing: z.enum(['upfront', 'per_visit']),
+        visitsRemaining: z.number().int(),
+      })
+      .nullable(),
+    version: z.number().int(),
+  })
+  .strict();
+
+export const JobCardDispatcherSchema = z
+  .object({
+    id: uuid,
+    jobNumber: z.string(),
+    title: z.string(),
+    status: jobStatusSchema,
+    priority: z.enum(['low', 'normal', 'high', 'urgent']),
+    scheduledFor: isoDateTime.nullable(),
+    customerId: uuid,
+    customerName: z.string(),
+    assignedTo: uuid.nullable(),
+    isOverdue: z.boolean(),
+    isContractVisit: z.boolean(),
+    version: z.number().int(),
+  })
+  .strict(); // money-free by construction — v_job_cards_dispatcher has no value column
+
+export const JobCardOwnerSchema = JobCardDispatcherSchema.extend({
+  cost: moneyString.nullable(),
+  discountAmount: moneyString.nullable(),
+  discountReason: z.string().nullable(),
+  amountCollected: moneyString.nullable(),
+  collectionMode: z.enum(['cash', 'upi', 'card', 'bank_transfer', 'none']).nullable(),
+}).strict();
+
+export type JobCardTechnician = z.infer<typeof JobCardTechnicianSchema>;
+export type JobCardDispatcher = z.infer<typeof JobCardDispatcherSchema>;
+export type JobCardOwner = z.infer<typeof JobCardOwnerSchema>;
+
+// ── customers (§5 rule 3, §6.4) ─────────────────────────────────────────────
+
+export const CustomerCreateSchema = z
+  .object({
+    name: z.string().min(1),
+    phone: z.string().min(1),
+    altPhone: z.string().optional(),
+    addressLine1: z.string().optional(),
+    addressLine2: z.string().optional(),
+    city: z.string().optional(),
+    pincode: z.string().optional(),
+    notes: z.string().optional(),
+    companyId: uuid.nullish(),
+  })
+  .strict();
+
+/** The dispatcher form: `companyId` absent — and stripped server-side even if sent. */
+export const DispatcherCustomerCreateSchema = CustomerCreateSchema.omit({ companyId: true }).strict();
+
+export type CustomerCreate = z.infer<typeof CustomerCreateSchema>;
+export type DispatcherCustomerCreate = z.infer<typeof DispatcherCustomerCreateSchema>;
+
+// ── devices (§8) ────────────────────────────────────────────────────────────
+
+export const deviceUpsertSchema = z
+  .object({
+    installId: z.string().min(1),
+    platform: z.enum(['android', 'ios', 'web']),
+    appVersion: z.string(),
+    osVersion: z.string(),
+    manufacturer: z.string(),
+    model: z.string(),
+    fcmToken: z.string().optional(),
+    locationPermission: z.enum(['none', 'foreground', 'background']).optional(),
+    batteryOptExempt: z.boolean().optional(),
+    autostartConfirmed: z.boolean().optional(),
+    notificationsEnabled: z.boolean().optional(),
+  })
+  .strict();
+
+export type DeviceUpsert = z.infer<typeof deviceUpsertSchema>;
+
+// ── location pings (§8) ─────────────────────────────────────────────────────
+
+export const locationPingSchema = z
+  .object({
+    recordedAt: isoDateTime,
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    accuracyM: z.number().nonnegative(),
+    altitudeM: z.number().optional(),
+    speedMps: z.number().nonnegative().optional(),
+    headingDeg: z.number().min(0).max(360).optional(),
+    batteryPct: z.number().int().min(0).max(100).optional(),
+    isMoving: z.boolean().optional(),
+    source: z.enum(['scheduled', 'on_demand', 'live', 'manual']),
+  })
+  .strict();
+
+/** Batch of up to 200, buffered on device. */
+export const locationPingBatchSchema = z.object({ pings: z.array(locationPingSchema).max(200) });
+
+export const pingBatchResultSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+  rejected: z.array(z.object({ index: z.number().int().nonnegative(), code: pingRejectCodeSchema })),
+});
+
+export type LocationPingPayload = z.infer<typeof locationPingSchema>;
+export type PingBatchResultParsed = z.infer<typeof pingBatchResultSchema>;
+
+// ── error envelope (§3.1) ───────────────────────────────────────────────────
+
+export const errorEnvelopeSchema = z.object({
+  error: z.object({
+    code: z.string(), // switched against the ErrorCode union on the client side
+    message: z.string(),
+    details: z.unknown().optional(),
+    requestId: z.string(),
+  }),
+});
+
+// ── sync (§7) ───────────────────────────────────────────────────────────────
+
+export const syncOperationSchema = z.object({
+  localId: z.string().min(1),
+  dependsOn: z.string().optional(),
+  idempotencyKey: uuid,
+  method: z.enum(['POST', 'PATCH', 'DELETE']),
+  path: z.string().startsWith('/v1/'),
+  body: z.unknown().optional(),
+});
+
+export const syncBatchSchema = z.object({ operations: z.array(syncOperationSchema).max(50) });
+export type SyncOperation = z.infer<typeof syncOperationSchema>;
