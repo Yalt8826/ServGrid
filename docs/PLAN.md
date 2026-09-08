@@ -4,6 +4,8 @@ UPS and battery sales, installation and servicing. 14 users: 1 owner, 3 dispatch
 
 This supersedes the earlier plan. Decisions below are closed unless marked otherwise.
 
+Companion documents: `PLAN-DATA-MODEL.md`, `PLAN-BACKEND.md` and `PLAN-FRONTEND.md` specify how each layer is built; `UI/plan-2/` carries the design philosophy, the motion system and a screen-by-screen specification for every role; `PLAN-EXECUTION.md` carries the phases, tests, exit criteria and rollback; `PLAN-GAPS.md` records the gaps found by two passes — the first reading all five against each other, the second reading them against the work of building and running the app — and the decisions taken to close them. Where those decisions changed something here, this document has been amended and the gap register says why. `implementation/` turns all of it into a build: eight files, one per phase plus a protocol, **89 tasks** each naming the doc sections to read, the files to create, the tests to write, the criteria that decide whether it worked, and the rollback for when it did not.
+
 ---
 
 ## 1. Platform
@@ -21,7 +23,7 @@ Two consequences worth holding onto:
 
 **Offline need is independent of platform.** Dispatchers are on Android but sit at a desk on office wifi, so they get online-only behaviour with clear error states. The outbox is a technician and sales-rep feature. These two facts will want to get conflated once code is being written; they shouldn't be.
 
-**The owner is the only role needing two layouts.** So the work is "phone layouts for everything, plus desktop layouts for eleven owner screens" — two nearly disjoint sets, not a responsive matrix across every screen.
+**The owner is the only role needing two layouts.** So the work is "phone layouts for everything, plus desktop layouts for fourteen owner screens" — two nearly disjoint sets, not a responsive matrix across every screen.
 
 ---
 
@@ -61,11 +63,13 @@ Money is `NUMERIC(12,2)`. Timestamps are `timestamptz`, business dates come from
 
 **Jobs** — `job_cards`, plus `job_completions` and `job_cancellations` as separate 1:1 tables, plus append-only `job_events`.
 
+**Contracts** — `service_contracts` and `contract_visits`. An AMC is an agreement with a fixed number of scheduled visits, and each visit becomes an ordinary job card when it falls due.
+
 **Sales** — `sales_cards` with `sales_card_items` (unit price snapshotted at sale time), `payments`, `attachments`.
 
-**Cash handover** — `cash_reconciliations`, one row per technician per day.
+**Cash handover** — `cash_reconciliations`, one row per **employee** per day. Technicians collect cash at completion and sales reps occasionally collect it from companies; both hand it over, so the table is keyed on the employee rather than the role.
 
-**Location** — `location_pings`. **Sync** — `idempotency_keys`, `sequences`.
+**Location** — `location_pings` and `location_requests` (an on-demand fix is a persisted request, not a fire-and-forget push). **Sync** — `idempotency_keys`, `sequences`.
 
 ### Four structural decisions
 
@@ -73,15 +77,39 @@ Money is `NUMERIC(12,2)`. Timestamps are `timestamptz`, business dates come from
 
 **Company dues are a view, not a column.** `SUM(sales) − SUM(payments)` per company. You wanted the due amount to rise the moment a sale is logged; a derived view does that and cannot drift, where a stored counter is correct until the first edit, void or retried request.
 
-**Expected cash is derived the same way.** The technician declares what he's handing over; what he *should* have comes from his cash-mode completions that day. Cash only — UPI and card land in the company account and never pass through anyone's hands. The owner's queue uses a `FULL OUTER JOIN` so a day with collections but no submission still appears; that's the row the whole feature exists to catch.
+**Expected cash is derived the same way.** The employee declares what he's handing over; what he *should* have comes from his cash-mode completions and cash-mode payments that day. Cash only — UPI, card and bank transfer land in the company account and never pass through anyone's hands. The owner's queue uses a `FULL OUTER JOIN` so a day with collections but no submission still appears; that's the row the whole feature exists to catch.
+
+A completion can be amended afterwards, by the owner only and with a reason, because a mistyped amount otherwise reaches the owner as an unexplainable variance with no way to fix it. Amendment is refused once that day's handover is confirmed — the owner reopens the reconciliation first, so a figure he has already signed off cannot move underneath him.
 
 **Every mutation carries an idempotency key.** Without it, one flaky reconnect on a technician's phone creates duplicate jobs and double-counted payments.
 
+### Service contracts
+
+An AMC is an agreement: a customer signs for a fixed number of visits over a term, billed either upfront or per visit. `services` already carried an `AMC` code, but a code is not a contract, and without one there is nothing to schedule visits from, nothing to expire, and nothing to renew.
+
+**One site, one AMC.** A contract covers a single customer location, and a partial unique index makes a second active one at the same site impossible. A corporate account with nine sites holds nine contracts — the deal may be negotiated once, but it is serviced and administered per location, which is the level the visits happen at. Since a site is not an account, a sales rep sees the contracts he sold rather than the contracts of accounts he owns.
+
+**A contract visit becomes an ordinary job card.** A nightly job raises an `unassigned` card for every visit falling due within the week and marks the visit as raised. From that moment the dispatcher assigns it with the same picker and the technician closes it with the same sheet — nothing downstream knows a contract caused it. That is what makes the whole module removable: turn the generator off and the jobs it already raised are indistinguishable from manual ones.
+
+**Billing decides whether money changes hands on site.** An upfront contract's visit is prepaid, so its completion is zero cost, zero discount, collection mode none — which the completion rules already permit without amendment. A per-visit contract charges normally. The technician's job detail carries the contract and its billing mode, so the complete sheet can drop the amount field entirely on a prepaid visit rather than trusting someone to type a zero.
+
+**The technician decides, on site, whether a visit is lost or moved.** He arrives at a locked gate; the office does not. He cancels the job with a reason and either picks a new date — which returns the visit to the schedule and lets the generator raise a fresh card when it comes due — or does not, which spends one of the customer's entitled visits. No roll-over, no refund: the reschedule was offered and the reason is recorded against the job, so a later dispute has an answer.
+
+Because that default costs the customer something, the cancel sheet says so in those words before he skips it. It is the one place in the app where a technician is warned about a default rather than trusted to know it.
+
+**Renewal is a view**, not a reminder table: active contracts ending within sixty days, with visits used and remaining, on the owner's dashboard and on the selling rep's. A spent visit reduces what a renewal is worth, which is exactly what the owner needs to see before quoting.
+
 ### Closed scope decisions
 
-No customer credit — jobs never create receivables. Sales cards are internal records, not invoices, so no GST breakup or printable format. Companies are managed by owner and sales reps only. Technicians update a customer's product stack after installing, since they're the ones who know what got fitted.
+No customer credit — jobs never create receivables. Sales cards are internal records, not invoices, so no GST breakup or printable format. Technicians update a customer's product stack after installing, since they're the ones who know what got fitted.
 
-Worth noting for the technician completion form: with no credit system, a job where `amount_collected` is less than `cost` has nowhere for the difference to go. Either the form should ask why (an on-site discount), or the two fields should collapse into one. Still open.
+**Parts fitted on a job are recorded; stock is not tracked.** A completion can list what was consumed, because a fixed-price AMC whose visits eat two filters each time has a cost the renewal quote should reflect and nothing else would reveal it. But nothing is decremented, there are no stock levels, and **parts never affect the amount charged** — the technician still enters one figure. Anyone later deriving the amount from a parts total is rebuilding invoicing, which the line above rules out.
+
+**Technicians do not spend from collected cash.** Confirmed with the owner, and it is why the cash handover is one number and a note, and why every variance in the owner's queue is a real discrepancy rather than something to explain away.
+
+**Companies are managed by owner and sales reps only, and each rep owns his accounts.** `companies.owner_rep_id` decides what a rep sees; a NULL owner means a house account visible to every rep, which is where a company created by the owner lands. Only the owner can reassign an account, which is also how leave and handover work — he reassigns or nulls a rep's accounts for the duration. A payment recorded by a rep who does not own the account is legal and records who actually took the money, exactly as a completion records who actually closed the job.
+
+The technician completion form's shortfall question — where the difference goes when collected is less than cost, with no credit system — is resolved in `PLAN-DATA-MODEL.md` §3.4: the technician enters one amount, and a shortfall must be entered as a discount with a reason. A gap with no explanation is unrepresentable.
 
 ---
 
@@ -93,14 +121,27 @@ Defined once in `packages/shared`, enforced server-side, used by the UI to decid
 |---|---|---|---|---|
 | Own jobs | read, status, complete, cancel | — | — | full |
 | All jobs | — | CRUD + assign | — | full |
-| Job money | writes own at completion | **none** | — | full |
+| Job money | writes own at completion | **none** | — | full, amends with a reason |
 | Customers | read (assigned only) | create, read, update | — | full |
 | Customer product stack | update | — | — | full |
-| Companies | — | **none** | read, create, update | full |
+| Companies | — | **none** | own accounts + house accounts | full |
+| Service contracts | reads the contract behind his visit; **reschedules or spends a visit from the cancel sheet** | reads visit context, moves due dates and skips a visit the customer cancelled by phone, **no contract value** | contracts he sold | full |
 | Sales / payments | — | — | own | full |
-| Cash handover | declares own | — | — | confirms all |
+| Cash handover | declares own | — | declares own | confirms all, reopens |
 | Employees | self | self | self | full |
-| Location | sends | — | sends | reads all |
+| Location | sends | **device health only, no position** | sends | reads all |
+
+Three things the table alone doesn't carry:
+
+**Dispatchers can create a customer but not attach it to a company.** They have no company permission at all, so `customers.company_id` is absent from their form and stripped from their payloads server-side. It is an owner and rep field.
+
+**A technician's `job.money` is write-once at completion.** He submits the amount; the job detail he sees afterwards shows the work summary and collection mode, not a revenue figure. The completion he wrote is his own record, not a report.
+
+**Deactivating an employee is refused while he still holds open jobs, owns companies, or has cash the owner has not confirmed**, with the blocking rows named so the owner can reassign and retry. On success every refresh token is revoked, his devices are marked inactive and he leaves the tracking-health view. History is untouched — `is_active` was never a delete.
+
+The cash precondition is the one that is easy to leave out and expensive to leave out. Open jobs and owned companies are visible; an unconfirmed handover is a row in a queue the owner may not have reached yet, and deactivating the person is how a real discrepancy becomes an unanswerable one — the only person who could explain it can no longer log in and is probably no longer employed. **Changing an employee's role is gated the same way**, for the same reason plus one: a technician promoted to dispatcher loses offline capability at his next login, so his queue must have drained first.
+
+**A dispatcher sees tracking health but never a position.** He is the person who will notice a technician has stopped reporting and the person who will ring him, so his dashboard carries the warning inline. Where someone actually *is* — coordinates, the day's trail, the map — remains the owner's alone. `PLAN-BACKEND.md` §5 splits these as `location.health` and `location.read`; without the split the choice was between handing the desk a live map of eight people or leaving the dispatcher's warning reading data the matrix forbids.
 
 ---
 
@@ -111,6 +152,12 @@ SQLite mirror of what the role needs in the field, plus an `outbox` table. User 
 Conflicts resolve by last-write-wins on descriptive fields, but status transitions are validated server-side — you cannot complete a job the office cancelled while you were underground. On rejection the client keeps the local record and shows a plain banner explaining what happened. No silent overwrite in either direction.
 
 Job and sale numbers are server-assigned; the device shows "Pending sync" until one arrives, never a fake local number. Photos queue as local file URIs and upload on reconnect. Nothing in the UI blocks on the network, and a pending-count badge stays visible so the technician can see work is queued rather than lost.
+
+**Logging out never discards queued work.** Logout is blocked while anything is queued or in flight, reporting the count and offering a retry. If only rejected items remain, logout proceeds and those are kept, keyed to the employee, so they reappear when he logs back in on that handset. On a shared phone the mirror is cleared on user switch; the outbox is filtered, not wiped.
+
+**Assignment notifications.** The drain and delta sync fire on reconnect, on foreground and on a timer *while the app is active* — none of which run when the app is backgrounded. Without a push, a technician learns about an urgent job when he next opens the app. So the server sends a data-only FCM message on assignment, reassignment, cancellation of an assigned job, and priority escalation. It carries no job content: it wakes the device, which syncs and raises a local notification from the row it just received.
+
+**The system stays correct with every push dropped.** Push is a latency improvement over the existing sync triggers, never the transport. A technician who receives none still gets the job on next foreground. Keeping FCM off the correctness path is what makes it safe to depend on a delivery channel nobody controls.
 
 ---
 
@@ -130,6 +177,8 @@ Android only, and still the highest-risk part of the build.
 
 **Onboarding, in this order.** Foreground permission, then background permission — which on Android 11+ cannot be requested in-flow, so it's a deep-link into settings with an explanation — then battery optimisation exemption, then the OEM autostart page on Xiaomi, Realme, Vivo, Oppo and OnePlus. Those vendors kill background tasks regardless of what Android permits, and they are most of the handset market here.
 
+**Notification permission comes after the ladder, not inside it.** Android 13+ requires a runtime prompt for notifications, and it is needed for assignment alerts (§6) rather than for tracking. Asking mid-ladder means a refusal strands someone between two location permissions; asking after means a refusal costs alerts and nothing else. The persistent foreground-service notification is exempt, so tracking survives a refusal — but the technician stops being told about new jobs, which is silent degradation, and this app treats that as the enemy everywhere else. The health chip has to say so.
+
 **Make failure loud.** A health chip on the technician's profile showing "Tracking active · last ping 6 min ago", visible to the owner too. Silent failure is the enemy.
 
 **Consent.** A one-time screen at first login, plus the persistent notification. Under the DPDP Act you want that documented, and it stops the app being experienced as something done to staff rather than with them.
@@ -138,19 +187,46 @@ Android only, and still the highest-risk part of the build.
 
 ## 8. Screens
 
-**Technician** — Dashboard, Jobs (tabs, job detail, complete sheet, cancel sheet), Profile.
+**Technician** — Dashboard, Jobs (tabs, job detail, complete sheet, cancel sheet), Cash handover, Profile.
 
-**Dispatcher** — Dashboard, Dispatch Job, Job Logs, Customer, Profile. Two of these need designing for a phone rather than shrinking:
+A job detail names the specific unit the job is about, not just the site — a customer with five UPS units and three battery banks otherwise produces a docket that says "battery swap" and leaves the technician to work it out on arrival. When that unit is still under warranty the detail says so with the expiry date, and completing it with a charge raises a confirmation rather than a refusal, because out-of-scope work on an in-warranty unit is legitimately chargeable.
+
+**Dispatcher** — Dashboard, Dispatch Job, Job Logs, Customer, Profile. An open job past its scheduled date shows as **Overdue** and sorts first; the date never rolls forward on its own, because silently moving it hides exactly the missed commitment a dispatcher is employed to see. Two of these need designing for a phone rather than shrinking:
 
 *Job Logs* was a sortable table with a sticky header. On a phone it becomes a filtered list with a persistent filter bar — technician, status, date — and bulk reassign becomes a multi-select mode rather than checkboxes in a table.
 
 *Assignment* shouldn't be a dropdown of eight names. The picker shows load inline — "Ravi · 3 today", "Anitha · 6 today" — because choosing who to send is the actual decision and a name alone doesn't support it.
 
-**Sales Rep** — Dashboard, Sales, Payment (Pending / Collected tabs, proof photo), Company, Profile.
+**Sales Rep** — Dashboard, Sales, Payment (Pending / Collected tabs, proof photo), Company, Contracts due for renewal, Cash handover, Profile.
 
-**Owner** — Dashboard, Jobs, Sales, Dispatch Job, Payment, Product, Customer, Employees, Company, Location, Profile, plus the cash reconciliation queue.
+**Owner** — Dashboard, Jobs, Dispatch Job, Customers, Contracts, Sales, Payments, Companies, Products, Services, Employees, Location, Cash reconciliation queue, Profile.
 
-Eleven destinations don't fit a phone tab bar, so on Android they group into five: Dashboard, Operations (jobs, dispatch, customers), Sales (sales, payments, companies), People (employees, location, cash), Profile. On desktop the same routes expand into a left rail with those groups as sections. Same route tree, two presentations.
+Fourteen destinations don't fit a phone tab bar, so on Android they group into five:
+
+| Group | Routes |
+|---|---|
+| Dashboard | dashboard |
+| Operations | jobs, dispatch job, customers, contracts |
+| Sales | sales, payments, companies, contract renewals |
+| People | employees, location, cash queue |
+| Profile | profile, products, services |
+
+On desktop the same routes expand into a left rail with those groups as sections. Same route tree, two presentations. Products and services sit under Profile because they are settings the owner touches a few times a year, not work — putting them in Operations would give a daily group two entries nobody opens.
+
+**The grouping is per role, not one owner-shaped map with rows hidden.** That distinction is easy to miss and expensive to discover: the table above is the *owner's* grouping, and simply filtering it by permission strands two screens. Cash sits under People, which a technician cannot reach — so his handover would have no home. Contracts sits under Operations, which a sales rep cannot reach — so the rep who sells and renews AMCs could reach the renewal list but never the contract he is renewing.
+
+| Role | Tabs | Contents |
+|---|---|---|
+| Technician | 4 | Dashboard · Jobs · **Cash** · Profile |
+| Dispatcher | 3 | Dashboard · **Operations** (jobs, dispatch, customers, contracts) · Profile |
+| Sales Rep | 4 | Dashboard · **Sales** (sales, payments, companies, contracts, renewals) · **Cash** · Profile |
+| Owner | 5 | Dashboard · Operations · Sales · People · Profile |
+
+Two routes move by role rather than being hidden: `/cash` is the owner's reconciliation queue under People and the field roles' own handover as its own tab, and `/contracts` is operational for a dispatcher and commercial for a rep. Everything else is the same map with unreachable groups removed.
+
+**Cash gets its own tab for the field roles rather than a row inside Profile.** It is touched once a day, at the end of a shift, by someone tired and wanting to leave; a screen behind two taps at that moment is a screen that gets skipped, and a skipped handover is precisely the `missing_submission` row the owner's queue exists to catch. The same argument applies with more force to the sales rep, whose cash is rare — a path nobody exercises is a path nobody notices is broken.
+
+The owner's dashboard shows four figures — open jobs by status today, cash awaiting confirmation, month-to-date completion revenue, total outstanding company dues — and two charts, jobs per day over thirty days and revenue per week over twelve. Every one reads an existing view. Stating them here is what stops the dashboard becoming a design conversation at the start of Phase 4.
 
 ---
 
@@ -163,6 +239,8 @@ Light mode only for now. If dark mode is added later, the contrast levels below 
 The accent is safety yellow `#F2C200`, taken from the vernacular of the work — hard hats, lockout tags, cable markers — and it stays readable in direct sunlight where a mid-tone blue disappears. It appears on exactly two things: the primary action and the active state. The moment it decorates a third, it stops meaning anything.
 
 Status colours are read off UPS front panels, so the card communicates state before anyone reads a word: `#0F8A5F` completed, `#D98A00` en route, `#F2C200` in progress, `#B3261E` cancelled.
+
+**Language.** English only, and that is a decision rather than an omission — all fourteen staff read it comfortably. Numbers still format as `en-IN`, so a lakh renders `1,00,000` and not `100,000`. If the language ever changes the cost is every screen, so it is worth revisiting before Phase 1 rather than after.
 
 **Type.** IBM Plex Sans throughout, Condensed for large dashboard figures. Drawn for engineering contexts, genuinely good tabular figures for job numbers and amounts, and not the family every app defaults to. Open licensed. One family, two widths.
 
@@ -178,12 +256,15 @@ The one rule that matters for the owner's dual layout: **the same job is a card 
 
 | Phase | What |
 |---|---|
-| 0 done | Monorepo, schema, permission matrix, auth, tokens |
+| 0 | Monorepo, schema, permission matrix, auth, tokens |
 | 1 | Technician app — exercises offline and location while scope is small |
 | 2 | Dispatcher — phone-native Job Logs and load-aware assignment |
+| 2B | Service contracts — AMC agreements, visit generation, renewal view |
 | 3 | Sales Rep — sales cards, balances, payments with proof upload |
 | 4 | Owner — Android grouped nav, desktop rail, location console, cash queue |
 | 5 | Hardening — OEM battery testing on the actual handsets staff carry |
+
+Contracts sit after the dispatcher because generated visits need somewhere to be assigned, and before the sales rep because renewals are a thing a rep sells. `PLAN-EXECUTION.md` carries the schedule, the tests and the rollback for each.
 
 ---
 

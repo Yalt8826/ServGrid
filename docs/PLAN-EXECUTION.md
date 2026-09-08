@@ -6,6 +6,8 @@ Every phase below has the same five sections: **Ships · Entry · Tests · Exit 
 
 **Estimates assume one full-time developer.** That assumption is almost certainly wrong for your situation; correct it and the durations scale roughly linearly except Phase 5, which is gated by handset access and calendar time, not headcount.
 
+**Amended after the gap pass.** `PLAN-GAPS.md` records twenty-one gaps found by reading the plans against each other and against the working day they describe. One of them — annual maintenance contracts — was a missing business capability rather than a missing detail, and it is now **Phase 2B**, taking the programme from ~28 to ~32 weeks. Everything else absorbed into phases that already existed. Two schedule consequences worth knowing before reading further: **FCM moved from Phase 4 to Phase 0**, and **owner password recovery is now a Phase 0 exit criterion**.
+
 ---
 
 ## Part I — Ground rules
@@ -26,7 +28,9 @@ Down-migrations are written and tested in CI, because they are how a developer r
 
 Concretely: no `DROP COLUMN`, no `NOT NULL` on an existing column, no type narrowing, and no enum value removal in the same release that stops using it. Adding an enum value is safe; removing one is a contract step.
 
-This is why phases 1–4 add tables and never modify Phase 0's. A rollback at any point leaves orphan tables, and orphan tables cost nothing.
+This is why phases 1–4 add tables and never modify Phase 0's. A rollback at any point leaves orphan tables, and orphan tables cost nothing. Phase 2B's contract tables follow the same rule: a rollback past them leaves two unwritten tables and a disabled cron.
+
+**One exception, and it is only available now.** The gap pass changed several migrations that have not yet run — `cash_reconciliations` keyed on employee rather than technician, `companies.owner_rep_id`, `job_cards.customer_product_id`, two new attachment owner types. Those are text edits to files 001–014, not expand/contract cycles, because no environment has applied them. **This exception expires the moment Phase 0 deploys**; after that every one of them would have cost a dual-write and a contract step. It is the strongest practical argument for doing a gap pass before the first migration runs rather than after.
 
 ### 2. Rollback tiers
 
@@ -51,12 +55,28 @@ Know which tier a change is in *before* shipping it, because the tiers differ by
 
 Server-driven, returned in `GET /v1/auth/me`, evaluated per employee and per role. Every phase's user-facing surface ships behind its flag:
 
-```
-tech.jobs        tech.offline      tech.location
-dispatch.console dispatch.bulk
-sales.cards      sales.payments
-owner.web        owner.location    owner.cash
-```
+Each flag names exactly one surface, so "turn it off" is never ambiguous:
+
+| Flag | Guards | Phase |
+|---|---|---|
+| `tech.jobs` | Technician job screens and completion | 1 |
+| `tech.offline` | SQLite mirror and outbox — off means online-only, queued items preserved | 1 |
+| `tech.location` | Background tracking task and ping ingest | 1 |
+| `tech.notifications` | Assignment pushes and local notifications | 2 |
+| `dispatch.console` | Dispatcher dashboard, dispatch form, Job Logs | 2 |
+| `dispatch.bulk` | Multi-select bulk reassign only | 2 |
+| `dispatch.overdue` | Overdue filter and dashboard count | 2 |
+| `contracts.manage` | Contract screens and CRUD | 2B |
+| `contracts.generate` | The nightly visit generator alone | 2B |
+| `sales.cards` | Sales cards and line items | 3 |
+| `sales.payments` | Payment capture and the Pending/Collected tabs | 3 |
+| `sales.cash` | The sales rep's cash handover | 3 |
+| `owner.web` | The desktop rail and `DataTable` | 4 |
+| `owner.location` | Location console and map | 4 |
+| `owner.cash` | Reconciliation queue, confirm, dispute, reopen | 4 |
+| `owner.amend` | Completion amendment | 4 |
+
+`dispatch.bulk` and `contracts.generate` are deliberately separate from the console and management flags beside them. Both are the risky half of an otherwise safe feature — a bulk operation and an unattended cron — and both need to be switchable without taking the working half down with them.
 
 This buys **dark launch**: turn a phase on for one named person for a week before the role. It also makes T0 rollback possible, which is the only tier fast enough to matter during a working day.
 
@@ -116,11 +136,19 @@ The only phase with a free rollback, because nothing is live yet. Use that.
 | Repo | Monorepo (`apps/mobile`, `apps/api`, `packages/shared`), CI, docker compose |
 | Data | Migrations 001–005: helpers, enums, identity, sync plumbing, reference data |
 | Shared | Permission matrix, zod schemas, job status machine, error-code union, sequence format |
-| API | Fastify skeleton, config-at-boot validation, error envelope, request context, auth (login / refresh / rotation / reuse detection / password change) |
+| API | Fastify skeleton, config-at-boot validation, error envelope, request context, auth (login / refresh / rotation / reuse detection / password change), **consent endpoints** (`GET /v1/consents/required`, `POST /v1/consents` — the screen ships this phase and had no endpoint behind it), **employee CRUD** — the fourteen accounts must exist before anyone can log in, and seeding them by hand into production is how a password reaches a shell history |
 | App | App shell, IBM Plex font gate, design tokens, session store + secure storage, API client with refresh-on-401, login, forced password change, consent screen |
-| Ops | Staging + production VPS, Postgres, MinIO, Caddy, backups configured, **EAS build producing a signed APK that installs by sideload** |
+| Ops | Staging + production VPS, Postgres, MinIO, Caddy, backups configured, **EAS build producing a signed APK that installs by sideload**, CI pipeline (typecheck, lint incl. the three custom rules, nav-map/matrix cross-check, integration against testcontainers Postgres, migration up/down/up), external uptime check on `/healthz` |
+| Admin | **Second owner-role account** created and handed to a trusted second person; break-glass password-reset CLI written and exercised once |
+| Push | **FCM Google project confirmed and one data-only push delivered to a real handset end to end** |
 
 **Entry** — nothing. This is the start.
+
+**Two additions that were previously scoped later, and belong here.**
+
+**FCM moves from Phase 4 to Phase 0.** It was budgeted for the owner's *Locate now*. Assignment notifications need it in Phase 2, so the project must exist now — and the thing to prove is not that an account exists but that a data-only message reaches a handset, since that is the step that fails. Confirming it here costs an afternoon; discovering in Phase 2 that no Google account exists costs the phase.
+
+**The owner has no password recovery.** Accounts are owner-created, there is no email and no reset flow, and there is one owner. A second owner-role account is the real answer and costs nothing; the break-glass CLI is the answer when that is lost too. Both must be *exercised* in Phase 0, not merely written — an untested recovery path is the same class of belief as an untested backup, and this phase already refuses that one.
 
 **Tests**
 
@@ -137,8 +165,12 @@ The only phase with a free rollback, because nothing is live yet. Use that.
 - [ ] An owner account logs in on a physical Android device **and** on desktop web
 - [ ] Migrations rehearsed forward and backward on a clone
 - [ ] `pg_dump` backup taken and **restored into a scratch database successfully** — not just scheduled
-- [ ] Secrets in place: `JWT_SECRET`, S3 credentials, TLS
+- [ ] Secrets in place: `JWT_SECRET`, S3 credentials, TLS, `FCM_SERVICE_ACCOUNT`
 - [ ] APK distribution path proven end-to-end: EAS build → download link → install on a handset that has never had the app
+- [ ] **A data-only FCM push delivered to that handset and handled by the app**
+- [ ] **Second owner account created; break-glass reset run once against staging and the audit row verified**
+- [ ] CI blocks a merge on a failing test, a lint violation of **any of the three custom rules**, a nav-map/permission-matrix disagreement, and a failing down-migration — each proven by deliberately breaking it once
+- [ ] Uptime check alerts a phone when the API is stopped
 
 **Rollback** — T2 for the API. For everything else: revert the branch and drop the database. There is no production data and no installed app. This is the last time that is true.
 
@@ -158,7 +190,7 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 
 | Layer | Deliverable |
 |---|---|
-| Data | Migrations 006–010: `customer_products`, jobs (cards, completions, cancellations, events), attachments, location, cash |
+| Data | Migrations 006–010: `customer_products`, jobs (cards, completions, parts, cancellations, events), attachments, location **incl. `v_employee_tracking_health`**, cash |
 | API | Jobs module + status machine, completion (with the discount constraint), cancellation, `job_events`, **idempotency plugin**, sync bootstrap/delta/batch, location ingest with work-window validation, attachments, cash handover declaration |
 | App | Technician dashboard, job tabs, job detail, complete sheet, cancel sheet, cash handover, profile; **SQLite mirror**, **outbox + drain manager**, **location task + permission ladder**, tracking health chip |
 | Side quest | **Dispatcher Job Logs prototype at real volume** (see Phase 2 entry) |
@@ -178,8 +210,18 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 | Integration | Expired access token + full outbox → refresh once, retry once, **nothing discarded** (`PLAN-BACKEND.md` open item 1) | queue intact |
 | Integration | Sync batch: `dependsOn` short-circuit, rejection isolation, cursor monotonicity | all |
 | Integration | Ping ingest: out-of-window rejected with HTTP 200; duplicate `(employee, recorded_at)` absorbed | both |
+| Integration | Completion amendment: before confirm succeeds; after confirm → 409 naming the reconciliation; reopen then amend succeeds; event trail carries before and after | all four |
+| Integration | Cash handover keyed on `employee_id`, unique per `(employee, date)`; `businessDate` refused in the future and beyond 7 days back | passes |
+| Integration | Declaration amended while `submitted` succeeds; after `confirmed` or `disputed` → 409 | both |
+| Integration | **Scope exit**: a job reassigned away from a technician arrives in his next delta as an `out_of_scope` tombstone, and his queued completion for it is **not** deleted | both halves |
+| Integration | `v_employee_tracking_health` exists after migration 009 and `GET /v1/location/health/me` returns the actor's own row and nobody else's | passes |
+| E2E | **Cold start with the radio off**: expired access token, full outbox → app renders the mirror, nobody is logged out, no blocking refresh | green on device |
+| E2E | Completion with two photos → JSON batch pass, then binary pass; a rejected parent leaves its photos unsent rather than orphaned on the server | green |
+| Integration | Parts recorded on a completion **do not alter `cost`**; a completion with parts and one without produce identical money rows | passes |
+| Unit | Complete sheet: in-warranty charge raises exactly one confirmation; discount discloses a mandatory reason | both |
 | E2E (Maestro) | Airplane mode → complete a job → reconnect → job number arrives, badge clears | green on device |
 | E2E | Complete a job offline that the office cancelled → reconnect → `JOB_ALREADY_CLOSED` banner, local record retained | green |
+| E2E | **Logout with queued items is blocked**; logout with only rejected items succeeds and those rows return on next login for the same employee — and are invisible to a different one | green on device |
 | Device | Overnight background survival, ≥1 handset per OEM in the roster | recorded in the matrix |
 | Soak | 72h continuous tracking, 2 devices | ping delivery + battery cost measured |
 | Field | 2 technicians, 2 weeks, real jobs, parallel run | see exit criteria |
@@ -193,6 +235,8 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 - [ ] Both technicians completed a full day's jobs **without falling back to the old process**
 - [ ] Basement/dead-zone recovery observed at least once in the wild: a gap that filled in on reconnect rather than staying a gap
 - [ ] Health chip showed a **true red** at least once and the technician acted on it — a chip that has only ever been green is untested
+- [ ] **No queued work was lost across a logout** during the parallel run — including at least one deliberate end-of-shift handset handover
+- [ ] Parts were recorded on at least some real completions, and **no technician asked why the amount did not change** — if anyone did, the sheet implies a bill it does not produce
 
 **Rollback**
 
@@ -224,13 +268,16 @@ This is a real option, not a consolation. Jobs, offline completion, cash handove
 
 | Layer | Deliverable |
 |---|---|
-| Data | Migration 013 (ops views): `v_job_cards_dispatcher`, `v_technician_load` |
-| API | Dispatcher job queries **against the view, never the table**; assign; bulk reassign; customer CRUD |
-| App | Dispatcher dashboard, Dispatch Job form, **Job Logs**, `TechnicianPicker` with inline load, customer screens; online-only with explicit error states |
+| Data | Migration 013 (ops views): `v_job_cards_dispatcher` including `is_overdue`, `v_technician_load`. `v_employee_tracking_health` already exists from 009 |
+| API | Dispatcher job queries **against the view, never the table**; assign and bulk reassign **under `If-Match`**; customer CRUD with `company_id` stripped; **assignment push notifications** |
+| App | Dispatcher dashboard led by the overdue count, Dispatch Job form, **Job Logs** with an Overdue filter, `TechnicianPicker` with inline load, customer screens; online-only with explicit error states; technician-side push handling and local notifications |
 
-**Entry — a hard gate.** The Job Logs prototype from Phase 1 must have passed its test: **a dispatcher answers "who has the Kormangala jobs today" in under 5 seconds, on a phone, against 200+ jobs.** If it did not pass, take the descope path below *before* the phase starts.
+**Entry — two hard gates.**
 
-Also: owner has answered whether a reassigned-away technician gets notified (`PLAN-BACKEND.md` open item 5).
+1. The Job Logs prototype from Phase 1 must have passed its test: **a dispatcher answers "who has the Kormangala jobs today" in under 5 seconds, on a phone, against 200+ jobs.** If it did not pass, take the descope path below *before* the phase starts.
+2. **FCM proven end to end in Phase 0.** Assignment notifications are the reason this moved forward two phases; without the channel, a dispatcher can assign urgent work that the technician will not see until he next opens the app.
+
+Also decided before starting: what the local notification says when work is *taken away* by a reassign (`PLAN-BACKEND.md` open item 5), and whether a technician is pushed for a job assigned outside the 09:00–19:00 window (open item 6 — proposed: suppress until the window opens, except urgent). The second is a staff-relations question as much as a technical one, and it is cheaper to answer than to retract.
 
 **Tests**
 
@@ -240,7 +287,14 @@ Also: owner has answered whether a reassigned-away technician gets notified (`PL
 | Static | Lint rule: `job_completions` unreferenced in `modules/jobs/repo.dispatcher.ts` | passes |
 | Integration | Every dispatcher endpoint as every role — 403/404 | full matrix |
 | Integration | Bulk reassign with one invalid job in the set → partial results, valid ones applied | passes |
+| Integration | Reassign from `assigned` and from `en_route` succeed (status resets to `assigned`); from `in_progress` → 409 naming who is on site | all three |
+| Integration | A dispatcher payload carries tracking **health** and last-ping age but **no coordinates**, for every dispatcher endpoint | zero coordinates |
+| Integration | **Two simultaneous assigns of one job** — one wins, the loser gets 409 naming the current assignee | deterministic |
+| Integration | A dispatcher create-customer payload carrying `company_id` has it stripped, not honoured | passes |
 | Integration | `v_technician_load` matches a hand-counted fixture | exact |
+| Integration | `is_overdue` matches a hand-counted fixture across a date boundary in IST | exact |
+| E2E | Assign a job while the technician's app is **backgrounded** → push wakes it → local notification within 30s | green on device |
+| E2E | Same, with push suppressed at the OS level → job still arrives on next foreground | green — proves push is not the transport |
 | Usability | 2 real dispatchers, 200+ jobs, timed tasks on a phone | median < 5s for the filter task |
 | Field | 1 dispatcher, 1 week, then all 3, 1 week | see exit |
 
@@ -251,14 +305,86 @@ Also: owner has answered whether a reassigned-away technician gets notified (`PL
 - [ ] Money-leak CI assertion green across every dispatcher endpoint
 - [ ] Bulk reassign used at least once on real data without a support call
 - [ ] Error states verified by pulling the office wifi mid-task — a clear message, not a spinner
+- [ ] **Assignment notifications delivered for ≥ 80% of real assignments within 60 seconds**, measured over the parallel-run week — and a technician confirms the app still worked on the day one was missed
 
 **Rollback** — the cheapest phase to undo. Dispatchers hold no device state: no SQLite, no outbox. T0 flag off, or T1/T2. Recovery is minutes and the old process resumes with the job data intact in the database.
+
+Notifications get their own flag (`tech.notifications`) so they can be turned off without touching dispatch. That separation matters because the two failure modes are unrelated: a dispatcher screen being wrong and a push spamming a technician at 22:00 need different switches, and the second is the one that will be wanted in a hurry.
 
 **Descope** — if Job Logs fails the 5-second test on a phone, **give dispatchers the desktop web build instead.**
 
 `PLAN.md` §1 says dispatchers are Android-only, but it also says they sit at a desk on office wifi — which is exactly the condition under which a browser is the better surface. The cost is sequencing: the web shell is Phase 4 work, so taking this path means pulling the `NavShell` rail and `DataTable` forward by two phases. Budget **+2 weeks** and note it as a deviation from `PLAN.md` §1 requiring the owner's sign-off.
 
 The fallback *within* phone-first, if the deviation is refused: a compact two-line row at 44px with the filter bar pinned, accepting a smaller tap target on this one screen because a dispatcher is seated and not wearing gloves.
+
+---
+
+### Phase 2B — Service contracts
+
+**Size: M · ~4 weeks · Risk: low technically, medium commercially**
+
+The only phase added after the original plan. `services` carried an `AMC` code and nothing behind it — no agreement, no schedule, no expiry, no renewal — so annual maintenance was a job type with a suggestive name. It sits here because generated visits need a dispatcher to assign them, and because renewals are something a rep sells.
+
+**Ships**
+
+| Layer | Deliverable |
+|---|---|
+| Data | Migration 015: `service_contracts`, `contract_visits`, `v_contracts_expiring`, `v_contract_visits_dispatcher` |
+| API | Contract CRUD, activation with visit-schedule generation, cancellation, visit skip, `GET /v1/jobs/:id/contract` |
+| Jobs | Nightly `generate-contract-visits` (7-day horizon) and `expire-contracts` |
+| App | Contract list, create, detail with visit schedule, renewal list; `ContractChip` on the technician's job detail; prepaid visits hide the amount field |
+
+**Entry** — Phase 2 exit met. The three commercial questions that used to gate this phase are now answered and built into the model:
+
+1. **One site, one AMC.** A nine-site corporate account holds nine contracts. Enforced by a partial unique index, and it is why a rep is scoped by `sold_by` rather than through account ownership.
+2. **A visit not carried out is spent, unless the technician reschedules it on the spot.** No roll-over, no refund. The reschedule lives on the cancel sheet, not in the office.
+3. **Parts are recorded; stock is not tracked.** `job_completion_parts` already shipped in Phase 1, so contracts inherit it rather than needing it.
+
+What remains open here is smaller: a visit can be rescheduled indefinitely, and nothing stops it being pushed past the contract's `end_date` beyond an API bound. Watch `attempt_count` during the field run (`PLAN-DATA-MODEL.md` open item 9).
+
+**Tests**
+
+| Level | What | Gate |
+|---|---|---|
+| Integration | Generator run twice over the same window raises each visit **once** — the partial unique index is the guard, not a key | zero duplicates |
+| Integration | Generator interrupted mid-batch and resumed | no duplicates, no gaps |
+| Integration | Cancel a visit's job **with** a date → visit returns to `scheduled`, generator raises a second card, both cards survive under the visit | passes |
+| Integration | Cancel **without** a date → visit `skipped`, `visits_remaining` drops, renewal value reflects it | passes |
+| Integration | A second active contract at the same site → 409 naming the existing one | rejected |
+| Integration | `rescheduleTo` past the contract's `end_date` → rejected | rejected |
+| Integration | **A visit whose `due_date` is already in the past is raised by the next generator run** — the window has no lower bound, and the card arrives already Overdue | raised, not orphaned |
+| Integration | Activating a contract whose schedule would not fit its term → refused at draft by `contract_schedule_fits_term` | rejected |
+| Integration | Renewal activated the day before the outgoing contract ends → predecessor expired in the same transaction, no 409; a genuine overlap still 409s | both |
+| Integration | A `draft` contract has a NULL `contract_number`; activation allocates one | passes |
+| Integration | Activation writes exactly `visits_included` rows at the right intervals | exact, including a term crossing a fiscal-year boundary |
+| Integration | Prepaid visit completed with `cost > 0` → 422 | rejected |
+| Integration | Prepaid visit completed with `cost 0, mode none` → accepted by the existing constraints, unmodified | passes |
+| **CI assertion** | **No dispatcher payload contains `contract_value`** — extends the Phase 2 money-leak suite to the second table revenue now lives in | zero |
+| Integration | Cancelling a contract skips unraised visits and **leaves raised jobs untouched** | both |
+| Integration | `v_contracts_expiring` against a hand-counted fixture including a cancelled contract | exact — a cancelled contract must not appear |
+| Field | Two real contracts run for two weeks; visits raised, assigned and closed | see exit |
+
+**Exit criteria**
+
+- [ ] Two real AMC contracts activated, and their visits **raised, assigned and completed through the normal dispatcher and technician flow with no contract-specific handling**
+- [ ] A technician completed a prepaid visit and **was never shown an amount field**
+- [ ] The renewal list matched a manual count of what is expiring
+- [ ] Money-leak assertion green for `contract_value` across every dispatcher endpoint
+- [ ] **A real visit was rescheduled from the field and completed on the second attempt**, with both job cards visible under the visit
+- [ ] No technician skipped a visit without a date when the customer had in fact asked to reschedule — if that happened, the cancel sheet's warning is not doing its job
+
+**Rollback — the cleanest in the plan.**
+
+| Scenario | Tier | Action |
+|---|---|---|
+| Generator raising wrong or duplicate jobs | T0 | flag `contracts.generate` off; already-raised jobs are ordinary jobs and are unaffected |
+| Contract screens wrong | T0 | flag `contracts.manage` off |
+| API bug | T2 | previous image |
+| Wrongly generated jobs in production | T4 | cancel them through the normal cancellation flow, with a reason — no data surgery |
+
+This is cheap to undo precisely because a visit becomes an ordinary job card. There is no parallel execution path to unwind: turn the generator off and the system is exactly what it was in Phase 2, plus some jobs that were going to be raised by hand anyway. **That property is worth protecting** — the first change that gives contract jobs special handling downstream is the change that makes this rollback expensive.
+
+**Descope** — ship contracts as a **record without a generator**: the owner and reps capture agreements and see renewals, and visits are dispatched manually as they always were. That keeps the commercial value (knowing what is owed and what is expiring) and drops the automation, which is the part with the operational risk. Roughly halves the phase.
 
 ---
 
@@ -270,26 +396,31 @@ The fallback *within* phone-first, if the deviation is refused: a compact two-li
 
 | Layer | Deliverable |
 |---|---|
-| Data | Migrations 011–012: `sales_cards`, `sales_card_items`, `payments`, money views |
-| API | Companies, sales cards + items, payments, `v_company_balances`, company ledger |
-| App | Sales dashboard, sales cards with line items, Pending/Collected payment tabs, proof photo, company list + ledger |
+| Data | Migrations 011–012: `sales_cards`, `sales_card_items`, `payments`, money views including the payments side of `v_employee_expected_cash` |
+| API | Companies **with rep ownership**, owner-only ownership reassignment, sales cards + items, payments, `v_company_balances`, company ledger |
+| App | Sales dashboard, sales cards with line items, Pending/Collected payment tabs, proof photo, company list + ledger, **rep cash handover** |
 
-**Entry** — Phase 1 exit met (the outbox must be proven before a second consumer). Three decisions taken:
+**Entry** — Phase 1 exit met (the outbox must be proven before a second consumer). Decisions taken:
 
-1. Do parts consumed on a job need modelling? (`PLAN-DATA-MODEL.md` open item 1) — additive either way, but deciding now avoids a Phase 4 surprise.
+1. Do parts consumed on a job need modelling? (`PLAN-DATA-MODEL.md` open item 1) — should already be answered at Phase 2B entry; confirm it did not change.
 2. **Is stock/inventory genuinely out of scope?** (`PLAN-DATA-MODEL.md` open item 3) Sales snapshot prices but decrement nothing. If the owner expects stock levels, that is a new module, not a column — and this is the last phase where it can be added without reworking the sales model.
 3. Does any sales operation need a multi-parent `dependsOn` in the outbox? (`PLAN-BACKEND.md` open item 3) Currently single-parent, no known case; a payment with a proof photo is still a single chain.
+4. **Which companies belong to which rep, as a starting allocation.** Account ownership is now a column, and the reps have to agree on the split before the phase goes live. House accounts — `owner_rep_id` NULL — are the answer for anything genuinely shared, and are also how leave gets covered.
 
 **Tests**
 
 | Level | What | Gate |
 |---|---|---|
 | Property | For random sequences of confirm/void/pay/void-payment, `v_company_balances.balance` always equals `Σ confirmed sales − Σ collected payments` | 1000 generated sequences, zero violations |
-| Integration | Draft sale burns no `sale_number`; number allocated at **confirm** | passes |
+| Integration | Draft sale burns no `sale_number` — the column is NULL and the partial `CHECK` enforces it; number allocated at **confirm** | passes |
 | Integration | Void requires a reason; voided sale leaves the balance correct | passes |
 | Integration | On-account payment (`sales_card_id` NULL) lands on the company balance | passes |
 | Integration | Overpayment produces a negative balance and the UI renders it | passes |
 | **Regression** | **The Phase 1 outbox test suite passes unchanged, with no new code paths added to the drain** | the phase's structural gate |
+| Integration | A rep sees his accounts plus house accounts, and **not** the other rep's — every company endpoint, both reps | full matrix |
+| Integration | A rep cannot reassign an account, his own or anyone's; the owner can, including to NULL | passes |
+| Integration | A cash payment recorded by a rep appears in `v_employee_expected_cash` for **that rep's** day | passes |
+| Integration | Duplicate company created offline → `DUPLICATE_ENTITY` with the existing row named, dependent outbox rows rewritable | passes |
 | E2E | Record a payment offline with a proof photo → reconnect → photo uploads after its parent | green |
 | Field | 1 full month-end cycle | see exit |
 
@@ -299,6 +430,8 @@ The fallback *within* phone-first, if the deviation is refused: a compact two-li
 - [ ] The outbox required **zero modification** to serve sales reps. If it did need changes, the Phase 1 abstraction leaked — record what and why, because the same leak will reappear
 - [ ] Both reps recorded a full month of sales and collections in-app
 - [ ] At least one void exercised on real data, balance verified afterwards
+- [ ] Neither rep saw the other's accounts, and neither reported the split getting in their way — if it did, house accounts are the release valve, not a code change
+- [ ] **If any cash was collected by a rep, it appeared in the owner's reconciliation queue.** If none was, record that — a path with no traffic is untested, not proven
 
 **Rollback** — T0/T1/T2 as usual. **T4 is the live risk here.** Wrong financial data is corrected by voiding and re-entering, never by `DELETE` or `UPDATE`, so the ledger keeps a record of the correction. Before cutover, confirm the owner understands that void-and-reenter is the correction path — it is the one place where the system deliberately refuses to let a mistake vanish.
 
@@ -316,14 +449,14 @@ Sales tables are additive; a rollback to Phase 2 leaves them unwritten.
 
 | Layer | Deliverable |
 |---|---|
-| Data | Remaining views: `v_cash_reconciliation_queue`, `v_employee_tracking_health` |
-| API | Cash queue + confirm/dispute, location console queries, on-demand FCM requests, employee admin, dashboards |
-| App | Android five-group nav; **desktop left rail**; `DataTable`; location console with map; cash reconciliation queue |
+| Data | No new migration. `v_cash_reconciliation_queue` shipped with 012 in Phase 3 and `v_employee_tracking_health` with 009 in Phase 1 — this phase builds the **screens and endpoints** over views that already exist |
+| API | Cash queue + confirm/dispute/**reopen**, **completion amendment**, location console queries, on-demand FCM requests, employee admin **with deactivation preconditions**, dashboards |
+| App | Android five-group nav; **desktop left rail**; `DataTable`; location console with map; cash reconciliation queue (expected / declared / variance / flag, **no expenses column**); amend-completion flow |
 
-**Entry — two blocking items:**
+**Entry — one blocking item, one already cleared:**
 
-1. **FCM Google project exists and is configured** (`PLAN-BACKEND.md` open item 4). Required even though there is no Play Store distribution. Confirm before the phase starts; it is an account-provisioning task that can sit in a queue for days.
-2. **Map tile source decided** (`PLAN-FRONTEND.md` open item 2) — self-hosted raster vs. a free tier with attribution obligations.
+1. **Map tile source decided** (`PLAN-FRONTEND.md` open item 2) — self-hosted raster vs. a free tier with attribution obligations.
+2. FCM was the second blocker here. It is now proven in Phase 0 and in production use since Phase 2, so *Locate now* inherits a channel that has been carrying assignment notifications for two phases. That is a straightforward gain from moving it early: the riskiest part of on-demand location is no longer new.
 
 And one assessment, made at phase start, not mid-phase: **does React Native Web carry the `DataTable` and rail acceptably?** Spike it in the first three days. If not, fork a thin React web app sharing `packages/shared` and budget **+2 weeks** (`PLAN-FRONTEND.md` open item 5). Deciding this on day 3 is cheap; discovering it in week 4 is not.
 
@@ -333,7 +466,12 @@ And one assessment, made at phase start, not mid-phase: **does React Native Web 
 |---|---|---|
 | SQL fixture | `v_cash_reconciliation_queue` emits `missing_submission` for a technician-day with cash collected and no declaration | **the row the whole feature exists for** |
 | SQL fixture | The other three flags: `no_expected_cash`, `variance`, `match` | all four |
+| SQL fixture | A rep-day with a cash payment and no declaration also flags `missing_submission` | the payments side is exercised, not just completions |
 | Integration | Reassigned job's cash attributes to `completed_by`, not `assigned_to` | passes |
+| Integration | Deactivating an employee with open jobs → 409 listing them; after reassignment → succeeds, tokens revoked, devices inactive, out of the health view | all |
+| Integration | Deactivation refused while he holds an unconfirmed or disputed cash reconciliation; a **role change** refused under the same conditions plus a non-empty outbox | both |
+| SQL fixture | The queue's default range ends **yesterday**; today is reachable and captioned as still syncing | passes |
+| Integration | Amend after confirm → 409; reopen → amend succeeds; queue reflects the new figure | full cycle |
 | Integration | *Locate now* end-to-end on a real handset, including the **unanswered** path | both paths |
 | Integration | Stale FCM token → `UNREGISTERED` → token cleared, `failure_reason` set | passes |
 | Visual | Screenshots at 360dp, 412dp, 1280px, 1920px | **card on phone, row on desktop** verified on every owner screen |
@@ -347,6 +485,8 @@ And one assessment, made at phase start, not mid-phase: **does React Native Web 
 - [ ] No owner screen renders a card grid on desktop
 - [ ] Owner completed one employee admin task (create, deactivate, password reset) unaided
 - [ ] Web and Android show the same figures for the same day — checked by hand once, deliberately
+- [ ] **The owner amended at least one completion**, with the reason recorded, and the reconciliation queue reflected it. Before this phase there was no way to correct a mistyped amount at all
+- [ ] The dashboard shows the four defined stats and two charts, and the owner can say what each one means without being told
 
 **Rollback** — web is a separate bundle and rolls back independently of the APK, which makes it the safest surface in the project. Map and tiles behind `owner.location`; cash queue behind `owner.cash`. T0 for each.
 
@@ -373,9 +513,11 @@ And one assessment, made at phase start, not mid-phase: **does React Native Web 
 
 The OEM matrix is the deliverable, not a test of one. A table of `manufacturer × OS version × mitigation state`, one row per **actual handset in the roster**, each filled by observation:
 
-| Handset | Android | Bg perm | Batt exempt | Autostart | 12h survival | 72h survival | Battery/day |
-|---|---|---|---|---|---|---|---|
-| *(one row per real device)* | | | | | | | |
+| Handset | Android | Bg perm | Batt exempt | Autostart | 12h survival | 72h survival | Battery/day | **200-row scroll** |
+|---|---|---|---|---|---|---|---|---|
+| *(one row per real device)* | | | | | | | | |
+
+The last column is dropped frames scrolling 200 Job Logs rows (`UI/plan-2/02-MOTION.md` §9). It sits in this table rather than in a separate performance pass because it is the same question as the others — what this app costs the device — and the same borrowed handsets answer it. A frame budget verified on a flagship is not verified.
 
 `PLAN.md` §11: this cannot be simulated. It is the one test plan that must not be compressed, and it is why this phase is gated by calendar time.
 
@@ -410,11 +552,14 @@ The OEM matrix is the deliverable, not a test of one. A table of `manufacturer �
 | Gate | Before | Blocking condition |
 |---|---|---|
 | **APK sideloads on a real staff handset** | Phase 0 week 2 | No fallback exists in `PLAN.md`. Project-level risk. |
+| **FCM push delivered end to end** | **Phase 0 exit** | Moved forward two phases. Blocks assignment notifications in Phase 2, and *Locate now* in Phase 4 |
+| Second owner account + break-glass reset exercised | Phase 0 exit | Otherwise a forgotten owner password is unrecoverable |
 | Restore-from-backup verified | Phase 0 exit | |
 | Job Logs 5-second test | **Phase 2 start** | Fails → take the web deviation, +2 weeks, owner sign-off |
 | Tracking viable on majority handsets | Phase 1 exit | Fails → descope to on-demand + manual check-in |
+| Contract shape: customer or company; skipped-visit rule | **Phase 2B start** | Restructuring after visits exist means rewriting generated history |
+| Rep account allocation agreed | Phase 3 start | Ownership is a column; the split is a business decision |
 | Outbox generalises unchanged | Phase 3 exit | Fails → sales reps go online-only |
-| FCM project provisioned | **Phase 4 start** | Hard blocker for *Locate now* |
 | Map tile source decided | Phase 4 start | |
 | RNW carries DataTable + rail | Phase 4 day 3 | Fails → fork thin React web, +2 weeks |
 | Full OEM matrix filled | Phase 5 exit | |
@@ -433,6 +578,9 @@ Each risk has a **trigger** — the observable that says it has arrived — beca
 | Money figures disagree with the owner's books | Any mismatch at Phase 3 month-end | Do not cut over. The property test passing while reality disagrees means the model is wrong, not the code |
 | Photo storage growth | Bucket > 50 GB | Retention policy, downscale more aggressively |
 | Single-VPS failure | Any unplanned outage | Documented restore path; accepted risk at 14 users, revisit if it happens twice |
+| **Contract scope was larger than the plan knew** | A second business capability turns out to be missing during Phase 2B | The AMC gap was found by reading the plans against the working day, not against each other. If one such gap existed, a second may. Re-run that reading before Phase 3 rather than after |
+| Notification fatigue | Any technician silences the app, or asks to | The window rule and the urgent-only exception are the mitigations. A silenced app still syncs on foreground, so the failure is soft — but it is invisible, which is the pattern this project treats as the enemy |
+| Contract jobs acquire special handling | Any code path branches on "is this a contract visit" beyond a display chip | Push back in review. The T0 rollback for Phase 2B depends entirely on a generated visit being an ordinary job |
 
 ### Timeline
 
@@ -441,11 +589,16 @@ Each risk has a **trigger** — the observable that says it has arrived — beca
 | 0 Foundation | M | 3 wks | 3 |
 | 1 Technician | XL | 7 wks | 10 |
 | 2 Dispatcher | M | 4 wks | 14 |
-| 3 Sales Rep | M | 4 wks | 18 |
-| 4 Owner | L | 6 wks | 24 |
-| 5 Hardening | M | 4 wks | 28 |
+| **2B Contracts** | **M** | **4 wks** | **18** |
+| 3 Sales Rep | M | 4 wks | 22 |
+| 4 Owner | L | 6 wks | 28 |
+| 5 Hardening | M | 4 wks | 32 |
 
-**~28 weeks / ~7 months for one full-time developer**, excluding parallel-run windows that overlap the following phase's build. Contingency for the two +2-week descope branches is **not** included; if both fire, add a month.
+**~32 weeks / ~8 months for one full-time developer**, excluding parallel-run windows that overlap the following phase's build. Contingency for the two +2-week descope branches is **not** included; if both fire, add a month.
+
+**The four added weeks are Phase 2B and nothing else.** Every other amendment from `PLAN-GAPS.md` — assignment notifications, completion amendment, the logout gate, rep cash handover, account ownership, warranty and unit links, the CI pipeline — absorbs into phases that were already scheduled, because each is a small addition to work already planned rather than new work. Contracts cost a phase because they are a part of the business the plan did not know about, not because the plan was built wrong.
+
+Phase 2B's descope (a record without a generator) roughly halves it, so the realistic range is **30–32 weeks** before the other contingencies.
 
 ### Project acceptance
 
@@ -456,7 +609,9 @@ The whole thing is done when, for one full month:
 - Company balances match the books at month-end
 - Every roster handset holds a passing OEM matrix row
 - A backup has been restored successfully at least once
-- No dispatcher has ever seen a revenue figure — verifiable from the response-schema assertions in CI, not from anyone's recollection
+- No dispatcher has ever seen a revenue figure — **from `job_completions` or from `service_contracts`** — verifiable from the response-schema assertions in CI, not from anyone's recollection
+- AMC visits are raised, assigned and closed without anyone tracking them outside the app
+- No queued field work has been lost: not to a logout, not to a shared handset, not to a rejected sync
 
 ---
 
@@ -469,3 +624,7 @@ The whole thing is done when, for one full month:
 | 3 | Who besides the owner can authorise a rollback or call off a parallel run, if the owner is unreachable | Medium | Before Phase 1 cutover |
 | 4 | Staff training and handover is not scoped as work anywhere. 14 people learning a new process is real effort. | Medium — probably 1 week spread across phases 1–4 | Before Phase 1 cutover |
 | 5 | No staging handset budget. OEM matrix testing needs devices for a working day each, which means borrowing from working staff. | Medium — schedules Phase 5 | Before Phase 5 |
+| 6 | ~~Phase 2B's three commercial questions.~~ **All closed by the owner:** one site one AMC; an unrescheduled visit is spent; parts recorded, stock not tracked. | — | Done |
+| 7 | ~~Whether technicians spend from collected cash.~~ **Closed: they do not.** Expense columns removed. | — | Done |
+| 8 | The English-only decision deserves one confirmation with an actual technician rather than in the abstract. Cost of being wrong is every screen. | Medium if wrong | Before Phase 1 |
+| 9 | Stock/inventory remains out of scope by decision, not by omission. Parts are now recorded per completion, which is the data an inventory model would need — so if the owner ever wants stock levels, the hard part is already being captured. | Medium if it changes | Revisit after a year of parts data |
