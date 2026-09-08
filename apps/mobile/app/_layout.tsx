@@ -12,10 +12,18 @@ import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import { api } from '../src/lib/api';
+import { initPush } from '../src/push/notifications';
+import { registerPendingPushToken } from '../src/push/push';
 import { PLEX_FONT_SOURCES } from '../src/fonts/sources';
 import { bootstrapSession } from '../src/state/bootstrapSession';
 import { configureQueryClient } from '../src/state/runtimeQueryClient';
 import { useSessionStore } from '../src/state/sessionStore';
+
+// Push registration is start-up-adjacent, not start-up-gating: fires
+// once per launch, off the splash path (T0.15). `initPush` registers
+// the background sync task and the foreground listener; the pending
+// token ships after the bootstrap outcome is known.
+initPush();
 
 // Best-effort: a double-call or missing native module must not crash
 // start-up — the splash is presentation, not state.
@@ -34,6 +42,9 @@ export default function RootLayout() {
         if (outcome.authenticated && outcome.actor !== null) {
           configureQueryClient(outcome.actor.role);
           useSessionStore.getState().setAuthenticated(outcome.actor);
+          // Session exists — ship any FCM token parked before login
+          // (T0.15: token delivery is the failure-prone half of FCM).
+          void registerPendingPushToken().catch(() => {});
         } else {
           useSessionStore.getState().setAnonymous();
         }
