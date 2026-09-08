@@ -1,0 +1,11 @@
+# Terminates TLS for the API in production (PLAN-BACKEND.md §13).
+# Locally nothing is served yet — the API service arrives with T0.6,
+# at which point this routes to it.
+#
+# Container-internal ports stay standard (80/443); only the HOST side
+# is overridden — docker-compose.yml maps 8081/8443 locally because
+# 80/443 are commonly taken on dev machines. On the VPS the compose
+# override maps 80/443 as usual.
+:80 {
+	respond "ServGrid — no API yet (T0.6)" 200
+}

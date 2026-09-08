@@ -1,0 +1,67 @@
+# ServGrid local stack — the same shape as the one-VPS production deployment
+# (PLAN-BACKEND.md §13: Postgres 16, the API, MinIO, Caddy for TLS).
+# The API service is added by T0.6 (Fastify skeleton). Until then this file
+# provides the data services the API and its integration tests stand on.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      # Local defaults only — production values come from the VPS .env
+      # (T0.16), never from this file.
+      POSTGRES_USER: servgrid
+      POSTGRES_PASSWORD: servgrid
+      POSTGRES_DB: servgrid
+    ports:
+      - '${SERVGRID_DB_PORT:-5432}:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U servgrid -d servgrid']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: servgrid
+      MINIO_ROOT_PASSWORD: servgrid-minio
+    ports:
+      - '${SERVGRID_MINIO_API_PORT:-9000}:9000'
+      - '${SERVGRID_MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    # TLS termination in production; locally it fronts nothing until the
+    # API service exists (T0.6). Comment out locally if the host ports
+    # clash — no local surface needs TLS.
+    ports:
+      - '${SERVGRID_CADDY_HTTP_PORT:-8081}:80'
+      # 9443, not 8443: 8443 is a very common default (Mattermost,
+      # Portainer, ...) and collides on dev machines that self-host.
+      - '${SERVGRID_CADDY_HTTPS_PORT:-9443}:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  # Named volumes for all state; bind mounts would fight container users.
+  db-data:
+  minio-data:
+  caddy-data:
+  caddy-config:
