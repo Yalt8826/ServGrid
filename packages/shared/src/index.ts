@@ -5,3 +5,5 @@ export * from './canonical';
 export * from './sequence';
 export * from './domain';
 export * from './schemas';
+export * from './format';
+export * from './theme/index.ts';

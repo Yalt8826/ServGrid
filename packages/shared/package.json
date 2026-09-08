@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types \"src/*.test.ts\"",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
     "lint:fixtures": "node ../../tools/lint-proof.mjs"
   },
   "dependencies": {

@@ -2,15 +2,17 @@
  * Root layout — providers, session bootstrap, splash hold
  * (PLAN-FRONTEND.md §2). Bootstrap reads the token store ONCE, locally:
  * no refresh call is awaited before first paint (§5.1). The splash gate
- * waits on that local read and nothing else; bundled fonts load behind
- * it (T0.12 adds the Plex faces). The role-aware QueryClientProvider
- * lives in (app)/_layout — it needs the role, which cold start may not
- * have yet.
+ * waits on that local read **and** the Plex faces (T0.12: no frame
+ * renders in a fallback face — the native splash stays up until both
+ * land). The role-aware QueryClientProvider lives in (app)/_layout — it
+ * needs the role, which cold start may not have yet.
  */
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import { api } from '../src/lib/api';
+import { PLEX_FONT_SOURCES } from '../src/fonts/sources';
 import { bootstrapSession } from '../src/state/bootstrapSession';
 import { configureQueryClient } from '../src/state/runtimeQueryClient';
 import { useSessionStore } from '../src/state/sessionStore';
@@ -21,6 +23,7 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const status = useSessionStore((s) => s.status);
+  const [fontsLoaded, fontError] = useFonts(PLEX_FONT_SOURCES);
 
   useEffect(() => {
     let alive = true;
@@ -34,7 +37,6 @@ export default function RootLayout() {
         } else {
           useSessionStore.getState().setAnonymous();
         }
-        return SplashScreen.hideAsync().catch(() => {});
       })
       .catch(() => {});
     return () => {
@@ -42,8 +44,20 @@ export default function RootLayout() {
     };
   }, []);
 
-  // Splash holds until the local read lands; no network is involved.
-  if (status === 'boot') return null;
+  // Splash holds until the local read lands AND the fonts are ready; no
+  // network is involved. A font error degrades gracefully (warn and
+  // proceed) rather than bricking start-up behind a permanent splash.
+  useEffect(() => {
+    if (fontError) {
+      console.warn('[fonts] Plex failed to load:', fontError);
+    }
+    if (status !== 'boot' && (fontsLoaded || fontError)) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [status, fontsLoaded, fontError]);
+
+  // No frame until the session is known and type is Plex.
+  if (status === 'boot' || (!fontsLoaded && !fontError)) return null;
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
