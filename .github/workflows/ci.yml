@@ -50,9 +50,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # T0.2 lands docker-compose.yml and the API test suite; until then
-      # the harness must still prove it runs red on a real failure
-      # (tools/fail-check/ fixture package, wired by tools/devnull.mjs).
+      # Integration suites hit real Postgres (PLAN-BACKEND.md §14: no
+      # mocked database anywhere). T0.2 landed docker-compose.yml and
+      # apps/api/test/integration.
+      - run: pnpm compose:up
       - run: pnpm test
 
   migrations:
@@ -65,8 +66,9 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # T0.2 replaces this with the real up → down → up rehearsal against
-      # a clean Postgres 16 (node-pg-migrate, apps/api/src/db/migrate.ts).
+      # Real up → down → up rehearsal against a clean Postgres 16 —
+      # apps/api/src/db/rehearse.ts, driven by tools/migration-check.mjs,
+      # which starts the compose db and tears it down afterwards.
       - run: pnpm migration:check
 
   deploy-staging:
