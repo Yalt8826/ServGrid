@@ -8,6 +8,7 @@ import { initFcm } from './lib/fcm.js';
 import { probeStorage } from './lib/storage.js';
 import { authPlugin } from './plugins/auth.js';
 import { errorsPlugin } from './plugins/errors.js';
+import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
@@ -83,6 +84,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(requestContextPlugin);
   app.register(errorsPlugin, { nodeEnv: config.nodeEnv });
   app.register(authPlugin, { jwtSecret: config.jwtSecret });
+  app.register(rbacPlugin);
   app.register(authRoutes, { jwtSecret: config.jwtSecret });
   app.register(employeesRoutes);
   app.register(consentRoutes);

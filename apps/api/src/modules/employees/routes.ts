@@ -17,9 +17,11 @@ import { createEmployeesService } from './service.js';
 
 /**
  * Employee-admin routes (PLAN-BACKEND.md §4.1). Owner only, except
- * `GET /v1/employees/me`. The owner gate is inline for now — the rbac
- * plugin and its SQL-predicate scopes are T0.10; the matrix test that
- * pins this table is test/authz/employees.test.ts.
+ * `GET /v1/employees/me`. The gates come from the rbac plugin (T0.10):
+ * `requireAll` asks the shared matrix whether the actor's cell is `all` —
+ * today only the owner's is — while the wording stays this route's,
+ * because the message is user-facing (§3.1). The matrix suite pins the
+ * outcome per role in test/authz/matrix.test.ts.
  */
 
 export const OWNER_ONLY_MESSAGE = 'Only the owner can manage employee accounts.';
@@ -30,19 +32,12 @@ export const OWNER_ONLY_MESSAGE = 'Only the owner can manage employee accounts.'
 const asResponseSchema = (schema: ZodTypeAny): ZodTypeAny => schema;
 
 /**
- * Runs after `requireAuth`: a missing token is 401, a token without the
- * owner's role is 403. §4.1 has no exception list — every non-owner role
- * is refused identically, including on a path carrying their own id.
- *
- * Async on purpose: Fastify's hook runner advances a preHandler list only
- * when the hook returns a thenable or calls its `next` callback — a sync
- * hook that merely returns hangs the request.
+ * Runs after `requireAuth`: a missing token is 401, a token whose role
+ * does not hold the whole `employee` table is 403. §4.1 has no exception
+ * list — every non-owner role is refused identically, including on a
+ * path carrying their own id (`own` is self service, and self service
+ * here is `/me`, keyed off the token).
  */
-async function assertOwner(request: FastifyRequest): Promise<void> {
-  const auth = request.auth;
-  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
-  if (auth.role !== 'owner') throw new AppError('FORBIDDEN', OWNER_ONLY_MESSAGE);
-}
 
 /** PATCH carries `If-Match: <version>` — the optimistic-concurrency guard (§4.1). */
 function ifMatchVersion(request: FastifyRequest): number {
@@ -84,7 +79,7 @@ export const employeesRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/v1/employees',
     {
-      preHandler: [app.requireAuth, assertOwner],
+      preHandler: [app.requireAuth, app.requireAll('employee', 'read', OWNER_ONLY_MESSAGE)],
       config: { responseSchema: asResponseSchema(employeeListResponseSchema) },
     },
     async (request) => {
@@ -96,7 +91,7 @@ export const employeesRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/v1/employees',
     {
-      preHandler: [app.requireAuth, assertOwner],
+      preHandler: [app.requireAuth, app.requireAll('employee', 'create', OWNER_ONLY_MESSAGE)],
       config: { responseSchema: asResponseSchema(employeeAdminSchema) },
     },
     async (request) => {
@@ -110,7 +105,7 @@ export const employeesRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/v1/employees/:id',
     {
-      preHandler: [app.requireAuth, assertOwner],
+      preHandler: [app.requireAuth, app.requireAll('employee', 'read', OWNER_ONLY_MESSAGE)],
       config: { responseSchema: asResponseSchema(employeeDetailResponseSchema) },
     },
     async (request) => service.detail(employeeIdParam(request)),
@@ -119,7 +114,7 @@ export const employeesRoutes: FastifyPluginAsync = async (app) => {
   app.patch(
     '/v1/employees/:id',
     {
-      preHandler: [app.requireAuth, assertOwner],
+      preHandler: [app.requireAuth, app.requireAll('employee', 'update', OWNER_ONLY_MESSAGE)],
       config: { responseSchema: asResponseSchema(employeeAdminSchema) },
     },
     async (request) => {
@@ -132,7 +127,7 @@ export const employeesRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/v1/employees/:id/password',
     {
-      preHandler: [app.requireAuth, assertOwner],
+      preHandler: [app.requireAuth, app.requireAll('employee', 'update', OWNER_ONLY_MESSAGE)],
       config: { responseSchema: asResponseSchema(passwordChangeResponseSchema) },
     },
     async (request, reply: FastifyReply) => {
