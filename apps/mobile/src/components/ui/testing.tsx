@@ -44,6 +44,25 @@ export function findByTestID(root: Node | string | null, testID: string): Node |
   return undefined;
 }
 
+/** Every node matching a predicate, in render order. */
+export function findAll(root: Node | string | null, match: (node: Node) => boolean): Node[] {
+  if (root === null || typeof root === 'string') return [];
+  const hit = match(root) ? [root] : [];
+  for (const child of root.children ?? []) {
+    hit.push(...findAll(child, match));
+  }
+  return hit;
+}
+
+export function findAllByTestID(root: Node | string | null, testID: string): Node[] {
+  return findAll(root, (node) => node.props.testID === testID);
+}
+
+/** First node of a given host type inside a subtree (e.g. the input in a field). */
+export function firstDescendantOfType(root: Node, type: string): Node | undefined {
+  return findAll(root, (node) => node.type === type)[0];
+}
+
 /** All non-empty text strings in the tree, in order. */
 export function allText(root: Node | string | null, acc: string[] = []): string[] {
   if (root === null || typeof root === 'string') return acc;

@@ -40,6 +40,8 @@ export interface ApiResult<T = unknown> {
   error: ApiError | null;
   /** Present whenever the 401 path ran: what the refresh attempt did. */
   refreshOutcome?: RefreshOutcome;
+  /** `Retry-After` in seconds, when the server sent one (429 lockouts). */
+  retryAfterSeconds?: number;
 }
 
 export interface RequestInitLite {
@@ -66,11 +68,20 @@ export interface LoginEmployee {
   username: string;
 }
 
+/** The consent state every login response carries (PLAN-BACKEND.md §4). */
+export interface LoginConsentState {
+  /** True means the employee still owes acceptance for `version`. */
+  required: boolean;
+  /** The date string of the consent copy revision the server presents. */
+  version: string;
+}
+
 export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
   employee: LoginEmployee;
   mustChangePassword: boolean;
+  consent: LoginConsentState;
 }
 
 interface RawResponse {
@@ -79,10 +90,27 @@ interface RawResponse {
   json: unknown | null;
   parseFailed: boolean;
   networkError: string | null;
+  retryAfterSeconds: number | null;
 }
 
 function networkResult(message: string): RawResponse {
-  return { status: 0, ok: false, json: null, parseFailed: false, networkError: message };
+  return { status: 0, ok: false, json: null, parseFailed: false, networkError: message, retryAfterSeconds: null };
+}
+
+/**
+ * `Retry-After` in seconds, or null. Defensive on purpose: a fetch
+ * without headers (test doubles, exotic runtimes) reads as absent, never
+ * as a crash.
+ */
+function retryAfterOf(res: Response): number | null {
+  try {
+    const raw: unknown = res.headers?.get?.('retry-after');
+    if (typeof raw !== 'string' || raw === '') return null;
+    const seconds = Number(raw);
+    return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The 401 test: exactly the status, never a guessed body shape. */
@@ -173,7 +201,14 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
       } catch {
         parseFailed = true; // proxy HTML, empty body, truncated response
       }
-      return { status: res.status, ok: res.ok, json, parseFailed, networkError: null };
+      return {
+        status: res.status,
+        ok: res.ok,
+        json,
+        parseFailed,
+        networkError: null,
+        retryAfterSeconds: retryAfterOf(res),
+      };
     } catch (err) {
       return networkResult(err instanceof Error ? err.message : String(err));
     }
@@ -200,8 +235,9 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
   }
 
   function toResult<T>(res: RawResponse, refreshOutcome?: RefreshOutcome): ApiResult<T> {
+    const retryAfter = res.retryAfterSeconds !== null ? { retryAfterSeconds: res.retryAfterSeconds } : {};
     if (res.networkError !== null) {
-      return { ok: false, status: 0, data: null, error: toError(res), refreshOutcome };
+      return { ok: false, status: 0, data: null, error: toError(res), refreshOutcome, ...retryAfter };
     }
     if (!res.ok) {
       return {
@@ -210,9 +246,17 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         data: null,
         error: toError(res),
         refreshOutcome,
+        ...retryAfter,
       };
     }
-    return { ok: true, status: res.status, data: (res.json as T) ?? null, error: null, refreshOutcome };
+    return {
+      ok: true,
+      status: res.status,
+      data: (res.json as T) ?? null,
+      error: null,
+      refreshOutcome,
+      ...retryAfter,
+    };
   }
 
   async function doRefresh(): Promise<RefreshOutcome> {
@@ -314,6 +358,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         accessToken?: unknown;
         refreshToken?: unknown;
         mustChangePassword?: unknown;
+        consent?: { required?: unknown; version?: unknown };
         employee?: { id?: unknown; role?: unknown; username?: unknown };
       } | null;
       if (
@@ -323,7 +368,9 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         typeof body.refreshToken !== 'string' ||
         typeof body.employee?.id !== 'string' ||
         typeof body.employee.role !== 'string' ||
-        typeof body.employee.username !== 'string'
+        typeof body.employee.username !== 'string' ||
+        typeof body.consent?.required !== 'boolean' ||
+        typeof body.consent?.version !== 'string'
       ) {
         return {
           ok: false,
@@ -337,6 +384,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         role: body.employee.role as Role,
         username: body.employee.username,
       };
+      const consent: LoginConsentState = { required: body.consent.required, version: body.consent.version };
       await saveSession({
         accessToken: body.accessToken,
         refreshToken: body.refreshToken,
@@ -350,6 +398,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
           refreshToken: body.refreshToken,
           employee,
           mustChangePassword: body.mustChangePassword === true,
+          consent,
         },
         error: null,
       };

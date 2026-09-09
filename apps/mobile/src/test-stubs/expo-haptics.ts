@@ -14,6 +14,18 @@ export const NotificationSuccess = 'notificationSuccess';
 export const NotificationWarning = 'notificationWarning';
 export const NotificationError = 'notificationError';
 
+/** The enums the real module exports and the haptic map reads. */
+export const ImpactFeedbackStyle = {
+  Light: ImpactLight,
+  Medium: ImpactMedium,
+  Heavy: ImpactHeavy,
+} as const;
+export const NotificationFeedbackType = {
+  Success: NotificationSuccess,
+  Warning: NotificationWarning,
+  Error: NotificationError,
+} as const;
+
 export async function impactAsync(style: string): Promise<void> {
   fired.push(`impact:${style}`);
 }

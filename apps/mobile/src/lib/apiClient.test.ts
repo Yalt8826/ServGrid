@@ -330,7 +330,7 @@ describe('apiClient — headers, keys, and single-flight', () => {
           refreshToken: 'rt-login',
           employee: { id: 'e1', role: 'owner', username: 'owner' },
           mustChangePassword: true,
-          consent: { required: false, version: 1 },
+          consent: { required: false, version: '2026-09-01' },
         },
       },
     ]);
@@ -345,6 +345,7 @@ describe('apiClient — headers, keys, and single-flight', () => {
 
     expect(result.ok).toBe(true);
     expect(result.data?.mustChangePassword).toBe(true);
+    expect(result.data?.consent).toEqual({ required: false, version: '2026-09-01' });
     expect(result.data?.employee.role).toBe('owner');
     expect(store.session).toMatchObject({
       accessToken: 'at-login',

@@ -29,6 +29,13 @@ export interface TextFieldProps {
   /** The value is local data the server has not confirmed. */
   stale?: boolean;
   secureTextEntry?: boolean;
+  /**
+   * Control rendered inside the field's row, after the input — a
+   * password visibility toggle is the T0.14 use (§X1: visible by
+   * default, the mask is one tap away). It is part of the field's own
+   * tap target, not a decoration beside it.
+   */
+  trailing?: React.ReactNode;
   testID?: string;
 }
 
@@ -43,6 +50,7 @@ export function TextField({
   loading = false,
   stale = false,
   secureTextEntry = false,
+  trailing,
   testID,
 }: TextFieldProps): React.ReactNode {
   const density = useDensity();
@@ -68,29 +76,33 @@ export function TextField({
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 }}>
         {label}
       </Text>
-      <TextInput
-        accessibilityLabel={label}
-        accessibilityState={{ disabled }}
-        editable={!disabled && !loading}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={SEMANTIC.text.placeholder}
-        secureTextEntry={secureTextEntry}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          height,
-          minHeight: height,
-          borderRadius: RADII.control,
-          borderWidth: focused ? 2 : 1,
-          borderColor,
-          backgroundColor: disabled ? SEMANTIC.bg.pressed : SEMANTIC.bg.raised,
-          paddingHorizontal: 12,
-          color: SEMANTIC.text.primary,
-          ...textStyle('body', density),
-        }}
-      />
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <TextInput
+          accessibilityLabel={label}
+          accessibilityState={{ disabled }}
+          editable={!disabled && !loading}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={SEMANTIC.text.placeholder}
+          secureTextEntry={secureTextEntry}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            flex: 1,
+            height,
+            minHeight: height,
+            borderRadius: RADII.control,
+            borderWidth: focused ? 2 : 1,
+            borderColor,
+            backgroundColor: disabled ? SEMANTIC.bg.pressed : SEMANTIC.bg.raised,
+            paddingHorizontal: 12,
+            color: SEMANTIC.text.primary,
+            ...textStyle('body', density),
+          }}
+        />
+        {trailing}
+      </View>
       {errorText ? (
         <Text testID={testID ? `${testID}-error` : undefined} style={[captionStyle.caption, { color: SEMANTIC.feedback.danger, marginTop: 4 }]}>
           {errorText}

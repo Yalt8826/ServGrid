@@ -221,6 +221,7 @@ export const HAPTIC_EVENTS = [
   'syncRejected',
   'destructiveConfirmed',
   'validationFailed',
+  'passwordChanged',
 ] as const;
 
 export type HapticEvent = (typeof HAPTIC_EVENTS)[number];

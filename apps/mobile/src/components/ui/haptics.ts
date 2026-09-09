@@ -23,6 +23,7 @@ export function haptic(event: HapticEvent): void {
       break;
     case 'completionSynced':
     case 'outboxDrained':
+    case 'passwordChanged':
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       break;
     case 'syncRejected':

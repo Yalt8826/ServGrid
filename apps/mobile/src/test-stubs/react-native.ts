@@ -55,6 +55,17 @@ export const AccessibilityInfo = {
   isScreenReaderEnabled: async () => false,
 };
 
+/**
+ * Only the subscription surface the screens use (T0.14): the forced
+ * password change and consent screens swallow hardware back ("not
+ * skippable, no back"). Tests only need the subscription to exist.
+ */
+export const BackHandler = {
+  addEventListener: (_event: string, _handler: () => boolean): { remove: () => void } => ({
+    remove: () => {},
+  }),
+};
+
 export const ScaledSheet = { create: StyleSheet.create };
 
 /**
