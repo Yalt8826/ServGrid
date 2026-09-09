@@ -17,9 +17,10 @@
  */
 import { z } from 'zod';
 
-import { ACTIONS, RESOURCES } from './permissions.ts';
+import { ACTIONS, RESOURCES, ROLES, SCOPES } from './permissions.ts';
 import { JOB_STATUSES } from './status.ts';
 import { PING_REJECT_CODES } from './errors.ts';
+import { FEATURE_FLAGS } from './flags.ts';
 
 // ── primitives ──────────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export const isoDateTime = z.string().datetime({ offset: true });
 export const jobStatusSchema = z.enum(JOB_STATUSES);
 export const resourceSchema = z.enum(RESOURCES);
 export const actionSchema = z.enum(ACTIONS);
+export const scopeSchema = z.enum(SCOPES);
+export const roleSchema = z.enum(ROLES);
 export const pingRejectCodeSchema = z.enum(PING_REJECT_CODES);
 
 // ── jobs (§6) ───────────────────────────────────────────────────────────────
@@ -217,6 +220,109 @@ export const pingBatchResultSchema = z.object({
 
 export type LocationPingPayload = z.infer<typeof locationPingSchema>;
 export type PingBatchResultParsed = z.infer<typeof pingBatchResultSchema>;
+
+// ── auth (§4) ───────────────────────────────────────────────────────────────
+
+/**
+ * Same shape the DB CHECK enforces on `employees.username`
+ * (PLAN-DATA-MODEL.md §3.1) — the client failing this is a 422 before
+ * the server ever hashes anything.
+ */
+export const usernameSchema = z
+  .string()
+  .regex(/^[a-z0-9._-]{3,32}$/, 'Use 3-32 characters: a-z, 0-9, dots, dashes, underscores.');
+
+/** The device half of the login payload (§4) — six required fields, no diagnostics. */
+export const authDeviceSchema = z
+  .object({
+    installId: z.string().min(1),
+    platform: z.enum(['android', 'ios', 'web']),
+    appVersion: z.string().min(1),
+    osVersion: z.string().min(1),
+    manufacturer: z.string().min(1),
+    model: z.string().min(1),
+  })
+  .strict();
+
+export const loginRequestSchema = z
+  .object({
+    username: usernameSchema,
+    password: z.string().min(1),
+    device: authDeviceSchema,
+  })
+  .strict();
+
+/** The employee as login and /v1/auth/me return it — never the password hash. */
+export const employeePublicSchema = z
+  .object({
+    id: uuid,
+    username: z.string(),
+    fullName: z.string(),
+    phone: z.string().nullable(),
+    role: z.enum(ROLES),
+    mustChangePassword: z.boolean(),
+    lastLoginAt: isoDateTime.nullable(),
+  })
+  .strict();
+
+/** Current state of the location-tracking consent (§4, §7). */
+export const consentStateSchema = z
+  .object({
+    /** True means the employee still owes acceptance for `version`. */
+    required: z.boolean(),
+    /** The date string of the consent copy revision — bumping it re-prompts everyone. */
+    version: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .strict();
+
+export const tokenPairSchema = z
+  .object({
+    accessToken: z.string().min(1),
+    refreshToken: z.string().min(1),
+  })
+  .strict();
+
+export const loginResponseSchema = tokenPairSchema
+  .extend({
+    employee: employeePublicSchema,
+    mustChangePassword: z.boolean(),
+    consent: consentStateSchema,
+  })
+  .strict();
+
+export const refreshRequestSchema = z.object({ refreshToken: z.string().min(1) }).strict();
+export const refreshResponseSchema = tokenPairSchema;
+
+export const passwordChangeRequestSchema = z
+  .object({
+    currentPassword: z.string().min(1),
+    /** Eight characters is a floor, not a policy — the owner hands out the temp passwords. */
+    newPassword: z.string().min(8, 'Use at least 8 characters.'),
+  })
+  .strict();
+export const passwordChangeResponseSchema = z.object({ ok: z.boolean() });
+export const logoutResponseSchema = z.object({ ok: z.boolean() });
+
+export const permissionsSnapshotSchema = z.record(resourceSchema, z.record(actionSchema, scopeSchema));
+export const featureFlagsSchema = z.record(z.enum(FEATURE_FLAGS), z.boolean());
+
+export const authMeResponseSchema = z
+  .object({
+    employee: employeePublicSchema,
+    permissions: permissionsSnapshotSchema,
+    featureFlags: featureFlagsSchema,
+    consent: consentStateSchema,
+  })
+  .strict();
+
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+export type LoginResponse = z.infer<typeof loginResponseSchema>;
+export type RefreshRequest = z.infer<typeof refreshRequestSchema>;
+export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
+export type PasswordChangeRequest = z.infer<typeof passwordChangeRequestSchema>;
+export type AuthMeResponse = z.infer<typeof authMeResponseSchema>;
+export type EmployeePublic = z.infer<typeof employeePublicSchema>;
+export type ConsentState = z.infer<typeof consentStateSchema>;
 
 // ── error envelope (§3.1) ───────────────────────────────────────────────────
 

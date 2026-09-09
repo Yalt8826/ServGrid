@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.0",
     "@servgrid/shared": "workspace:*",
     "fastify": "5.12.3",
     "fastify-plugin": "6.0.0",

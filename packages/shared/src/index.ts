@@ -1,6 +1,7 @@
 export * from './permissions.ts';
 export * from './status.ts';
 export * from './errors.ts';
+export * from './flags.ts';
 export * from './canonical.ts';
 export * from './sequence.ts';
 export * from './domain.ts';

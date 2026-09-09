@@ -55,6 +55,8 @@ export type Action = (typeof ACTIONS)[number];
  */
 export type Scope = 'all' | 'own' | 'assigned' | 'none';
 
+export const SCOPES = ['all', 'own', 'assigned', 'none'] as const satisfies readonly Scope[];
+
 /**
  * The matrix, transcribed cell-for-cell from PLAN.md §5 with the scope
  * refinements from PLAN-BACKEND.md §5 and PLAN-GAPS.md G1/G3:
@@ -186,4 +188,14 @@ const MATRIX: Readonly<Record<Role, Readonly<Record<Resource, Record<Action, Sco
  */
 export function permit(role: Role, resource: Resource, action: Action): Scope {
   return MATRIX[role][resource][action];
+}
+
+/**
+ * The role's full row of the matrix — the "permissions snapshot"
+ * `GET /v1/auth/me` returns (PLAN-BACKEND.md §4). A copy, not the live
+ * table: a caller mutating what it received must not be able to corrupt
+ * the one matrix everything else keys off.
+ */
+export function permissionsSnapshot(role: Role): Record<Resource, Record<Action, Scope>> {
+  return structuredClone(MATRIX[role]);
 }
