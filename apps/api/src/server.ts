@@ -10,6 +10,7 @@ import { authPlugin } from './plugins/auth.js';
 import { errorsPlugin } from './plugins/errors.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { consentRoutes } from './modules/consents/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
 
 /**
@@ -84,6 +85,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(authPlugin, { jwtSecret: config.jwtSecret });
   app.register(authRoutes, { jwtSecret: config.jwtSecret });
   app.register(employeesRoutes);
+  app.register(consentRoutes);
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });

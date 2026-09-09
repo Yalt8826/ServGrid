@@ -426,6 +426,59 @@ export type EmployeePatchRequest = z.infer<typeof employeePatchRequestSchema>;
 export type EmployeePasswordResetRequest = z.infer<typeof employeePasswordResetRequestSchema>;
 export type DeviceDiagnostic = z.infer<typeof deviceDiagnosticSchema>;
 
+// ── consents (§4) ───────────────────────────────────────────────────────────
+
+/**
+ * `consent_kind` (migration 002) — one value today; the type exists so a
+ * second consent kind never needs a migration on a text column.
+ */
+export const CONSENT_KINDS = ['location_tracking'] as const;
+export const consentKindSchema = z.enum(CONSENT_KINDS);
+
+/** The consent copy's version — the date string of the revision (§4). */
+export const consentVersionSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/** One kind+version this actor still owes (GET /v1/consents/required). */
+export const consentObligationSchema = z
+  .object({ kind: consentKindSchema, version: consentVersionSchema })
+  .strict();
+
+export const requiredConsentsResponseSchema = z
+  .object({ required: z.array(consentObligationSchema) })
+  .strict();
+
+export const consentCreateRequestSchema = z
+  .object({
+    kind: consentKindSchema,
+    version: consentVersionSchema,
+    deviceId: uuid.nullish(),
+    /**
+     * In the contract and read by nobody. The server records the request's
+     * own address (§4): this row is DPDP Act evidence, and evidence a client
+     * can author is not evidence. Naming the field here is what keeps
+     * "ignored" a visible, tested decision rather than silent stripping.
+     */
+    ipAddress: z.string().optional(),
+  })
+  .strict();
+
+export const consentCreateResponseSchema = z
+  .object({
+    kind: consentKindSchema,
+    version: consentVersionSchema,
+    acceptedAt: isoDateTime,
+    deviceId: uuid.nullable(),
+    /** The server-recorded request address — never an echo of the body. */
+    ipAddress: z.string().nullable(),
+  })
+  .strict();
+
+export type ConsentKind = z.infer<typeof consentKindSchema>;
+export type ConsentObligation = z.infer<typeof consentObligationSchema>;
+export type RequiredConsentsResponse = z.infer<typeof requiredConsentsResponseSchema>;
+export type ConsentCreateRequest = z.infer<typeof consentCreateRequestSchema>;
+export type ConsentCreateResponse = z.infer<typeof consentCreateResponseSchema>;
+
 // ── error envelope (§3.1) ───────────────────────────────────────────────────
 
 export const errorEnvelopeSchema = z.object({
