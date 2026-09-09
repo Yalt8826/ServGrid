@@ -40,9 +40,29 @@ export async function closePool(): Promise<void> {
 }
 
 /** Tagged-parameter query through the shared pool (no ORM — hand-written SQL). */
-export function query<R extends QueryResultRow = QueryResultRow>(
+export async function query<R extends QueryResultRow = QueryResultRow>(
   text: string,
   values?: readonly unknown[],
 ): Promise<QueryResult<R>> {
-  return getPool().query<R>(text, values as unknown[]);
+  const startedAt = performance.now();
+  try {
+    return await getPool().query<R>(text, values as unknown[]);
+  } finally {
+    const durationMs = performance.now() - startedAt;
+    if (slowQueryObserver && durationMs > SLOW_QUERY_THRESHOLD_MS) {
+      slowQueryObserver({ text, durationMs: Math.round(durationMs) });
+    }
+  }
+}
+
+/** PLAN-BACKEND.md §13: anything slower than this is logged. */
+export const SLOW_QUERY_THRESHOLD_MS = 200;
+
+export type SlowQueryObserver = (info: { text: string; durationMs: number }) => void;
+
+let slowQueryObserver: SlowQueryObserver | null = null;
+
+/** The server installs its logger here; `null` detaches (tests). */
+export function observeSlowQueries(observer: SlowQueryObserver | null): void {
+  slowQueryObserver = observer;
 }

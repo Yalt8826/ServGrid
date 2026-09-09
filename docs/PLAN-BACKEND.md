@@ -94,6 +94,7 @@ Codes are an exhaustive union in `packages/shared`, so the client can switch on 
 | `IDEMPOTENCY_KEY_REUSED` | 422 | same key, different body |
 | `VALIDATION_FAILED` | 422 | zod issues in `details.issues` |
 | `RATE_LIMITED` | 429 | |
+| `INTERNAL` | 500 | unhandled server fault — the body never carries a stack; safe to retry later |
 
 **Per-ping outcomes are a separate, smaller union** — `PingRejectCode` in `packages/shared`: `OUT_OF_WINDOW`, `TOO_OLD`, `FUTURE`, `DUPLICATE`. They are not error codes and never appear in an error envelope, because a rejected ping is a normal outcome of a batch that succeeded (§8). Keeping them in a different type is what stops a client treating an out-of-window ping as a request failure and retrying forever.
 

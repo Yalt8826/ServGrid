@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
+    setupFiles: ['test/setup.ts'],
     // Integration suites hit a real Postgres (PLAN-BACKEND.md §14: no
     // mocked database anywhere), so their floor is milliseconds of SQL
     // over a socket plus container health waits in beforeAll.

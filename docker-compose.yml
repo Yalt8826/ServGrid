@@ -1,7 +1,10 @@
 # ServGrid local stack — the same shape as the one-VPS production deployment
 # (PLAN-BACKEND.md §13: Postgres 16, the API, MinIO, Caddy for TLS).
-# The API service is added by T0.6 (Fastify skeleton). Until then this file
-# provides the data services the API and its integration tests stand on.
+# The API itself runs on the host locally (`pnpm -F api dev`, T0.6) and
+# joins this file as a service with the image work in T0.16. Until then
+# this file provides the data services the API and its integration tests
+# stand on — `pnpm compose:up` starts db and minio, and /healthz reports
+# on both.
 
 services:
   db:

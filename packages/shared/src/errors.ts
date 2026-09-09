@@ -27,7 +27,8 @@ export type ErrorCode =
   | 'IDEMPOTENCY_IN_FLIGHT' // 409 — same key still processing
   | 'IDEMPOTENCY_KEY_REUSED' // 422 — same key, different body
   | 'VALIDATION_FAILED' // 422 — zod issues in details.issues
-  | 'RATE_LIMITED'; // 429
+  | 'RATE_LIMITED' // 429
+  | 'INTERNAL'; // 500 — unhandled server fault; safe to retry later, nothing to fix client-side
 
 export const ERROR_CODES = [
   'UNAUTHENTICATED',
@@ -45,6 +46,7 @@ export const ERROR_CODES = [
   'IDEMPOTENCY_KEY_REUSED',
   'VALIDATION_FAILED',
   'RATE_LIMITED',
+  'INTERNAL',
 ] as const satisfies readonly ErrorCode[];
 
 /** Exhaustive by type: adding an ErrorCode without an HTTP status fails to compile. */
@@ -64,6 +66,7 @@ export const ERROR_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   IDEMPOTENCY_KEY_REUSED: 422,
   VALIDATION_FAILED: 422,
   RATE_LIMITED: 429,
+  INTERNAL: 500,
 };
 
 /**

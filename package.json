@@ -10,7 +10,7 @@
     "lint": "node tools/lint-proof.mjs",
     "test": "pnpm -r test && node tools/devnull.mjs",
     "migration:check": "node tools/migration-check.mjs",
-    "compose:up": "docker compose up -d db --wait",
+    "compose:up": "docker compose up -d db minio --wait",
     "compose:down": "docker compose down"
   },
   "devDependencies": {

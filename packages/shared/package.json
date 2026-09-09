@@ -11,12 +11,9 @@
     "lint:fixtures": "node ../../tools/lint-proof.mjs"
   },
   "dependencies": {
-    "zod": "^3.25.0"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "typescript": "~5.5.4"
-  },
-  "dependencies": {
-    "zod": "^3.25.76"
   }
 }
