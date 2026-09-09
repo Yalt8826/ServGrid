@@ -8,6 +8,7 @@
     "start": "tsx src/server.ts",
     "migrate": "tsx src/db/migrate-cli.ts",
     "rehearse": "tsx src/db/rehearse.ts",
+    "admin:reset-password": "tsx scripts/admin-reset-password.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

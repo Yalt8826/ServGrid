@@ -10,6 +10,7 @@ import { authPlugin } from './plugins/auth.js';
 import { errorsPlugin } from './plugins/errors.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { employeesRoutes } from './modules/employees/routes.js';
 
 /**
  * The Fastify instance (PLAN-BACKEND.md §2 server.ts): plugin
@@ -82,6 +83,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(errorsPlugin, { nodeEnv: config.nodeEnv });
   app.register(authPlugin, { jwtSecret: config.jwtSecret });
   app.register(authRoutes, { jwtSecret: config.jwtSecret });
+  app.register(employeesRoutes);
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });

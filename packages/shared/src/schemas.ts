@@ -324,6 +324,108 @@ export type AuthMeResponse = z.infer<typeof authMeResponseSchema>;
 export type EmployeePublic = z.infer<typeof employeePublicSchema>;
 export type ConsentState = z.infer<typeof consentStateSchema>;
 
+// ── employee administration (§4.1) ──────────────────────────────────────────
+
+/**
+ * One device install as the owner's employee detail shows it (§3.1): the
+ * four OEM-mitigation diagnostics default to their unconfirmed state, so
+ * a handset that never checks in reads unhealthy rather than silently
+ * healthy. Tracking health rides on `v_employee_tracking_health`, which
+ * ships with migration 009 (Phase 1) — the detail response grows that
+ * field then, not before.
+ */
+export const deviceDiagnosticSchema = z
+  .object({
+    id: uuid,
+    installId: z.string(),
+    manufacturer: z.string().nullable(),
+    model: z.string().nullable(),
+    osVersion: z.string().nullable(),
+    appVersion: z.string().nullable(),
+    locationPermission: z.enum(['none', 'foreground', 'background']),
+    batteryOptExempt: z.boolean(),
+    autostartConfirmed: z.boolean(),
+    notificationsEnabled: z.boolean(),
+    lastSeenAt: isoDateTime.nullable(),
+    isActive: z.boolean(),
+  })
+  .strict();
+
+/**
+ * The employee as the owner's endpoints return it. Wider than the
+ * public login shape: `isActive`, `createdAt` and `version` are owner
+ * facts, and `version` is what the client sends back as `If-Match` on
+ * PATCH — an admin payload without it would make optimistic concurrency
+ * unreachable from the screen.
+ */
+export const employeeAdminSchema = z
+  .object({
+    id: uuid,
+    username: z.string(),
+    fullName: z.string(),
+    phone: z.string().nullable(),
+    role: roleSchema,
+    isActive: z.boolean(),
+    mustChangePassword: z.boolean(),
+    lastLoginAt: isoDateTime.nullable(),
+    createdAt: isoDateTime,
+    version: z.number().int(),
+  })
+  .strict();
+
+export const employeeCreateRequestSchema = z
+  .object({
+    username: usernameSchema,
+    fullName: z.string().min(1),
+    phone: z.string().min(1).nullish(),
+    role: roleSchema,
+    /** Handed to the employee by voice or in person (§4.1) — never stored in clear. */
+    tempPassword: z.string().min(8, 'Use at least 8 characters.'),
+  })
+  .strict();
+
+/** `role` may repeat in the query string; one value arrives as a string. */
+export const employeeListQuerySchema = z
+  .object({
+    role: z.union([roleSchema, z.array(roleSchema)]).optional(),
+    isActive: z.enum(['true', 'false']).optional(),
+  })
+  .transform((q) => ({
+    roles: q.role === undefined ? undefined : Array.isArray(q.role) ? q.role : [q.role],
+    isActive: q.isActive === undefined ? undefined : q.isActive === 'true',
+  }));
+
+export const employeeListResponseSchema = z.array(employeeAdminSchema);
+
+export type EmployeeListFilter = z.infer<typeof employeeListQuerySchema>;
+
+export const employeeDetailResponseSchema = employeeAdminSchema.extend({
+  devices: z.array(deviceDiagnosticSchema),
+});
+
+export const employeePatchRequestSchema = z
+  .object({
+    fullName: z.string().min(1).optional(),
+    phone: z.string().min(1).nullish(),
+    role: roleSchema.optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+
+export const employeePasswordResetRequestSchema = z
+  .object({
+    tempPassword: z.string().min(8, 'Use at least 8 characters.'),
+  })
+  .strict();
+
+export type EmployeeAdmin = z.infer<typeof employeeAdminSchema>;
+export type EmployeeDetail = z.infer<typeof employeeDetailResponseSchema>;
+export type EmployeeCreateRequest = z.infer<typeof employeeCreateRequestSchema>;
+export type EmployeePatchRequest = z.infer<typeof employeePatchRequestSchema>;
+export type EmployeePasswordResetRequest = z.infer<typeof employeePasswordResetRequestSchema>;
+export type DeviceDiagnostic = z.infer<typeof deviceDiagnosticSchema>;
+
 // ── error envelope (§3.1) ───────────────────────────────────────────────────
 
 export const errorEnvelopeSchema = z.object({
