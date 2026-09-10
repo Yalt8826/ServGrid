@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
+import { currentRequestTx } from './ambient-tx.js';
 import { getPool } from './pool.js';
 
 /**
@@ -12,20 +13,26 @@ import { getPool } from './pool.js';
  * `pg_advisory_xact_lock`, which releases with the surrounding
  * COMMIT/ROLLBACK instead of leaking a session lock onto the shared
  * client.
+ *
+ * With no explicit client, `withTransaction` joins the request
+ * transaction the idempotency plugin opened (db/ambient-tx.ts) when one
+ * is open — the caller's work lands inside the same COMMIT as the stored
+ * response, without every service having to thread a client through.
  */
 export async function withTransaction<T>(
   fn: (client: PoolClient) => Promise<T>,
   client?: PoolClient,
 ): Promise<T> {
-  if (client) {
-    await client.query('SAVEPOINT nested_tx');
+  const owner = client ?? currentRequestTx();
+  if (owner) {
+    await owner.query('SAVEPOINT nested_tx');
     try {
-      const result = await fn(client);
-      await client.query('RELEASE SAVEPOINT nested_tx');
+      const result = await fn(owner);
+      await owner.query('RELEASE SAVEPOINT nested_tx');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK TO SAVEPOINT nested_tx');
-      await client.query('RELEASE SAVEPOINT nested_tx');
+      await owner.query('ROLLBACK TO SAVEPOINT nested_tx');
+      await owner.query('RELEASE SAVEPOINT nested_tx');
       throw error;
     }
   }
