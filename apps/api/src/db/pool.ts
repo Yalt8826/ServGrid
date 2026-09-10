@@ -1,4 +1,5 @@
 import { Pool, type QueryResult, type QueryResultRow } from 'pg';
+import { currentRequestTx } from './ambient-tx.js';
 
 /**
  * The single pg.Pool for the API process (PLAN-BACKEND.md §2). Every
@@ -39,14 +40,23 @@ export async function closePool(): Promise<void> {
   }
 }
 
-/** Tagged-parameter query through the shared pool (no ORM — hand-written SQL). */
+/** Tagged-parameter query through the shared pool (no ORM — hand-written SQL).
+ *
+ * Inside a request transaction opened by the idempotency plugin
+ * (db/ambient-tx.ts) the query joins that transaction instead of the
+ * pool — a stray `query()` in a managed handler must not silently write
+ * outside the COMMIT that records the response. */
 export async function query<R extends QueryResultRow = QueryResultRow>(
   text: string,
   values?: readonly unknown[],
 ): Promise<QueryResult<R>> {
   const startedAt = performance.now();
+  const ambient = currentRequestTx();
   try {
-    return await getPool().query<R>(text, values as unknown[]);
+    const result = ambient
+      ? await ambient.query<R>(text, values as unknown[])
+      : await getPool().query<R>(text, values as unknown[]);
+    return result;
   } finally {
     const durationMs = performance.now() - startedAt;
     if (slowQueryObserver && durationMs > SLOW_QUERY_THRESHOLD_MS) {
