@@ -14,8 +14,10 @@ import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
+import { devicesRoutes } from './modules/devices/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
 import { jobsRoutes } from './modules/jobs/routes.js';
+import { locationRoutes } from './modules/location/routes.js';
 
 /**
  * The Fastify instance (PLAN-BACKEND.md §2 server.ts): plugin
@@ -119,6 +121,8 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(employeesRoutes);
   app.register(consentRoutes);
   app.register(jobsRoutes);
+  app.register(devicesRoutes);
+  app.register(locationRoutes, { workWindow: config.workWindow });
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });
