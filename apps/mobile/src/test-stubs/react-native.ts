@@ -56,3 +56,12 @@ export const AccessibilityInfo = {
 };
 
 export const ScaledSheet = { create: StyleSheet.create };
+
+/**
+ * A phone-sized viewport (T0.13): NavTabBar divides it across the role's
+ * tabs for the sliding underline. Constant — width-driven behaviour is
+ * NavShell's branch, which tests read as source, not as render.
+ */
+export function useWindowDimensions(): { width: number; height: number; scale: number; fontScale: number } {
+  return { width: 412, height: 915, scale: 2, fontScale: 1 };
+}

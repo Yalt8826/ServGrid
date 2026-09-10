@@ -62,6 +62,24 @@ export function clamp(value: number): number {
   return value;
 }
 
+/**
+ * Easing + reduced motion (T0.13): NavTabBar slides its underline with
+ * `withTiming(x, { easing: Easing.bezier(...) })`. The easing factory is
+ * identity — the stub has no clock to ease — and reduced motion follows
+ * the system default of off.
+ */
+export const Easing = {
+  bezier: (_x1: number, _y1: number, _x2: number, _y2: number) => (t: number): number => t,
+  linear: (t: number): number => t,
+  in: (t: number): number => t,
+  out: (t: number): number => t,
+  inOut: (t: number): number => t,
+};
+
+export function useReducedMotion(): boolean {
+  return false;
+}
+
 export const ReduceMotion = {
   System: 'system',
   Always: 'always',

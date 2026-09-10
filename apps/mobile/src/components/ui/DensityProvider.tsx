@@ -1,9 +1,9 @@
 /**
  * Density provider (01-FOUNDATIONS.md §3.3). One provider, read by
- * every primitive. Screens never set density — `NavShell` (T0.13) will
- * set it from role and platform, exactly once; until then the gallery
- * and any screen-level usage set it explicitly. Default is `field`:
- * the technician's phone is the product's centre of gravity.
+ * every primitive. Screens never set density — `NavShell` (T0.13) sets
+ * it from role and platform, exactly once, via `densityForRole`; the
+ * gallery sets it explicitly per section to render every mode. Default
+ * is `field`: the technician's phone is the product's centre of gravity.
  */
 import { createContext, useContext, type ReactNode } from 'react';
 
