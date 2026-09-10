@@ -10,7 +10,9 @@
     "rehearse": "tsx src/db/rehearse.ts",
     "admin:reset-password": "tsx scripts/admin-reset-password.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:int": "vitest run test/integration",
+    "test:authz": "vitest run test/authz"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

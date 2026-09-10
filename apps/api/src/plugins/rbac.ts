@@ -79,6 +79,19 @@ interface ResourcePredicates {
 }
 
 const PREDICATES: Partial<Record<Resource, ResourcePredicates>> = {
+  job: {
+    table: 'job_cards',
+    // A technician's own jobs — present tense or closed, no status filter
+    // on purpose: the completed job is the ordinary read (his history, the
+    // customer stack at a site he has worked), and §6.1's who-column, not
+    // the matrix, decides what he may then *do* to the row. Registered
+    // with the jobs module (T1.5); the matrix grants the cell, so the
+    // predicate had to exist before a scoped jobs query could run.
+    own: ({ actorId, paramStart, qualifier }) => ({
+      sql: `${qualifier}.assigned_to = $${paramStart}`,
+      params: [actorId],
+    }),
+  },
   company: {
     table: 'companies',
     // `own` on company is ownership with a house-account floor (G3): a
