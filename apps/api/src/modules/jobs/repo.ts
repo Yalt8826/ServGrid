@@ -150,7 +150,7 @@ export async function updateJobStatus(db: Db, jobId: string, to: JobStatus): Pro
 
 export interface JobEventInsert {
   jobCardId: string;
-  eventType: 'status_changed';
+  eventType: 'status_changed' | 'completed';
   actorId: string;
   /** The client's occurredAt, already clamped by the service (§6.3). */
   occurredAt: string;
@@ -177,6 +177,231 @@ export async function insertJobEvent(db: Db, e: JobEventInsert): Promise<void> {
       e.payload === undefined ? null : JSON.stringify(e.payload),
     ],
   );
+}
+
+// ── completion (§6.2) ───────────────────────────────────────────────────────
+
+export interface JobCompletionLockRow {
+  id: string;
+  status: JobStatus;
+  assigned_to: string | null;
+  /** Stack changes belong to the job's site (§6.2 step 5). */
+  customer_id: string;
+  /** Non-null only on a contract visit — Phase 2B flips the visit's status (§6.2 step 7). */
+  contract_visit_id: string | null;
+}
+
+/**
+ * §6.2 step 1 — the row lock the whole completion holds to commit. Every
+ * later step of the transaction runs under it, so a status move racing
+ * the completion waits instead of interleaving.
+ */
+export async function lockJobForCompletion(db: Db, jobId: string): Promise<JobCompletionLockRow | null> {
+  const r = await db.query<JobCompletionLockRow>(
+    `SELECT id, status, assigned_to, customer_id, contract_visit_id
+     FROM job_cards WHERE id = $1 FOR UPDATE`,
+    [jobId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface CompletionInsert {
+  jobCardId: string;
+  completedBy: string;
+  /** The client's completedAt, already clamped by the service (§6.2). */
+  completedAt: string;
+  workSummary: string;
+  cost: string;
+  discountAmount: string;
+  discountReason: string | null;
+  collectionMode: 'cash' | 'upi' | 'card' | 'bank_transfer' | 'none';
+  paymentReference: string | null;
+  customerSigned: boolean;
+}
+
+/**
+ * §6.2 step 2 — the money row. The discount rule is the database's
+ * (completion_discount_*, completion_mode_coherent); this INSERT only
+ * carries the columns — the service maps a refused insert to a readable
+ * 422 and never re-decides the rule. `amount_collected` is a generated
+ * column: it is neither sent nor written, ever.
+ */
+export async function insertCompletion(db: Db, c: CompletionInsert): Promise<void> {
+  await db.query(
+    `INSERT INTO job_completions
+       (job_card_id, completed_by, completed_at, work_summary, cost,
+        discount_amount, discount_reason, collection_mode, payment_reference, customer_signed)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10)`,
+    [
+      c.jobCardId,
+      c.completedBy,
+      c.completedAt,
+      c.workSummary,
+      c.cost,
+      c.discountAmount,
+      c.discountReason,
+      c.collectionMode,
+      c.paymentReference,
+      c.customerSigned,
+    ],
+  );
+}
+
+/**
+ * §6.2 step 3 — close the card. `closed_at` is the client's clamped
+ * completedAt, so the day the card shows as closed is the day the work
+ * happened, not the day the handset synced (`job_closed_coherent` ties
+ * the pair; the touch trigger bumps version).
+ */
+export async function completeJobCard(db: Db, jobId: string, closedAt: string): Promise<void> {
+  await db.query(`UPDATE job_cards SET status = 'completed', closed_at = $2 WHERE id = $1`, [
+    jobId,
+    closedAt,
+  ]);
+}
+
+export interface StackUnitRow {
+  id: string;
+  customer_id: string;
+}
+
+/**
+ * The active unit with this serial, locked — the read half of §6.2 step
+ * 5's upsert. A serial cannot stand at two sites at once
+ * (customer_products_active_serial_unique); this pre-check turns the
+ * cross-site case into a readable refusal, and the unique index stays as
+ * the race backstop between two jobs at two sites.
+ */
+export async function lockActiveUnitBySerial(db: Db, serialNumber: string): Promise<StackUnitRow | null> {
+  const r = await db.query<StackUnitRow>(
+    `SELECT id, customer_id FROM customer_products
+     WHERE lower(serial_number) = lower($1) AND is_active
+     FOR UPDATE`,
+    [serialNumber],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface StackChangeUpsert {
+  customerId: string;
+  sourceJobId: string;
+  installedBy: string;
+  productId: string | null;
+  freeTextName: string | null;
+  serialNumber: string;
+  quantity: number;
+  /** The client's date, or null to fall back to the completion's IST business date. */
+  installedOn: string | null;
+  completedAt: string;
+  warrantyExpiresOn: string | null;
+  notes: string | null;
+}
+
+/** §6.2 step 5, insert half — a unit the job put there. `source_job_id` IS the audit stamp (§3.3). */
+export async function insertStackUnit(db: Db, s: StackChangeUpsert): Promise<void> {
+  await db.query(
+    `INSERT INTO customer_products
+       (customer_id, product_id, free_text_name, serial_number, quantity,
+        installed_on, warranty_expires_on, installed_by, source_job_id, notes)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, business_date($7::timestamptz)), $8, $9, $10, $11)`,
+    [
+      s.customerId,
+      s.productId,
+      s.freeTextName,
+      s.serialNumber,
+      s.quantity,
+      s.installedOn,
+      s.completedAt,
+      s.warrantyExpiresOn,
+      s.installedBy,
+      s.sourceJobId,
+      s.notes,
+    ],
+  );
+}
+
+/** §6.2 step 5, update half — the site's row for this serial already stands; the job refreshes it and re-stamps the source. */
+export async function updateStackUnitFromJob(db: Db, id: string, s: StackChangeUpsert): Promise<void> {
+  await db.query(
+    `UPDATE customer_products SET
+       product_id = $2, free_text_name = $3, quantity = $4,
+       installed_on = COALESCE($5::date, business_date($6::timestamptz)),
+       warranty_expires_on = $7, notes = $8, installed_by = $9, source_job_id = $10
+     WHERE id = $1`,
+    [
+      id,
+      s.productId,
+      s.freeTextName,
+      s.quantity,
+      s.installedOn,
+      s.completedAt,
+      s.warrantyExpiresOn,
+      s.notes,
+      s.installedBy,
+      s.sourceJobId,
+    ],
+  );
+}
+
+export interface CompletionPartInsert {
+  lineNo: number;
+  productId: string | null;
+  freeTextName: string | null;
+  quantity: number;
+  unitCost: string | null;
+  serialNumber: string | null;
+  fromCustomerStock: boolean;
+}
+
+/**
+ * §6.2 step 6 — the parts, one INSERT for all lines (`line_no` unique
+ * within the completion). A record of what was fitted, never a bill:
+ * nothing here reads or writes a money column (§3.4).
+ */
+export async function insertCompletionParts(
+  db: Db,
+  jobId: string,
+  parts: readonly CompletionPartInsert[],
+): Promise<void> {
+  if (parts.length === 0) return;
+  const values: unknown[] = [];
+  const tuples = parts.map((p, i) => {
+    const base = i * 8;
+    values.push(jobId, p.lineNo, p.productId, p.freeTextName, p.quantity, p.unitCost, p.serialNumber, p.fromCustomerStock);
+    return `($${base + 1}, $${base + 2}, $${base + 3}::uuid, $${base + 4}, $${base + 5}::numeric, $${base + 6}::numeric, $${base + 7}, $${base + 8})`;
+  });
+  await db.query(
+    `INSERT INTO job_completion_parts
+       (job_card_id, line_no, product_id, free_text_name, quantity, unit_cost, serial_number, from_customer_stock)
+     VALUES ${tuples.join(', ')}`,
+    values,
+  );
+}
+
+export interface ClosureActor {
+  kind: 'cancelled' | 'completed';
+  fullName: string;
+  at: Date;
+}
+
+/**
+ * Who already closed this job — the JOB_ALREADY_CLOSED message names the
+ * person and the moment (§6.1: "naming who cancelled it and when"). A
+ * job carries at most one closure row, so LIMIT 1 cannot hide a second.
+ */
+export async function findClosureActor(db: Db, jobId: string): Promise<ClosureActor | null> {
+  const r = await db.query<ClosureActor>(
+    `SELECT 'cancelled' AS kind, e.full_name AS "fullName", c.cancelled_at AS at
+       FROM job_cancellations c JOIN employees e ON e.id = c.cancelled_by
+      WHERE c.job_card_id = $1
+     UNION ALL
+     SELECT 'completed' AS kind, e.full_name AS "fullName", p.completed_at AS at
+       FROM job_completions p JOIN employees e ON e.id = p.completed_by
+      WHERE p.job_card_id = $1
+     LIMIT 1`,
+    [jobId],
+  );
+  return r.rows[0] ?? null;
 }
 
 // ── the list (§6.3 GET /v1/jobs) ────────────────────────────────────────────

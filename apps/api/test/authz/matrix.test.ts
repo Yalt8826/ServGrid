@@ -153,6 +153,8 @@ const OWNER_ONLY = { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sa
 const JOB_READERS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: the status move is "technician (own), owner". */
 const STATUS_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.3: completion is "technician (own), owner", gated on `job.money` × `create` — a dispatcher's cell there is `none` outright. */
+const COMPLETION_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 
 const ENDPOINTS: EndpointRow[] = [
   {
@@ -406,6 +408,28 @@ const ENDPOINTS: EndpointRow[] = [
     expect: STATUS_ACTORS,
     assertOk: (actor, res) => {
       if (actor === 'technician') expect(res.json<{ status: string }>().status).toBe('en_route');
+    },
+  },
+  {
+    name: 'POST /v1/jobs/:id/complete',
+    method: 'POST',
+    url: '/v1/jobs/:id/complete',
+    // A fresh assigned job per probe (§6.2: completing straight from
+    // assigned is legal): the owner and the assignee close it; the
+    // dispatcher's `job.money` is `none`, so he is 403 before the body
+    // is even read; the sales rep likewise; the anonymous caller is 401.
+    probe: async (actor) => {
+      const jobId = await seedJobAssignedToTechnician();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/jobs/${jobId}/complete`,
+        headers: bearer(actor),
+        payload: { completedAt: new Date().toISOString(), workSummary: 'Matrix probe completion.' },
+      });
+    },
+    expect: COMPLETION_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor === 'technician') expect(res.json<{ status: string }>().status).toBe('completed');
     },
   },
   {

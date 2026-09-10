@@ -9,7 +9,9 @@ import {
 import { AppError } from '../../plugins/errors.js';
 import { getPool } from '../../db/pool.js';
 import { withTransaction } from '../../db/tx.js';
+import type { PoolClient } from 'pg';
 import type { RequestSource } from '../../plugins/request-context.js';
+import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
 import * as repo from './repo.js';
 
 /**
@@ -53,6 +55,9 @@ const OUT_OF_SCOPE_MESSAGE = 'This job belongs to another technician.';
 const NOT_FOUND_MESSAGE = "We couldn't find that job.";
 /** §6.3: the status endpoint is "technician (own), owner" — dispatchers assign and cancel, they do not step cards. */
 const STATUS_ACTORS_MESSAGE = 'Job status is moved by the technician on site or the owner.';
+/** §6.3: completion is "technician (own), owner" — the matrix cell is `job.money` × `create`, which a dispatcher does not hold at all. */
+export const COMPLETION_ACTORS_MESSAGE = 'A job is completed by the technician who did the work or the owner.';
+/** §6.2: "The warranty rule is a prompt, not a constraint" — nothing here forces cost to zero; the client confirms on site. */
 
 /** §3.1: the message is shown verbatim — it says what to do, not what failed. */
 function refusalMessage(from: JobStatus, to: JobStatus): string {
@@ -331,7 +336,287 @@ export function createJobsService() {
     });
   }
 
-  return { listJobs, getJobCard, changeStatus };
+  return { listJobs, getJobCard, changeStatus, completeJob };
+}
+
+// ── completion (§6.2) ───────────────────────────────────────────────────────
+
+/**
+ * The mapping layer (§6.2 step 2 and "If it fails"): the discount rule —
+ * and every other rule of that shape — lives in the database's
+ * constraints; the service only translates a refused insert into a
+ * sentence the technician can act on. A violation this table does not
+ * know still comes out as a readable 422 — never a 500, never the
+ * constraint's name. Moving a rule from the constraints into this
+ * service would be the wrong fix in the other direction.
+ */
+const COMPLETION_CONSTRAINT_MESSAGES: Readonly<Record<string, string>> = {
+  completion_cost_non_negative: 'The amount cannot be negative.',
+  completion_discount_non_negative: 'The discount cannot be negative.',
+  completion_discount_bounded:
+    'The discount is larger than the amount — a discount reduces what is owed, it cannot exceed it.',
+  completion_discount_justified: 'A discount needs a reason — say why the amount was reduced.',
+  completion_mode_coherent:
+    'Select how the customer paid — with nothing owed no payment mode is needed; otherwise the money moved by some mode.',
+  job_completions_latlng_paired: 'Send the location fix as both coordinates, or leave it out.',
+  customer_products_product_or_name: 'Name the equipment — pick a product or type what it is.',
+  customer_products_quantity_positive: 'The equipment quantity must be at least 1.',
+  customer_products_active_serial_unique:
+    'That serial is already recorded at another site — remove it there before installing it here.',
+  job_completion_parts_product_or_name: 'Name the part — pick a product or type what it is.',
+  job_completion_parts_quantity_positive: 'A part quantity must be more than zero.',
+};
+
+/** Said when a rule this table has no sentence for refuses the row — the rule stays in the database either way. */
+const CONSTRAINT_FALLBACK_MESSAGE =
+  'One of the details conflicts with a business rule — check the form and try again.';
+
+/** The service pre-checks the serial before the upsert (§6.2 step 5); the sentence and the constraint's mapping stay one string. */
+const SERIAL_AT_ANOTHER_SITE_MESSAGE =
+  'That serial is already recorded at another site — remove it there before installing it here.';
+
+interface PgViolation {
+  code: string;
+  constraint?: string;
+}
+
+function isPgViolation(error: unknown): error is PgViolation {
+  return typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string';
+}
+
+function mapDbRefusal(error: unknown): Error {
+  if (!isPgViolation(error)) return error instanceof Error ? error : new Error(String(error));
+  const known = error.constraint === undefined ? undefined : COMPLETION_CONSTRAINT_MESSAGES[error.constraint];
+  // 23514 check · 22003/22001 value too large · 23505 unique · 23503 foreign key
+  if (error.code === '23514' || error.code === '22003' || error.code === '22001') {
+    return new AppError('VALIDATION_FAILED', known ?? CONSTRAINT_FALLBACK_MESSAGE);
+  }
+  if (error.code === '23505') {
+    return known !== undefined
+      ? new AppError('VALIDATION_FAILED', known)
+      : new AppError('DUPLICATE_ENTITY', 'That record already exists — it may have synced while you were offline.');
+  }
+  if (error.code === '23503') {
+    return new AppError(
+      'VALIDATION_FAILED',
+      known ?? 'Something this refers to is no longer in the system — refresh and try again.',
+    );
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * The JOB_ALREADY_CLOSED message names who closed the job and when
+ * (§6.1) — it is shown verbatim in the offline-conflict banner, and its
+ * whole job is to answer "then what happens to what I just typed?"
+ * before the technician wonders: the phone keeps the record, the office
+ * reconciles. Timestamps are the site's business clock (IST).
+ */
+function closedMessage(closure: repo.ClosureActor): string {
+  const when = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(closure.at);
+  if (closure.kind === 'cancelled') {
+    return (
+      `This job was cancelled by ${closure.fullName} on ${when} IST. ` +
+      'Your completion is kept on this phone — the office will reconcile it.'
+    );
+  }
+  return (
+    `This job was already completed by ${closure.fullName} on ${when} IST. ` +
+    'One completion per job — if the amount is wrong, the office can amend it.'
+  );
+}
+
+export interface CompletionInput {
+  completedAt: string;
+  workSummary: string;
+  /** Absent means 0 — the warranty/prepaid shape is cost 0, discount 0, mode none (§3.4). */
+  cost?: string;
+  discountAmount?: string;
+  discountReason?: string;
+  /** Absent means 'none'; a nonzero amount owed with 'none' is the database's refusal, mapped to a readable 422. */
+  collectionMode?: 'cash' | 'upi' | 'card' | 'bank_transfer' | 'none';
+  paymentReference?: string;
+  customerSigned?: boolean;
+  /** §6.2 step 5 — equipment that now stands at the site, stamped with this job. */
+  stackChanges?: JobStackChange[];
+  /** §6.2 step 6 — what was fitted or consumed. A record, not a bill: nothing here touches cost. */
+  parts?: JobCompletionPart[];
+}
+
+/**
+ * §6.2 step 7 — the contract-visit flip. `contract_visits` is a Phase 2B
+ * table (migration 015 adds its FK); until then the column on job_cards
+ * is populated by nothing, and the hook is honestly a no-op. The skipped
+ * test in test/integration/completion.test.ts marks where the flip gets
+ * asserted.
+ */
+async function onContractVisitCompleted(
+  _client: PoolClient,
+  _contractVisitId: string,
+  _actorId: string,
+): Promise<void> {
+  /* Phase 2B: UPDATE contract_visits SET status = 'completed' … */
+}
+
+/** POST /v1/jobs/:id/complete (§6.2) — one transaction, eight steps. */
+export async function completeJob(
+  actor: Actor,
+  jobId: string,
+  input: CompletionInput,
+  source: RequestSource,
+): Promise<JobCardTechnician | JobCardOwner> {
+  if (actor.role !== 'technician' && actor.role !== 'owner') {
+    throw new AppError('FORBIDDEN', COMPLETION_ACTORS_MESSAGE);
+  }
+
+  // Absent money fields are the honest zeros: a warranty job and a
+  // prepaid visit arrive as cost 0, discount 0, mode none and pass the
+  // constraints unchanged (§3.4). `amountCollected` is not an input at
+  // all — the column is generated (cost − discount); accepting it would
+  // store derived money.
+  const cost = input.cost ?? '0';
+  const discountAmount = input.discountAmount ?? '0';
+  const discountReason = input.discountReason ?? null;
+  const collectionMode = input.collectionMode ?? 'none';
+  const paymentReference = input.paymentReference ?? null;
+  const customerSigned = input.customerSigned ?? false;
+
+  return withTransaction(async (client) => {
+    // Step 1 — the row lock every later step holds; the status and the
+    // actor asserts ride it.
+    const job = await repo.lockJobForCompletion(client, jobId);
+    if (job === null) {
+      throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+    }
+    if (actor.role === 'technician' && job.assigned_to !== actor.id) {
+      throw new AppError('OUT_OF_SCOPE', OUT_OF_SCOPE_MESSAGE);
+    }
+    if (job.status === 'cancelled' || job.status === 'completed') {
+      const closure = await repo.findClosureActor(client, jobId);
+      throw new AppError(
+        'JOB_ALREADY_CLOSED',
+        closure === null ? `This job is already ${job.status}.` : closedMessage(closure),
+      );
+    }
+    if (job.status === 'unassigned') {
+      throw new AppError(
+        'ILLEGAL_TRANSITION',
+        'An unassigned job has nobody on site to complete it — assign it first.',
+      );
+    }
+
+    // The client's clock, clamped once for the completion row, the card's
+    // closed_at and the event (§6.2: accepted, not trusted).
+    const clamp = clampOccurredAt(input.completedAt);
+    const completedAt = clamp.occurredAt;
+
+    // Steps 2–6: every database refusal inside this block maps to a
+    // readable 422, and the transaction rolls the whole attempt back —
+    // both rows or neither.
+    try {
+      // Step 2 — the money row. The constraints decide; see mapDbRefusal.
+      await repo.insertCompletion(client, {
+        jobCardId: jobId,
+        completedBy: actor.id,
+        completedAt,
+        workSummary: input.workSummary,
+        cost,
+        discountAmount,
+        discountReason,
+        collectionMode,
+        paymentReference,
+        customerSigned,
+      });
+
+      // Step 3 — close the card at the moment the work happened.
+      await repo.completeJobCard(client, jobId, completedAt);
+
+      // Step 4 — the trail: occurred_at is the site moment, recorded_at
+      // is now() (the column's default); a clamp is recorded in the payload.
+      await repo.insertJobEvent(client, {
+        jobCardId: jobId,
+        eventType: 'completed',
+        actorId: actor.id,
+        occurredAt: completedAt,
+        fromStatus: job.status,
+        toStatus: 'completed',
+        source,
+        payload: clamp.clamped
+          ? { completedAtClamped: { sent: input.completedAt, recordedAs: clamp.occurredAt } }
+          : undefined,
+      });
+
+      // Step 5 — the stack, upserted by serial inside the same transaction.
+      for (const change of input.stackChanges ?? []) {
+        const upsert: repo.StackChangeUpsert = {
+          customerId: job.customer_id,
+          sourceJobId: jobId,
+          installedBy: actor.id,
+          productId: change.productId ?? null,
+          freeTextName: change.freeTextName ?? null,
+          serialNumber: change.serialNumber,
+          quantity: change.quantity ?? 1,
+          installedOn: change.installedOn ?? null,
+          completedAt,
+          warrantyExpiresOn: change.warrantyExpiresOn ?? null,
+          notes: change.notes ?? null,
+        };
+        const existing = await repo.lockActiveUnitBySerial(client, change.serialNumber);
+        if (existing === null) {
+          await repo.insertStackUnit(client, upsert);
+        } else if (existing.customer_id !== job.customer_id) {
+          // The active-serial unique index is the rule; this is its sentence.
+          throw new AppError('VALIDATION_FAILED', SERIAL_AT_ANOTHER_SITE_MESSAGE);
+        } else {
+          await repo.updateStackUnitFromJob(client, existing.id, upsert);
+        }
+      }
+
+      // Step 6 — the parts, a record of what was fitted; no money column
+      // is read or written (§3.4).
+      await repo.insertCompletionParts(
+        client,
+        jobId,
+        (input.parts ?? []).map((part, index) => ({
+          lineNo: index + 1,
+          productId: part.productId ?? null,
+          freeTextName: part.freeTextName ?? null,
+          quantity: part.quantity,
+          unitCost: part.unitCost ?? null,
+          serialNumber: part.serialNumber ?? null,
+          fromCustomerStock: part.fromCustomerStock ?? false,
+        })),
+      );
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw mapDbRefusal(error);
+    }
+
+    // Step 7 — contract visits: Phase 2B flips the visit's status (hook above).
+    if (job.contract_visit_id !== null) {
+      await onContractVisitCompleted(client, job.contract_visit_id, actor.id);
+    }
+
+    // Step 8 — attachments arrive as separate requests; a completion is
+    // valid without them. Nothing to do here by design.
+
+    const variant = variantForRole(actor.role);
+    const card = await repo.findCard(client, variant, jobId);
+    if (card === null) {
+      // Unreachable: the row is locked in this transaction and step 3
+      // succeeded. Never guess about a locked row.
+      throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
+    }
+    return toCard(variant, card) as JobCardTechnician | JobCardOwner;
+  });
 }
 
 export type JobsService = ReturnType<typeof createJobsService>;
