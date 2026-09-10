@@ -28,6 +28,18 @@ const GALLERY_TARGETS = [
   'cd',
 ] as const;
 
+/** The first `onPress` at or below a node — Button wraps its Pressable. */
+function firstOnPress(node: unknown): (() => void) | undefined {
+  if (node === null || typeof node !== 'object') return undefined;
+  const n = node as { props?: { onPress?: () => void }; children?: unknown[] };
+  if (typeof n.props?.onPress === 'function') return n.props.onPress;
+  for (const child of n.children ?? []) {
+    const hit = firstOnPress(child);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 describe('component gallery — the enforceable deliverable', () => {
   it('renders at __DEV__ with the display header', async () => {
     const r = await create(<GalleryRoute />);
@@ -66,6 +78,24 @@ describe('component gallery — the enforceable deliverable', () => {
     await act(async () => {
       await new Promise((res) => setTimeout(res, 260));
     });
+
+    // Sheet and ConfirmDialog are real Modals, so the gallery opens them
+    // on demand — rendered permanently they scrim the whole page and bury
+    // every component below it. Press the openers, so this stays an
+    // assertion about all eleven rather than shrinking to the nine that
+    // happen to be inline.
+    for (const opener of ['g-open-sheet', 'g-open-cd']) {
+      const node = findByTestID(toJson(r), opener);
+      expect(node, `opener "${opener}" present`).toBeTruthy();
+      // Button's testID sits on its wrapper; the handler is on the
+      // Pressable inside it.
+      const handler = firstOnPress(node!);
+      expect(handler, `opener "${opener}" is pressable`).toBeTruthy();
+      await act(async () => {
+        handler!();
+      });
+    }
+
     const tree = toJson(r);
     for (const target of GALLERY_TARGETS) {
       expect(findByTestID(tree, `g-${target}`), `primitive "${target}" present`).toBeTruthy();

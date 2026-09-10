@@ -8,6 +8,7 @@
  * in a release APK.
  */
 import { ScrollView, Text, View } from 'react-native';
+import { useState } from 'react';
 
 import { DENSITY, SEMANTIC, SPACE, STATES, type ComponentState, type Density } from '@servgrid/shared';
 import { textStyle } from '../../src/fonts/textStyle';
@@ -158,9 +159,13 @@ function SurfaceStates(): React.ReactNode {
   return (
     <View>
       <StateBlock label="Sheet (64pt of the screen stays visible)">
-        <Sheet visible title="Complete job" onDismiss={() => {}} hasUnsavedInput testID="g-sheet">
-          <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary }}>Scrollable content; the action bar never scrolls away.</Text>
-        </Sheet>
+        <OverlayPreview label="Open the sheet" testID="g-open-sheet">
+          {(visible, close) => (
+            <Sheet visible={visible} title="Complete job" onDismiss={close} hasUnsavedInput testID="g-sheet">
+              <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary }}>Scrollable content; the action bar never scrolls away.</Text>
+            </Sheet>
+          )}
+        </OverlayPreview>
       </StateBlock>
       {(['danger', 'warning', 'success', 'info'] as const).map((tone) => (
         <StateBlock key={tone} label={`Banner ${tone}`}>
@@ -195,15 +200,19 @@ function FeedbackStates(): React.ReactNode {
         <EmptyState message="Nothing needs attention" testID="g-es-info" />
       </StateBlock>
       <StateBlock label="ConfirmDialog (irreversible only, destructive right)">
-        <ConfirmDialog
-          visible
-          title="Void job?"
-          message="This cannot be undone."
-          confirmLabel="Void job"
-          onCancel={() => {}}
-          onConfirm={() => {}}
-          testID="g-cd"
-        />
+        <OverlayPreview label="Open the dialog" testID="g-open-cd">
+          {(visible, close) => (
+            <ConfirmDialog
+              visible={visible}
+              title="Void job?"
+              message="This cannot be undone."
+              confirmLabel="Void job"
+              onCancel={close}
+              onConfirm={close}
+              testID="g-cd"
+            />
+          )}
+        </OverlayPreview>
       </StateBlock>
     </View>
   );
@@ -250,6 +259,36 @@ function Gallery(): React.ReactNode {
  * Dev-gate: in release builds `__DEV__` is a compile-time constant, the
  * false branch minifies away, and the gallery module never loads.
  */
+/**
+ * Overlays open on demand rather than rendering permanently.
+ *
+ * `Sheet` and `ConfirmDialog` are real `Modal`s. Rendered `visible` in a
+ * gallery they each throw a full-screen scrim over everything below,
+ * which dims every other component on the page and buries the rest of
+ * the list — the gallery is the one artefact that has to stay readable,
+ * since it is what stops `stale` and `error` being reinvented per screen.
+ *
+ * A button that opens the real component beats a non-modal replica:
+ * a replica is a second implementation, and it drifts.
+ */
+function OverlayPreview({
+  label,
+  testID,
+  children,
+}: {
+  label: string;
+  testID: string;
+  children: (visible: boolean, close: () => void) => React.ReactNode;
+}): React.ReactNode {
+  const [visible, setVisible] = useState(false);
+  return (
+    <View>
+      <Button label={label} variant="secondary" onPress={() => setVisible(true)} testID={testID} />
+      {children(visible, () => setVisible(false))}
+    </View>
+  );
+}
+
 export default function GalleryRoute(): React.ReactNode {
   if (!__DEV__) {
     return (

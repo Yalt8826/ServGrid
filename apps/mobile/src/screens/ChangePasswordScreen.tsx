@@ -13,7 +13,7 @@
 import { BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useState } from 'react';
 
-import { SEMANTIC, SPACE } from '@servgrid/shared';
+import { LAYOUT, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button, TextField } from '../components/ui';
 import { haptic } from '../components/ui/haptics';
 import { textStyle } from '../fonts/textStyle';
@@ -136,6 +136,9 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     padding: SPACE[4],
+    width: '100%',
+    maxWidth: LAYOUT.formMaxWidth,
+    alignSelf: 'center',
   },
   heading: {
     ...textStyle('h1'),

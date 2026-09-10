@@ -14,7 +14,7 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 
-import { SEMANTIC, SPACE } from '@servgrid/shared';
+import { LAYOUT, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button, TextField } from '../components/ui';
 import { textStyle } from '../fonts/textStyle';
 import type { ApiResult, LoginResponse } from '../lib/apiClient';
@@ -144,6 +144,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: SPACE[4],
+    // A form the width of a 1900px window is not a form. The cap is a
+    // no-op on every handset (they are narrower than it) and is what
+    // stops the owner's desktop build reading as a broken page.
+    width: '100%',
+    maxWidth: LAYOUT.formMaxWidth,
+    alignSelf: 'center',
   },
   wordmark: {
     ...textStyle('h1'),

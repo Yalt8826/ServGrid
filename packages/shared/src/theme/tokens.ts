@@ -58,6 +58,11 @@ export const SEMANTIC = {
     disabled: SLATE[300],
     onAccent: SLATE[900],
     onDark: COLORS.surface,
+    // Secondary text on a dark ground. `text.secondary` (slate.500) is
+    // 3.00:1 there — the non-text floor, well under the 4.5:1 a label
+    // needs. slate.300 is 6.78:1 on slate.900 and is what the rail's
+    // group headings and inactive routes use.
+    onDarkSecondary: SLATE[300],
   },
   bg: {
     app: COLORS.surface,
@@ -130,6 +135,20 @@ export const TAP = {
   gutterField: 16,
   gutterDesk: 24,
   thumbBar: 72, // fixed bottom action bar height
+} as const;
+
+/**
+ * Layout caps. A phone has no use for these; a 1900px browser window
+ * does — without one, every field on the owner's build stretches the
+ * full viewport and the login form reads as a broken page rather than a
+ * form. `content` is the reading measure for a single-column screen;
+ * `form` is narrower because an input the width of a desk is harder to
+ * scan, not easier.
+ */
+export const LAYOUT = {
+  contentMaxWidth: 960,
+  formMaxWidth: 420,
+  railWidth: 240,
 } as const;
 
 /** Radii (§3.2) — square corners on job objects are a signature. */

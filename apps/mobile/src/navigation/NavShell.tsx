@@ -16,7 +16,7 @@ import { useRouter, usePathname } from 'expo-router';
 import type { ReactNode } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { COLORS, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { COLORS, LAYOUT, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { textStyle } from '../fonts/textStyle';
 import { DensityProvider } from '../components/ui/DensityProvider';
 import { useSessionStore } from '../state/sessionStore';
@@ -24,7 +24,7 @@ import { NavTabBar } from './NavTabBar';
 import { ROUTE_LABELS, densityForRole, groupMapFor, routeIsCovered } from './navmap';
 
 const DESK_MIN_WIDTH = 1024;
-const RAIL_WIDTH = 240;
+const RAIL_WIDTH = LAYOUT.railWidth;
 
 export function NavShell({ children }: { children: ReactNode }): ReactNode {
   const actor = useSessionStore((s) => s.actor);
@@ -49,11 +49,17 @@ export function NavShell({ children }: { children: ReactNode }): ReactNode {
       ) : desk ? (
         <View style={{ flex: 1, flexDirection: 'row' }}>
           <ScrollView
-            style={{ width: RAIL_WIDTH, backgroundColor: SEMANTIC.bg.raised }}
+            // `width` alone does not hold a ScrollView in a flex row on
+            // RNW — it grows to fill. Pinning all three flex properties is
+            // what keeps the rail at 240 instead of half the window.
+            style={{
+              width: RAIL_WIDTH,
+              flexGrow: 0,
+              flexShrink: 0,
+              flexBasis: RAIL_WIDTH,
+              backgroundColor: SEMANTIC.bg.dark,
+            }}
             contentContainerStyle={{
-              borderBottomWidth: 1,
-              borderRightWidth: 1,
-              borderColor: SEMANTIC.line.default,
               paddingBottom: SPACE[4],
             }}
           >
@@ -62,7 +68,7 @@ export function NavShell({ children }: { children: ReactNode }): ReactNode {
                 <Text
                   style={{
                     ...textStyle('caption'),
-                    color: SEMANTIC.text.secondary,
+                    color: SEMANTIC.text.onDarkSecondary,
                     paddingHorizontal: SPACE[3],
                     marginBottom: SPACE[1],
                   }}
@@ -87,7 +93,7 @@ export function NavShell({ children }: { children: ReactNode }): ReactNode {
                       <Text
                         style={{
                           ...textStyle('body'),
-                          color: active ? SEMANTIC.text.primary : SEMANTIC.text.secondary,
+                          color: active ? SEMANTIC.text.onDark : SEMANTIC.text.onDarkSecondary,
                         }}
                       >
                         {ROUTE_LABELS[route] ?? route}
