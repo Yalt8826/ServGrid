@@ -13,6 +13,7 @@ import { idempotencyPlugin } from './plugins/idempotency.js';
 import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { attachmentsRoutes } from './modules/attachments/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
 import { jobsRoutes } from './modules/jobs/routes.js';
@@ -116,6 +117,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(rbacPlugin);
   app.register(idempotencyPlugin);
   app.register(authRoutes, { jwtSecret: config.jwtSecret });
+  app.register(attachmentsRoutes, { s3: config.s3 });
   app.register(employeesRoutes);
   app.register(consentRoutes);
   app.register(jobsRoutes);

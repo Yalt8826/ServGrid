@@ -25,6 +25,7 @@ export type ErrorCode =
   | 'RECONCILIATION_CONFIRMED' // 409 — completion amendment refused; day signed off
   | 'EMPLOYEE_HAS_OPEN_WORK' // 409 — deactivation refused
   | 'IDEMPOTENCY_IN_FLIGHT' // 409 — same key still processing
+  | 'PAYLOAD_TOO_LARGE' // 413 — upload past the attachment size cap; no retry without shrinking can succeed
   | 'IDEMPOTENCY_KEY_REUSED' // 422 — same key, different body
   | 'VALIDATION_FAILED' // 422 — zod issues in details.issues
   | 'RATE_LIMITED' // 429
@@ -43,6 +44,7 @@ export const ERROR_CODES = [
   'RECONCILIATION_CONFIRMED',
   'EMPLOYEE_HAS_OPEN_WORK',
   'IDEMPOTENCY_IN_FLIGHT',
+  'PAYLOAD_TOO_LARGE',
   'IDEMPOTENCY_KEY_REUSED',
   'VALIDATION_FAILED',
   'RATE_LIMITED',
@@ -63,6 +65,7 @@ export const ERROR_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   RECONCILIATION_CONFIRMED: 409,
   EMPLOYEE_HAS_OPEN_WORK: 409,
   IDEMPOTENCY_IN_FLIGHT: 409,
+  PAYLOAD_TOO_LARGE: 413,
   IDEMPOTENCY_KEY_REUSED: 422,
   VALIDATION_FAILED: 422,
   RATE_LIMITED: 429,

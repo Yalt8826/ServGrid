@@ -7,8 +7,10 @@ import { createHash, createHmac } from 'node:crypto';
  * dependency tree for the handful of verbs this API ever uses.
  *
  * T0.6 ships the signer and the reachability probe `/healthz` stands on.
- * Attachment put/get/presign arrive with the attachments module (§9) and
- * reuse `signedRequest`.
+ * T1.10 adds the attachment half (`putObject`, `presignedGetUrl`) on the
+ * same `signedRequest` core — plus presigning, which is query-string
+ * SigV4: the signature goes in the URL rather than an Authorization
+ * header, so the client the URL is minted for needs no credentials.
  */
 
 export interface StorageConfig {
@@ -115,6 +117,97 @@ export interface StorageProbe {
   ok: boolean;
   /** Present when `ok` is false — the log line, not a user-facing message. */
   detail?: string;
+}
+
+/** The outcome of a single object write. `detail` is for the log, never the client. */
+export interface PutObjectResult {
+  ok: boolean;
+  status: number;
+  detail?: string;
+}
+
+/**
+ * PUT the bytes at `key` (§9: attachments write to
+ * `{ownerType}/{yyyy}/{mm}/{uuid}.{ext}`). The object's Content-Type
+ * rides the PUT so a presigned GET answers with the right type — the
+ * owner's browser renders the image instead of offering a download.
+ */
+export async function putObject(
+  config: StorageConfig,
+  key: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<PutObjectResult> {
+  let res: Response;
+  try {
+    res = await signedRequest(config, {
+      method: 'PUT',
+      path: `/${config.bucket}/${key}`,
+      body,
+      headers: { 'content-type': contentType },
+    });
+  } catch (error) {
+    return { ok: false, status: 0, detail: error instanceof Error ? error.message : String(error) };
+  }
+  if (res.ok) return { ok: true, status: res.status };
+  const text = await res.text().catch(() => '');
+  return { ok: false, status: res.status, detail: `storage PUT answered HTTP ${res.status}: ${text.slice(0, 200)}` };
+}
+
+/**
+ * A presigned GET URL (§9: `GET /v1/attachments/:id` answers 302 with
+ * one of these; the API never proxies the bytes). Query-string SigV4:
+ * the same canonical request as `signedRequest` but with the signature
+ * in `X-Amz-Signature`, `UNSIGNED-PAYLOAD` in place of a body hash (the
+ * bytes flow browser→MinIO, not through this signature), and
+ * `X-Amz-Expires` instead of a signed header date window. MinIO enforces
+ * the expiry at download time.
+ */
+export function presignedGetUrl(
+  config: StorageConfig,
+  key: string,
+  expiresSeconds: number,
+  now: Date = new Date(),
+): string {
+  const url = new URL(config.endpoint);
+  url.pathname = `/${config.bucket}/${key}`
+    .split('/')
+    .map((segment) => uriEncode(segment, true))
+    .join('/');
+
+  const { dateTime, date } = amzDate(now);
+  // Query parameters must be in canonical (sorted) order for the
+  // signature to verify; these five names already sort into place.
+  const query: Array<[string, string]> = [
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${config.accessKeyId}/${date}/${config.region}/s3/aws4_request`],
+    ['X-Amz-Date', dateTime],
+    ['X-Amz-Expires', String(expiresSeconds)],
+    ['X-Amz-SignedHeaders', 'host'],
+  ];
+  const canonicalQuery = query
+    .map(([k, v]) => `${uriEncode(k, true)}=${uriEncode(v, true)}`)
+    .join('&');
+
+  const canonicalRequest = [
+    'GET',
+    url.pathname,
+    canonicalQuery,
+    `host:${url.host}\n`,
+    'host',
+    'UNSIGNED-PAYLOAD',
+  ].join('\n');
+
+  const scope = `${date}/${config.region}/s3/aws4_request`;
+  const stringToSign = ['AWS4-HMAC-SHA256', dateTime, scope, sha256Hex(canonicalRequest)].join('\n');
+  const kDate = hmac(`AWS4${config.secretAccessKey}`, date);
+  const kRegion = hmac(kDate, config.region);
+  const kService = hmac(kRegion, 's3');
+  const kSigning = hmac(kService, 'aws4_request');
+  const signature = hmac(kSigning, stringToSign).toString('hex');
+
+  url.search = `${canonicalQuery}&X-Amz-Signature=${signature}`;
+  return url.toString();
 }
 
 /**

@@ -63,6 +63,10 @@ export const GENERIC_MESSAGES = {
   INTERNAL: 'Something went wrong on our side. Nothing was lost — try again in a moment.',
 } as const satisfies Partial<Record<ErrorCode, string>>;
 
+/** §9: the size cap refusal — says the limit, because the fix is shrinking the file. */
+export const PAYLOAD_TOO_LARGE_MESSAGE =
+  'That file is too large to upload. The limit is 15 MB — attach a smaller one.';
+
 function isZodError(error: unknown): error is ZodError {
   return (
     error instanceof ZodError ||
@@ -116,6 +120,14 @@ function handleError(error: unknown, request: FastifyRequest, reply: FastifyRepl
   if (typeof status === 'number' && status >= 400 && status < 500) {
     // Fastify's own client errors: bad JSON, oversized body, unsupported media type.
     if (status === 404) return send(reply, 'NOT_FOUND', GENERIC_MESSAGES.NOT_FOUND);
+    if (status === 413) {
+      // The body limit fires in the content-type parser, before any
+      // handler runs — a 20 MB upload must die as a 413 (§9: the client
+      // has to learn "too large, do not resend as-is"), not as the
+      // generic 422 the branch below would give it.
+      request.log.info({ err: error }, 'request body over the limit');
+      return send(reply, 'PAYLOAD_TOO_LARGE', PAYLOAD_TOO_LARGE_MESSAGE);
+    }
     request.log.info({ err: error }, 'request rejected');
     return send(reply, 'VALIDATION_FAILED', GENERIC_MESSAGES.VALIDATION_FAILED, {
       issues: [{ path: '', message: (error as Error).message ?? 'malformed request', code: 'request' }],
