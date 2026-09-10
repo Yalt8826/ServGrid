@@ -13,6 +13,7 @@ import { idempotencyPlugin } from './plugins/idempotency.js';
 import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { cashRoutes } from './modules/cash/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
 import { jobsRoutes } from './modules/jobs/routes.js';
@@ -119,6 +120,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(employeesRoutes);
   app.register(consentRoutes);
   app.register(jobsRoutes);
+  app.register(cashRoutes);
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });
