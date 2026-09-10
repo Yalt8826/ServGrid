@@ -1,6 +1,7 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import sharp from 'sharp';
 import type { FastifyInstance } from 'fastify';
 import {
   deviceDiagnosticSchema,
@@ -83,6 +84,40 @@ let subject: { id: string };
 let customerId = '';
 let serviceId = '';
 let matrixJobId = '';
+/** An attachment on the matrix technician's job, for the GET probe. */
+let matrixAttachmentId = '';
+
+/** A tiny valid PNG — big enough to sniff, small enough to not care about. */
+async function probePng(): Promise<Buffer> {
+  return sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } } }).png().toBuffer();
+}
+
+/** Hand-built multipart body (the same wire format light-my-request cannot easily produce). */
+function multipartBody(fields: Record<string, string>, file: { data: Buffer; filename: string }): {
+  payload: Buffer;
+  contentType: string;
+} {
+  const boundary = `----servgridt10${randomBytes(8).toString('hex')}`;
+  const chunks: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`, 'utf8'));
+  }
+  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.filename}"\r\n\r\n`, 'utf8'));
+  chunks.push(file.data, Buffer.from('\r\n', 'utf8'));
+  chunks.push(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
+  return { payload: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+/** The upload probe's form fields, checksum consistent with the bytes sent. */
+function uploadFields(jobId: string, bytes: Buffer): Record<string, string> {
+  return {
+    ownerType: 'job_card',
+    ownerId: jobId,
+    kind: 'photo',
+    capturedAt: '2026-09-11T09:00:00Z',
+    fileChecksum: createHash('sha256').update(bytes).digest('hex'),
+  };
+}
 
 async function seedJobAssignedToTechnician(): Promise<string> {
   const r = await db.query<{ id: string }>(
@@ -497,6 +532,71 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'POST /v1/attachments',
+    method: 'POST',
+    url: '/v1/attachments',
+    // §9: attachments on a job are governed by the `job` update cell, so
+    // the owner and the dispatcher (all), and the assignee technician
+    // (own), may upload to the matrix technician's job; the sales rep
+    // (none) may not. Each probe uploads its own tiny PNG under its own
+    // Idempotency-Key; the body parses after requireAuth, so `anon` is
+    // 401, not 422.
+    probe: async (actor) => {
+      const bytes = await probePng();
+      const body = multipartBody(uploadFields(matrixJobId, bytes), {
+        data: bytes,
+        filename: 'probe.png',
+      });
+      return app.inject({
+        method: 'POST',
+        url: '/v1/attachments',
+        headers: {
+          ...bearer(actor),
+          'content-type': body.contentType,
+          'idempotency-key': randomUUID(),
+        },
+        payload: body.payload,
+      });
+    },
+    expect: {
+      owner: OK,
+      dispatcher: OK,
+      technician: OK,
+      sales_rep: FORBIDDEN,
+      anon: UNAUTHENTICATED,
+    },
+    assertOk: (_actor, res) => {
+      const created = res.json<{ id: string; storageKey: string }>();
+      expect(created.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(created.storageKey).toMatch(/^job_card\//);
+    },
+  },
+  {
+    name: 'GET /v1/attachments/:id',
+    method: 'GET',
+    url: '/v1/attachments/:id',
+    // §9: the read follows the `job` read cell — owner and dispatcher
+    // all, the matrix technician own (his job's attachment), the sales
+    // rep none. A 302 with an empty body and a Location header is the
+    // success shape: permission-checked, then handed a presigned URL —
+    // never proxied bytes.
+    probe: (actor) =>
+      app.inject({ method: 'GET', url: `/v1/attachments/${matrixAttachmentId}`, headers: bearer(actor) }),
+    expect: {
+      owner: { status: 302 },
+      dispatcher: { status: 302 },
+      technician: { status: 302 },
+      sales_rep: FORBIDDEN,
+      anon: UNAUTHENTICATED,
+    },
+    assertOk: (_actor, res) => {
+      expect(res.body).toBe('');
+      const location = res.headers['location'];
+      expect(typeof location).toBe('string');
+      expect((location as string).includes('X-Amz-Signature')).toBe(true);
+    },
+  },
+  {
     name: 'GET /healthz',
     method: 'GET',
     url: '/healthz',
@@ -546,6 +646,24 @@ beforeAll(async () => {
     )
   ).rows[0]!.id;
   matrixJobId = await seedJobAssignedToTechnician();
+
+  // The GET /v1/attachments/:id probe needs an attachment on the matrix
+  // technician's job — landed once, through the API itself, exactly the
+  // way a real upload arrives.
+  const bytes = await probePng();
+  const body = multipartBody(uploadFields(matrixJobId, bytes), { data: bytes, filename: 'fixture.png' });
+  const uploaded = await app.inject({
+    method: 'POST',
+    url: '/v1/attachments',
+    headers: {
+      authorization: `Bearer ${tokens.technician}`,
+      'content-type': body.contentType,
+      'idempotency-key': randomUUID(),
+    },
+    payload: body.payload,
+  });
+  expect(uploaded.statusCode, uploaded.body).toBe(200);
+  matrixAttachmentId = uploaded.json<{ id: string }>().id;
 });
 
 afterAll(async () => {
@@ -569,7 +687,10 @@ describe('authorisation matrix — every endpoint × every role (T0.10)', () => 
         if (want.code !== undefined) {
           expect(envelopeOf(res.statusCode, res.body).code, label).toBe(want.code);
         }
-        if (want.status === 200 && endpoint.assertOk) endpoint.assertOk(actor, res);
+        // Any 2xx counts as a success shape worth asserting on — the
+        // attachments GET answers 302, not 200 (§9), and its Location
+        // needs the check as much as a 200's body does.
+        if (want.status >= 200 && want.status < 300 && endpoint.assertOk) endpoint.assertOk(actor, res);
       }
     });
   }

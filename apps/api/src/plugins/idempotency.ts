@@ -189,6 +189,17 @@ declare module 'fastify' {
     /** Set while a claimed request's transaction is open. */
     idempotency: WorkState | null;
   }
+  interface FastifyContextConfig {
+    /**
+     * Per-route hash input for `request_hash` (§3.2). The default hashes
+     * `canonicalJson(body)`; a multipart upload has no JSON body and an
+     * unstable boundary string, so `POST /v1/attachments` provides
+     * `fileChecksum + ownerType + ownerId + kind` instead — the route's
+     * preHandlers have run by the time this is read, so the payload is
+     * parsed and its checksum field known before the claim is made.
+     */
+    idempotencyRequestHashPayload?: (request: FastifyRequest) => string;
+  }
 }
 
 /**
@@ -211,7 +222,11 @@ async function idempotencyPreHandler(request: FastifyRequest, reply: FastifyRepl
   const employeeId = request.auth.sub;
   const endpoint = `${request.method} ${request.routeOptions.url ?? request.url}`;
   // A missing body (DELETE) hashes canonicalJson(null) — stable across retries.
-  const requestHash = sha256(canonicalJson(request.body ?? null));
+  // Multipart uploads supply their own stable input (see FastifyContextConfig).
+  const hashPayload = request.routeOptions.config.idempotencyRequestHashPayload;
+  const requestHash = sha256(
+    hashPayload ? hashPayload(request) : canonicalJson(request.body ?? null),
+  );
 
   const claim = await getPool().query<{ claim_token: string }>(CLAIM_SQL, [
     employeeId,
