@@ -36,6 +36,26 @@ export const REQUIRED_ENV_VARS = [
 
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/**
+ * `WEB_ORIGINS` as a list. Development gets localhost by default so
+ * `expo start --web` talks to a locally-running API without ceremony;
+ * every other environment must name its origins explicitly, because a
+ * default that silently allows an origin is how one leaks into
+ * production.
+ */
+export function parseOrigins(raw: string | undefined, nodeEnv: NodeEnv): string[] {
+  const listed = (raw ?? '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter((o) => o.length > 0);
+  if (listed.length > 0) return listed;
+  if (nodeEnv === 'development' || nodeEnv === 'test') {
+    // Metro's web port, and the port it falls back to when 8081 is taken.
+    return ['http://localhost:8081', 'http://localhost:8082', 'http://localhost:19006'];
+  }
+  return [];
+}
+
 const required = (name: string) => z.string({ required_error: `${name} is not set` }).min(1, `${name} is empty`);
 
 const envSchema = z
@@ -86,6 +106,20 @@ const envSchema = z
       required_error: 'LOG_LEVEL is not set',
       invalid_type_error: `LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}`,
     }),
+
+    /**
+     * Browser origins allowed to call this API, comma-separated.
+     *
+     * The owner's desktop build is a browser (PLAN.md §1), and "an owner
+     * account logs in on desktop web" is a Phase 0 exit criterion — which
+     * a browser refuses to attempt without CORS. Optional and empty by
+     * default: native clients are not browsers and send no Origin, so a
+     * deployment that serves the API only to handsets adds nothing.
+     *
+     * Never `*`. Credentials ride these requests, and a wildcard with
+     * credentials is the one combination browsers refuse outright.
+     */
+    WEB_ORIGINS: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     // Only meaningful once both halves parsed; a malformed half is already reported.
@@ -114,6 +148,8 @@ const envSchema = z
 
 export interface Config {
   nodeEnv: NodeEnv;
+  /** Browser origins allowed to call this API. Empty means none. */
+  webOrigins: string[];
   port: number;
   host: string;
   databaseUrl: string;
@@ -175,6 +211,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workWindow: { start: e.WORK_WINDOW_START, end: e.WORK_WINDOW_END },
     pingRetentionDays: e.PING_RETENTION_DAYS,
     logLevel: e.LOG_LEVEL,
+    webOrigins: parseOrigins(e.WEB_ORIGINS, e.NODE_ENV),
   };
 }
 

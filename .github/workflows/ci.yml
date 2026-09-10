@@ -56,6 +56,23 @@ jobs:
       - run: pnpm compose:up
       - run: pnpm test
 
+  # A Metro bundle is the only thing that proves the app can start.
+  # typecheck + vitest both passed for a build that could not resolve
+  # expo-notifications — hand-written .d.ts shims satisfied tsc and the
+  # test seam aliases the module, so nothing in CI ever asked Metro to
+  # resolve a real import. This job asks.
+  bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -F mobile bundle:check
+
   migrations:
     runs-on: ubuntu-24.04
     steps:
@@ -78,7 +95,7 @@ jobs:
     # secrets (docs/implementation/T0.16-RUNBOOK.md); the image
     # pipeline itself is live either way.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [typecheck, lint, test, migrations]
+    needs: [typecheck, lint, test, bundle, migrations]
     runs-on: ubuntu-24.04
     environment: staging
     permissions:

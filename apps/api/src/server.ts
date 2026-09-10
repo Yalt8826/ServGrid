@@ -6,6 +6,7 @@ import { loadConfig, loadDotEnv, type Config } from './config.js';
 import { closePool, getPool, observeSlowQueries } from './db/pool.js';
 import { initFcm } from './lib/fcm.js';
 import { probeStorage } from './lib/storage.js';
+import cors from '@fastify/cors';
 import { authPlugin } from './plugins/auth.js';
 import { errorsPlugin } from './plugins/errors.js';
 import { rbacPlugin } from './plugins/rbac.js';
@@ -79,6 +80,32 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
     // can be traced to exactly one request.
     requestIdHeader: false,
     trustProxy: true,
+  });
+
+  // CORS before anything that answers a request. The owner's desktop
+  // build is a browser, so its preflight has to be answered or the
+  // login it is a Phase 0 exit criterion for never leaves the tab.
+  //
+  // `credentials` is on because the refresh flow may move to a cookie,
+  // and an allowlist — never `*` — is what makes that safe: a wildcard
+  // with credentials is the one combination browsers refuse outright.
+  // With no origins configured the plugin still registers and simply
+  // matches nothing, which is the correct answer for a handset-only
+  // deployment.
+  app.register(cors, {
+    origin: config.webOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Idempotency-Key',
+      'If-Match',
+      'X-Source',
+      'X-Device-Id',
+    ],
+    exposedHeaders: ['X-Request-Id', 'Retry-After'],
+    maxAge: 600,
   });
 
   app.register(requestContextPlugin);

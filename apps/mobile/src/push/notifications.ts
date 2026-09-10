@@ -33,12 +33,16 @@ function isLocallyRaised(notification: Notifications.Notification): boolean {
  * engine exists (Phase 1); this bare confirmation is the Phase 0
  * delivery proof the T0.15 probe records. */
 export async function raiseSyncConfirmation(): Promise<void> {
+  // `channelId` belongs on the *trigger*, not the content — and an
+  // immediate notification (`trigger: null`) has no trigger to carry it,
+  // so Android routes it through the default channel. The dedicated
+  // channel is still created below for the per-row notifications T2.6
+  // raises, which schedule with a trigger and can name it.
   await Notifications.scheduleNotificationAsync({
     content: {
       title: 'ServGrid',
       body: 'New work synced — open the app to review.',
       data: { kind: LOCAL_KIND },
-      channelId: CHANNEL_ID,
     },
     trigger: null,
   });
@@ -83,12 +87,20 @@ export function initPush(): void {
     // data-only wake never reaches the tray, and a scheduled local
     // notification always does.) Idempotent — the SDK replaces the
     // global handler.
+    // `handleNotification` returns a promise, and the behaviour shape is
+    // `shouldShowBanner` / `shouldShowList` — `shouldShowAlert` is
+    // deprecated. Both were wrong against the real SDK and invisible
+    // while a hand-written .d.ts stood in for it.
     Notifications.setNotificationHandler({
-      handleNotification: (notification) => ({
-        shouldShowAlert: isLocallyRaised(notification),
-        shouldPlaySound: false,
-        shouldSetBadge: false,
-      }),
+      handleNotification: async (notification) => {
+        const ours = isLocallyRaised(notification);
+        return {
+          shouldShowBanner: ours,
+          shouldShowList: ours,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      },
     });
     if (Platform.OS === 'android') {
       void Notifications.setNotificationChannelAsync(CHANNEL_ID, {

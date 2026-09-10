@@ -213,8 +213,17 @@ describe('notifications — surfaces and the loop guard', () => {
     if (handler === undefined) throw new Error('setNotificationHandler was never called');
     const remote = { request: { content: { title: null, body: null, data: {} } } };
     const local = { request: { content: { title: 'x', body: 'y', data: { kind: 'servgrid-local' } } } };
-    expect(handler.handleNotification(remote).shouldShowAlert).toBe(false);
-    expect(handler.handleNotification(local).shouldShowAlert).toBe(true);
+    // `shouldShowBanner`/`shouldShowList`, not the deprecated
+    // `shouldShowAlert`, and the handler is async — both were asserted the
+    // old way against a hand-written .d.ts that did not match the SDK.
+    await expect(handler.handleNotification(remote)).resolves.toMatchObject({
+      shouldShowBanner: false,
+      shouldShowList: false,
+    });
+    await expect(handler.handleNotification(local)).resolves.toMatchObject({
+      shouldShowBanner: true,
+      shouldShowList: true,
+    });
   });
 
   it('a locally-raised notification does not re-wake the sync (loop guard)', async () => {
@@ -244,7 +253,14 @@ describe('notifications — surfaces and the loop guard', () => {
     expect(notif.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     const content = notif.scheduleNotificationAsync.mock.calls[0]?.[0]?.content;
     expect(content?.data).toEqual({ kind: 'servgrid-local' });
-    expect(content?.channelId).toBe('servgrid-sync');
+    // No `channelId` on the content: it belongs on the trigger, and an
+    // immediate notification has none. The channel is still created for
+    // the per-row notifications T2.6 schedules with one.
+    expect(content?.channelId).toBeUndefined();
+    expect(notif.setNotificationChannelAsync).toHaveBeenCalledWith(
+      'servgrid-sync',
+      expect.objectContaining({ name: 'Job updates' }),
+    );
   });
 
   it('the confirmation carries no job content — only the local marker', async () => {
