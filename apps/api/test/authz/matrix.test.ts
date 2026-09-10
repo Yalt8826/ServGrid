@@ -3,8 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
 import {
+  deviceDiagnosticSchema,
   employeeListResponseSchema,
   errorEnvelopeSchema,
+  pingBatchResultSchema,
   type ErrorCode,
   type ErrorEnvelope,
   type LoginResponse,
@@ -430,6 +432,68 @@ const ENDPOINTS: EndpointRow[] = [
     expect: COMPLETION_ACTORS,
     assertOk: (actor, res) => {
       if (actor === 'technician') expect(res.json<{ status: string }>().status).toBe('completed');
+    },
+  },
+  {
+    name: 'POST /v1/devices',
+    method: 'POST',
+    url: '/v1/devices',
+    // Self-service by construction (§8): employee_id comes from the token,
+    // never the body, so every authenticated role registers its own device
+    // — there is no `device` resource in the matrix to refuse a cell with,
+    // and the row cannot name anyone but the caller.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/devices',
+        headers: bearer(actor),
+        payload: {
+          installId: `matrix-${String(actor)}-${randomBytes(3).toString('hex')}`,
+          platform: 'android',
+          appVersion: '0.1.0',
+          osVersion: '14',
+          manufacturer: 'Xiaomi',
+          model: 'Redmi Note 12',
+          locationPermission: 'background',
+        },
+      }),
+    expect: { ...ALL_ROLES_OK, anon: UNAUTHENTICATED },
+    assertOk: (actor, res) => {
+      const device = deviceDiagnosticSchema.parse(res.json());
+      expect(device.installId.startsWith(`matrix-${String(actor)}`)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/location/pings',
+    method: 'POST',
+    url: '/v1/location/pings',
+    // The matrix's `location.send` cell (§5): the tracked field roles
+    // send, the owner is `all`, and a dispatcher's cell is `none` — he
+    // may know a device went quiet, never where anyone is. The body is
+    // parsed after requireAuth, so `anon` is 401, not 422. A per-ping
+    // rejection is still HTTP 200 (§8), so the accepted probes assert
+    // only that every ping got an outcome.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/location/pings',
+        headers: bearer(actor),
+        payload: {
+          pings: [
+            {
+              recordedAt: new Date().toISOString(),
+              latitude: 12.9716,
+              longitude: 77.5946,
+              accuracyM: 20,
+              source: 'scheduled',
+            },
+          ],
+        },
+      }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: OK, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const result = pingBatchResultSchema.parse(res.json());
+      expect(result.accepted + result.rejected.length).toBe(1);
     },
   },
   {
