@@ -432,7 +432,16 @@ describe('the shrink guard — the matrix covers every registered route', () => 
       const url = prefix + label;
       prefixes.push({ depth, prefix: url });
       for (const method of methods[1]!.split(', ')) {
-        if (method !== 'HEAD') routes.push({ method, url });
+        // HEAD is Fastify's automatic twin of every GET.
+        //
+        // OPTIONS is @fastify/cors' wildcard preflight handler, and it is
+        // deliberately outside the matrix: a preflight carries no
+        // credentials, reads nothing and returns no body — it answers
+        // "may I ask?", never "here is the answer". Authorising it per
+        // role would be authorising a question. What it *does* need is
+        // its own allowlist assertions, and those live in
+        // test/integration/cors.test.ts.
+        if (method !== 'HEAD' && method !== 'OPTIONS') routes.push({ method, url });
       }
     }
     return routes;
