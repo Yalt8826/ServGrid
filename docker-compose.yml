@@ -1,10 +1,10 @@
 # ServGrid local stack — the same shape as the one-VPS production deployment
 # (PLAN-BACKEND.md §13: Postgres 16, the API, MinIO, Caddy for TLS).
-# The API itself runs on the host locally (`pnpm -F api dev`, T0.6) and
-# joins this file as a service with the image work in T0.16. Until then
-# this file provides the data services the API and its integration tests
-# stand on — `pnpm compose:up` starts db and minio, and /healthz reports
-# on both.
+# By default this file provides the data services the host-run API
+# (`pnpm -F api dev`, T0.6) and its integration tests stand on —
+# `pnpm compose:up` starts db and minio, and /healthz reports on both.
+# `docker compose --profile full up -d` additionally runs the API from
+# the T0.16 image behind caddy — the same wiring the VPS compose uses.
 
 services:
   db:
@@ -46,11 +46,47 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  api:
+    # The T0.16 image, same one CI builds and the VPS runs. Profile-gated:
+    # the default local flow runs the API on the host against db+minio.
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    profiles: ['full']
+    environment:
+      # Compose-internal coordinates — the API reaches its dependencies
+      # by service name. Credentials come from the root .env, exactly as
+      # for the host-run dev API.
+      DATABASE_URL: postgres://servgrid:servgrid@db:5432/servgrid
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: servgrid-attachments
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-servgrid}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-servgrid-minio}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-not-a-secret-change-me-on-the-vps}
+      FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-{"project_id":"servgrid-local","client_email":"local@servgrid-local.iam.gserviceaccount.com","private_key":"placeholder"}}
+      WORK_WINDOW_START: ${WORK_WINDOW_START:-09:00}
+      WORK_WINDOW_END: ${WORK_WINDOW_END:-19:00}
+      PING_RETENTION_DAYS: ${PING_RETENTION_DAYS:-90}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # node:22-alpine has no curl/wget; fetch() is stdlib.
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
-    # TLS termination in production; locally it fronts nothing until the
-    # API service exists (T0.6). Comment out locally if the host ports
-    # clash — no local surface needs TLS.
+    # TLS termination in production; locally the host side is moved off
+    # 80/443 (commonly taken on dev machines) and fronts the api service
+    # when the `full` profile is up, else answers alone.
     ports:
       - '${SERVGRID_CADDY_HTTP_PORT:-8081}:80'
       # 9443, not 8443: 8443 is a very common default (Mattermost,

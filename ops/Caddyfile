@@ -1,0 +1,15 @@
+# Terminates TLS for the API on the VPS (PLAN-BACKEND.md §13).
+#
+# One site per environment copy: caddy is the only service publishing
+# 80/443, and each environment's stack runs its own caddy with its own
+# SERVGRID_DOMAIN (staging.<domain> / api.<domain>). Caddy obtains and
+# renews the certificate over ACME automatically — the "TLS" line of
+# the T0.16 secrets checklist is this file plus a DNS record pointing
+# SERVGRID_DOMAIN at the VPS.
+#
+# {$SERVGRID_DOMAIN} is caddy's own env substitution, fed by the
+# compose environment block in ops/compose.<env>.yml.
+
+{$SERVGRID_DOMAIN} {
+	reverse_proxy api:3000
+}

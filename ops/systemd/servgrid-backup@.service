@@ -1,0 +1,14 @@
+# Nightly logical backup — enabled per environment:
+#   systemctl enable --now servgrid-backup@staging.timer
+[Unit]
+Description=ServGrid nightly pg_dump backup (%i)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# %i is the environment: its env file lives at /srv/servgrid/<env>/.env
+ExecStart=/srv/servgrid/app/ops/backup/backup.sh
+# lib.sh reads the env file path from the drop-in below; the timer
+# template sets it once so the script never guesses paths.
+Environment=ENV_FILE=/srv/servgrid/%i/.env

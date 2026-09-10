@@ -1,0 +1,13 @@
+# Nightly at 01:30, after business hours (assumes the VPS clock is
+# Asia/Kolkata — the runbook sets it). Persistent: a VPS that was down
+# at 01:30 backs up at the next boot.
+[Unit]
+Description=ServGrid nightly backup schedule (%i)
+
+[Timer]
+OnCalendar=*-*-* 01:30:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

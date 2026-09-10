@@ -1,0 +1,33 @@
+# Staging override — the environment that proves deploys before
+# production sees them. Same VPS, separate database (POSTGRES_DB in
+# env file), separate bucket, separate domain.
+#
+#   docker compose --env-file /srv/servgrid/staging/.env \
+#     --project-directory ops -f ops/compose.yaml \
+#     -f ops/compose.staging.yml -p servgrid-staging <cmd>
+#
+# Staging data comes from seed/002–003 (+001 owner) and, once it
+# exists, fixtures/demo.sql. Production data is NEVER copied here —
+# location trails are personal data about identifiable employees under
+# the DPDP Act, and a staging database is not a place where consent
+# extends (PLAN-EXECUTION.md Part I §5).
+
+services:
+  api:
+    environment:
+      # Response validation runs everywhere except production
+      # (apps/api/src/config.ts) — staging is where a wrong payload
+      # shape is caught before a user sees it.
+      NODE_ENV: staging
+      # The bucket pin, as a committed literal on purpose. env file
+      # supplies S3_BUCKET; if someone pastes the production env file
+      # over the staging one, the API refuses to boot naming both
+      # buckets (apps/api/src/config.ts) instead of silently writing
+      # staging attachments into production. This is the third T0.16
+      # test — "a wrong S3_BUCKET should fail loudly" — and it cannot
+      # be edited away from the VPS because it ships in this file.
+      S3_BUCKET_EXPECTED: servgrid-attachments-staging
+
+  caddy:
+    environment:
+      SERVGRID_DOMAIN: ${SERVGRID_DOMAIN:?SERVGRID_DOMAIN is not set (env file)}

@@ -128,6 +128,40 @@ describe('config — malformed values are boot failures too', () => {
   });
 });
 
+describe('config — S3_BUCKET_EXPECTED pins the environment bucket (T0.16)', () => {
+  it('is optional — unset means no pin, which is how local dev boots', () => {
+    const config = loadConfig(validEnv());
+    expect(config.s3.bucketExpected).toBeUndefined();
+  });
+
+  it('boots when the bucket matches the pin', () => {
+    const env = validEnv({
+      S3_BUCKET: 'servgrid-attachments-staging',
+      S3_BUCKET_EXPECTED: 'servgrid-attachments-staging',
+    });
+    expect(loadConfig(env).s3).toMatchObject({
+      bucket: 'servgrid-attachments-staging',
+      bucketExpected: 'servgrid-attachments-staging',
+    });
+  });
+
+  it('refuses to boot when S3_BUCKET points at another environment\'s bucket', () => {
+    // The staging failure mode: someone copies the production .env over
+    // the staging one. The pin lives in the compose override, so the
+    // copy cannot carry it along.
+    const failure = bootFailure(
+      validEnv({
+        S3_BUCKET: 'servgrid-attachments',
+        S3_BUCKET_EXPECTED: 'servgrid-attachments-staging',
+      }),
+    );
+    expect(failure.variables).toEqual(['S3_BUCKET']);
+    expect(failure.message).toContain("'servgrid-attachments'");
+    expect(failure.message).toContain("'servgrid-attachments-staging'");
+    expect(failure.message).toMatch(/another environment's bucket|refusing to boot/);
+  });
+});
+
 describe('response validation switch (§3.4)', () => {
   it('is on in development, staging and test — off only in production', () => {
     expect(responseValidationEnabled('development')).toBe(true);

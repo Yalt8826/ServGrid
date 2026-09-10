@@ -28,6 +28,13 @@ tests, integration tests against a testcontainers Postgres, and
 migration `up → down → up` on a clean database. Merges to `main` build
 and push the API image and deploy staging. **EAS builds stay manual.**
 
+## Ops
+
+Staging and production run on one VPS from `ops/` — the compose stack
+(Postgres 16, API, MinIO, Caddy), backup and restore-verification
+scripts, and seed data in `seed/`. Start at `ops/README.md`; the
+T0.16 proof sequence is `docs/implementation/T0.16-RUNBOOK.md`.
+
 ## The three custom lint rules
 
 1. **No literal `#F2C200` outside `theme.ts`** — accent erosion.

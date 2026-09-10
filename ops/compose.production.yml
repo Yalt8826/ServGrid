@@ -1,0 +1,23 @@
+# Production override — the environment the business runs on.
+#
+#   docker compose --env-file /srv/servgrid/production/.env \
+#     --project-directory ops -f ops/compose.yaml \
+#     -f ops/compose.production.yml -p servgrid-production <cmd>
+#
+# Differences from staging: NODE_ENV=production (response validation
+# off — the schemas are proven by then), the production bucket pin, and
+# the production domain. The database, MinIO volume and buckets are
+# already separate by construction: this stack gets its own -p project
+# name, its own env file and its own volumes.
+
+services:
+  api:
+    environment:
+      NODE_ENV: production
+      # Same pin as staging, production value: the API refuses to boot
+      # if env file names any other bucket. See ops/compose.staging.yml.
+      S3_BUCKET_EXPECTED: servgrid-attachments
+
+  caddy:
+    environment:
+      SERVGRID_DOMAIN: ${SERVGRID_DOMAIN:?SERVGRID_DOMAIN is not set (env file)}

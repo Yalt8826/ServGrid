@@ -1,0 +1,23 @@
+# Root .dockerignore — the API image (apps/api/Dockerfile) builds from
+# the repo root because the pnpm workspace and packages/shared live
+# here. Everything the image does not install is kept out of the
+# context, most importantly the mobile app (only its manifest crosses,
+# so pnpm can resolve the workspace) and secrets.
+
+.git
+.env
+.env.*
+
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/*.tsbuildinfo
+**/.expo
+
+# The image is api + shared only; mobile's manifest is re-added below.
+apps/mobile/**
+!apps/mobile/package.json
+
+docs
+secrets

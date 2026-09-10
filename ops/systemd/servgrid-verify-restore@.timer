@@ -1,0 +1,10 @@
+[Unit]
+Description=ServGrid restore rehearsal schedule (%i)
+
+[Timer]
+OnCalendar=Sat *-*-01..07 03:00:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

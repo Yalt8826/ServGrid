@@ -1,0 +1,11 @@
+# Ship archived WAL segments off-site, every five minutes:
+#   systemctl enable --now servgrid-wal-sync@staging.timer
+[Unit]
+Description=ServGrid WAL off-site sync (%i)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+Environment=ENV_FILE=/srv/servgrid/%i/.env
+ExecStart=/srv/servgrid/app/ops/backup/wal-sync.sh

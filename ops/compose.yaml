@@ -1,0 +1,137 @@
+# ServGrid VPS stack — base compose (PLAN-BACKEND.md §13).
+#
+# Staging and production are two copies of this one shape on the same
+# VPS: separate Postgres, separate MinIO volumes, separate buckets,
+# separate domains. Nothing here names an environment — the overrides
+# do that:
+#
+#   docker compose \
+#     --env-file /srv/servgrid/<env>/.env \
+#     --project-directory ops \
+#     -f ops/compose.yaml \
+#     -f ops/compose.staging.yml \
+#     -p servgrid-staging <cmd>
+#
+# --env-file names the deployment env file (ops/env.<env>.example is
+# its template); --project-directory ops is where relative paths (the
+# Caddyfile) resolve. Secrets live only in that env file on the VPS —
+# it sits OUTSIDE the repo checkout so a deploy's `git reset --hard`
+# can never touch it. This file names variables and carries no values
+# (the `:?` interpolations fail `compose config` loudly when one is
+# missing — the config-at-boot rule applied to deployment).
+#
+# The API image is built by CI and pushed to GHCR; nothing on the VPS
+# builds images.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is not set (env file)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set (env file)}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is not set (env file)}
+    # WAL archiving (§13): segments land in the bind-mounted directory
+    # and ops/backup/wal-sync.sh ships them off-site every five minutes.
+    # archive_timeout segments a quiet database every 5 min so recovery
+    # loss is bounded even with no write traffic; archive_command must
+    # never fail silently — if /wal-archive is unwritable, pg_wal grows
+    # and `docker compose logs db` says so. One-time setup after first
+    # boot (bind mounts start root-owned):
+    #   docker compose ... exec db chown postgres:postgres /wal-archive
+    command:
+      - '-c'
+      - 'archive_mode=on'
+      - '-c'
+      - 'archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f'
+      - '-c'
+      - 'archive_timeout=300s'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ${SERVGRID_WAL_DIR:?SERVGRID_WAL_DIR is not set (env file)}:/wal-archive
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $POSTGRES_USER -d $POSTGRES_DB']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    image: ${API_IMAGE:?API_IMAGE is not set (env file) — CI pushes it to ghcr.io}
+    # Same file --env-file names, by its own absolute path
+    # (SERVGRID_ENV_FILE inside it): the API container reads the same
+    # deployment env the compose interpolation does.
+    env_file: ${SERVGRID_ENV_FILE:?SERVGRID_ENV_FILE is not set — the env file names its own absolute path}
+    environment:
+      # Computed coordinates win over env_file values: the API always
+      # reaches db/minio by service name, never a localhost URL copied
+      # from a local .env.
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      S3_ENDPOINT: http://minio:9000
+      # S3_BUCKET itself comes from the env file and is pinned by the
+      # per-environment override (S3_BUCKET_EXPECTED) — see
+      # ops/compose.staging.yml for why.
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # node:22-alpine has no curl/wget; fetch() is stdlib. Same check
+      # the external uptime monitor makes — a container that fails it
+      # never sees traffic routed by caddy.
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is not set (env file)}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is not set (env file)}
+    # Published on loopback only — mc administration from the VPS
+    # itself. Attachments travel API → minio on the compose network and
+    # are never exposed publicly; TLS for them is a non-goal (§9
+    # presigning streams through the API). The host side is overridable
+    # so this stack can share a machine with another compose project.
+    ports:
+      - '127.0.0.1:${SERVGRID_MINIO_PORT:-9000}:9000'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    # Standard ports here: the VPS has nothing else on 80/443. Caddy
+    # obtains and renews the TLS certificate automatically (ACME) for
+    # SERVGRID_DOMAIN, which the per-environment override supplies.
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      SERVGRID_DOMAIN: ${SERVGRID_DOMAIN:?SERVGRID_DOMAIN is not set (env file)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  # Named volumes for state; the one bind mount (WAL) is absolute from
+  # the env file and chowned once per environment (see db above).
+  db-data:
+  minio-data:
+  caddy-data:
+  caddy-config:

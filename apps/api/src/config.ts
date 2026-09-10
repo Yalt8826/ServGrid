@@ -53,6 +53,12 @@ const envSchema = z
 
     S3_ENDPOINT: required('S3_ENDPOINT').url('S3_ENDPOINT must be an http(s) URL'),
     S3_BUCKET: required('S3_BUCKET').min(3, 'S3_BUCKET must be at least 3 characters'),
+    // Environment pin (T0.16): the compose override on the VPS hardcodes
+    // the bucket this deployment may write to. A hand-edited .env that
+    // points staging at the production bucket therefore fails at boot —
+    // loudly — instead of silently writing one environment's attachments
+    // into the other's bucket.
+    S3_BUCKET_EXPECTED: z.string().min(3, 'S3_BUCKET_EXPECTED must be at least 3 characters').optional(),
     S3_ACCESS_KEY_ID: required('S3_ACCESS_KEY_ID'),
     S3_SECRET_ACCESS_KEY: required('S3_SECRET_ACCESS_KEY'),
     S3_REGION: z.string().min(1).default('us-east-1'),
@@ -94,6 +100,16 @@ const envSchema = z
         message: 'WORK_WINDOW_END must be later than WORK_WINDOW_START',
       });
     }
+    if (env.S3_BUCKET_EXPECTED !== undefined && env.S3_BUCKET !== env.S3_BUCKET_EXPECTED) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['S3_BUCKET'],
+        message:
+          `S3_BUCKET is '${env.S3_BUCKET}' but this environment may only use ` +
+          `'${env.S3_BUCKET_EXPECTED}' — refusing to boot rather than write ` +
+          `attachments into another environment's bucket`,
+      });
+    }
   });
 
 export interface Config {
@@ -105,6 +121,8 @@ export interface Config {
   s3: {
     endpoint: string;
     bucket: string;
+    /** Set per environment on the VPS — the only bucket this deployment may use. */
+    bucketExpected?: string;
     accessKeyId: string;
     secretAccessKey: string;
     region: string;
@@ -148,6 +166,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     s3: {
       endpoint: e.S3_ENDPOINT,
       bucket: e.S3_BUCKET,
+      bucketExpected: e.S3_BUCKET_EXPECTED,
       accessKeyId: e.S3_ACCESS_KEY_ID,
       secretAccessKey: e.S3_SECRET_ACCESS_KEY,
       region: e.S3_REGION,

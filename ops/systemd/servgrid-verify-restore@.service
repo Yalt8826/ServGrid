@@ -1,0 +1,16 @@
+# Monthly restore rehearsal (T0.16: "an untested backup is a belief").
+# Takes a fresh dump and restores it into a scratch database, queries
+# the result. First Saturday, 03:00:
+#   systemctl enable --now servgrid-verify-restore@staging.timer
+[Unit]
+Description=ServGrid monthly verified restore (%i)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+Environment=ENV_FILE=/srv/servgrid/%i/.env
+# backup.sh first: verify a dump from tonight's pipeline, not a stale
+# file. verify-restore.sh picks the newest dump when given no argument.
+ExecStart=/srv/servgrid/app/ops/backup/backup.sh
+ExecStart=/srv/servgrid/app/ops/backup/verify-restore.sh
