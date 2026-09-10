@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import sharp from 'sharp';
 import type { FastifyInstance } from 'fastify';
 import {
+  CashHandoverSchema,
   deviceDiagnosticSchema,
   employeeListResponseSchema,
   errorEnvelopeSchema,
@@ -117,6 +118,27 @@ function uploadFields(jobId: string, bytes: Buffer): Record<string, string> {
     capturedAt: '2026-09-11T09:00:00Z',
     fileChecksum: createHash('sha256').update(bytes).digest('hex'),
   };
+}
+
+/** The matrix IST business date — the same `business_date()` the §10 bounds use. */
+let todayIst = '';
+
+/**
+ * A submitted declaration for the matrix actor, idempotent per
+ * (employee, day) — the constraint itself makes repeat probes free.
+ */
+async function seedSubmittedHandover(employeeId: string): Promise<{ id: string; version: number }> {
+  await db.query(
+    `INSERT INTO cash_reconciliations (employee_id, business_date, declared_amount, declared_at)
+     VALUES ($1, $2::date, '2500.00', now())
+     ON CONFLICT (employee_id, business_date) DO NOTHING`,
+    [employeeId, todayIst],
+  );
+  const r = await db.query<{ id: string; version: number }>(
+    `SELECT id, version FROM cash_reconciliations WHERE employee_id = $1 AND business_date = $2::date`,
+    [employeeId, todayIst],
+  );
+  return r.rows[0]!;
 }
 
 async function seedJobAssignedToTechnician(): Promise<string> {
@@ -597,6 +619,70 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'POST /v1/cash/handovers',
+    method: 'POST',
+    url: '/v1/cash/handovers',
+    // §10 (T1.11): technician and sales rep declare their own; the owner's
+    // cash.declare create cell is `none` (he confirms and reopens, he never
+    // declares) and the dispatcher has no cash cell at all.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/cash/handovers',
+        headers: bearer(actor),
+        payload: { businessDate: todayIst, declaredAmount: '1500' },
+      }),
+    expect: { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: OK, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      expect(CashHandoverSchema.parse(res.json()).status).toBe('submitted');
+    },
+  },
+  {
+    name: 'GET /v1/cash/handovers/me',
+    method: 'GET',
+    url: '/v1/cash/handovers/me',
+    // Own history keyed off the token. The dispatcher's cash read cell is
+    // `none`; the owner reads all — an empty history, since he cannot
+    // declare — and so passes the same gate.
+    probe: async (actor) => {
+      if (actor === 'technician' || actor === 'sales_rep') await seedSubmittedHandover(selfIds[actor]!);
+      return app.inject({ method: 'GET', url: '/v1/cash/handovers/me', headers: bearer(actor) });
+    },
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: OK, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json())).toBe(true);
+    },
+  },
+  {
+    name: 'PATCH /v1/cash/handovers/:id',
+    method: 'PATCH',
+    url: '/v1/cash/handovers/:id',
+    // §10 (T1.11): the declaring employee only, while his row is
+    // submitted. Refused probes carry If-Match anyway, proving the 403
+    // comes from the gate before the guard's 422 could.
+    probe: async (actor) => {
+      if (actor === 'technician' || actor === 'sales_rep') {
+        const row = await seedSubmittedHandover(selfIds[actor]!);
+        return app.inject({
+          method: 'PATCH',
+          url: `/v1/cash/handovers/${row.id}`,
+          headers: { ...bearer(actor), 'if-match': String(row.version) },
+          payload: { declaredAmount: '2600' },
+        });
+      }
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/cash/handovers/${randomUUID()}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { declaredAmount: '2600' },
+      });
+    },
+    expect: { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: OK, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      expect(CashHandoverSchema.parse(res.json()).version).toBe(2);
+    },
+  },
+  {
     name: 'GET /healthz',
     method: 'GET',
     url: '/healthz',
@@ -664,6 +750,7 @@ beforeAll(async () => {
   });
   expect(uploaded.statusCode, uploaded.body).toBe(200);
   matrixAttachmentId = uploaded.json<{ id: string }>().id;
+  todayIst = (await db.query<{ d: string }>('SELECT business_date(now())::text AS d')).rows[0]!.d;
 });
 
 afterAll(async () => {

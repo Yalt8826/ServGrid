@@ -14,6 +14,7 @@ import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { attachmentsRoutes } from './modules/attachments/routes.js';
+import { cashRoutes } from './modules/cash/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
 import { devicesRoutes } from './modules/devices/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
@@ -125,6 +126,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(jobsRoutes);
   app.register(devicesRoutes);
   app.register(locationRoutes, { workWindow: config.workWindow });
+  app.register(cashRoutes);
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });

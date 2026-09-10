@@ -222,6 +222,61 @@ export const DispatcherCustomerCreateSchema = CustomerCreateSchema.omit({ compan
 export type CustomerCreate = z.infer<typeof CustomerCreateSchema>;
 export type DispatcherCustomerCreate = z.infer<typeof DispatcherCustomerCreateSchema>;
 
+// ── cash handover (§10) ─────────────────────────────────────────────────────
+
+/** The DB enum `reconciliation_status` (migration 002), mirrored so the client can render the status pill. */
+export const RECONCILIATION_STATUSES = ['submitted', 'confirmed', 'disputed'] as const;
+export const reconciliationStatusSchema = z.enum(RECONCILIATION_STATUSES);
+export type ReconciliationStatus = (typeof RECONCILIATION_STATUSES)[number];
+
+/** An IST business date (`business_date()`, migration 001) — `YYYY-MM-DD`. */
+export const businessDateSchema = z.string().date();
+
+export const cashDeclareRequestSchema = z
+  .object({
+    businessDate: businessDateSchema,
+    declaredAmount: moneyString,
+    note: z.string().min(1).max(1000).optional(),
+  })
+  .strict();
+
+export const cashAmendRequestSchema = z
+  .object({
+    declaredAmount: moneyString.optional(),
+    note: z.string().min(1).max(1000).optional(),
+  })
+  .strict()
+  .refine((v) => v.declaredAmount !== undefined || v.note !== undefined, {
+    message: 'Nothing to change.',
+  });
+
+/**
+ * One handover as the declaring employee sees it (§10, UI plan-2 §T6) —
+ * deliberately narrow, and the narrowness is the feature: no
+ * `expected_cash`, because he declares what he is handing over and the
+ * system's expectation is the check (showing him the answer first turns a
+ * reconciliation into a form-fill); no owner-side confirmation columns,
+ * because the queue is the owner's (Phase 4). Strict, so a leaked
+ * `expected_cash` fails response validation rather than shipping.
+ */
+export const CashHandoverSchema = z
+  .object({
+    id: uuid,
+    businessDate: businessDateSchema,
+    declaredAmount: moneyString,
+    note: z.string().nullable(),
+    status: reconciliationStatusSchema,
+    declaredAt: isoDateTime,
+    version: z.number().int(),
+  })
+  .strict();
+
+export const cashHandoverListResponseSchema = z.array(CashHandoverSchema);
+
+export type CashHandover = z.infer<typeof CashHandoverSchema>;
+export type CashDeclareRequest = z.infer<typeof cashDeclareRequestSchema>;
+export type CashAmendRequest = z.infer<typeof cashAmendRequestSchema>;
+
 // ── devices (§8) ────────────────────────────────────────────────────────────
 
 export const deviceUpsertSchema = z
