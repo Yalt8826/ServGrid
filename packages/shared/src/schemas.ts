@@ -50,6 +50,50 @@ export const jobStatusChangeSchema = z
   })
   .strict();
 
+/**
+ * One `stackChanges[]` line (§6.2 step 5): a unit that now STANDS at the
+ * site. The server upserts it into `customer_products` inside the
+ * completion transaction, stamped `source_job_id` — the audit trail from
+ * stack row back to the job that caused it (PLAN-DATA-MODEL.md §3.3).
+ * Third-party kit has no SKU: `freeTextName` carries it when `productId`
+ * is absent (the same shape as the customer_products CHECK).
+ */
+export const jobStackChangeSchema = z
+  .object({
+    productId: uuid.optional(),
+    freeTextName: z.string().min(1).max(200).optional(),
+    serialNumber: z.string().min(1).max(200),
+    quantity: z.number().int().min(1).max(9999).optional(),
+    installedOn: z.string().date().optional(),
+    warrantyExpiresOn: z.string().date().optional(),
+    notes: z.string().max(1000).optional(),
+  })
+  .strict()
+  .refine((v) => v.productId !== undefined || v.freeTextName !== undefined, {
+    message: 'Name the equipment — pick a product or type what it is.',
+  });
+
+/**
+ * One `parts[]` line (§6.2 step 6): what was fitted or consumed on the
+ * job. A record, never a bill — `unit_cost` is optional because a
+ * technician in a stairwell does not know it, and nothing here touches
+ * `cost` (PLAN-DATA-MODEL.md §3.4).
+ */
+export const jobCompletionPartSchema = z
+  .object({
+    productId: uuid.optional(),
+    freeTextName: z.string().min(1).max(200).optional(),
+    /** numeric(10,2), CHECK (quantity > 0) — the DB is the backstop. */
+    quantity: z.number().min(0.01).max(99_999_999.99),
+    unitCost: moneyString.optional(),
+    serialNumber: z.string().min(1).max(200).optional(),
+    fromCustomerStock: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => v.productId !== undefined || v.freeTextName !== undefined, {
+    message: 'Name the part — pick a product or type what it is.',
+  });
+
 export const jobCompleteSchema = z
   .object({
     completedAt: isoDateTime,
@@ -62,12 +106,15 @@ export const jobCompleteSchema = z
     collectionMode: z.enum(['cash', 'upi', 'card', 'bank_transfer', 'none']).optional(),
     paymentReference: z.string().optional(),
     customerSigned: z.boolean().optional(),
-    stackChanges: z.array(z.record(z.unknown())).max(50).optional(),
-    parts: z.array(z.record(z.unknown())).max(50).optional(),
+    stackChanges: z.array(jobStackChangeSchema).max(50).optional(),
+    parts: z.array(jobCompletionPartSchema).max(50).optional(),
   })
   .strict()
   .refine(
-    (v) => v.discountAmount === undefined || (v.discountReason !== undefined && v.discountReason.length > 0),
+    (v) =>
+      v.discountAmount === undefined ||
+      /^0(\.0{1,2})?$/.test(v.discountAmount) || // a zero discount is no discount — the DB asks for no reason either (§3.4)
+      (v.discountReason !== undefined && v.discountReason.length > 0),
     { message: 'A discount requires a reason.' },
   );
 
@@ -150,6 +197,8 @@ export const JobCardOwnerSchema = JobCardDispatcherSchema.extend({
 export type JobCardTechnician = z.infer<typeof JobCardTechnicianSchema>;
 export type JobCardDispatcher = z.infer<typeof JobCardDispatcherSchema>;
 export type JobCardOwner = z.infer<typeof JobCardOwnerSchema>;
+export type JobStackChange = z.infer<typeof jobStackChangeSchema>;
+export type JobCompletionPart = z.infer<typeof jobCompletionPartSchema>;
 
 // ── customers (§5 rule 3, §6.4) ─────────────────────────────────────────────
 

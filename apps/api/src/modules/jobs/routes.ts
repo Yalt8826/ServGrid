@@ -4,25 +4,32 @@ import {
   JobCardDispatcherSchema,
   JobCardOwnerSchema,
   JobCardTechnicianSchema,
+  jobCompleteSchema,
   jobStatusChangeSchema,
   jobStatusSchema,
   uuid,
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
-import { createJobsService } from './service.js';
+import { COMPLETION_ACTORS_MESSAGE, createJobsService } from './service.js';
 
 /**
  * Jobs routes (PLAN-BACKEND.md §6.3): the reads and the status move of
- * T1.5 — `GET /v1/jobs`, `GET /v1/jobs/:id`, `POST /v1/jobs/:id/status`.
- * Creation, assignment, completion, cancellation and the timeline are
- * later tasks on the same module.
+ * T1.5 — `GET /v1/jobs`, `GET /v1/jobs/:id`, `POST /v1/jobs/:id/status` —
+ * plus T1.6's `POST /v1/jobs/:id/complete`. Creation, assignment,
+ * cancellation and the timeline are later tasks on the same module.
  *
  * Response shape **by role** is three separate schemas (`JobCardTechnician`
  * / `JobCardDispatcher` / `JobCardOwner`, §6.3) — attached per request via
  * `responseSchemaByRole`, so the errors plugin asserts the actor's own
  * shape and a leaked money field is a failed response, not a schema
  * someone forgot to narrow.
+ *
+ * The completion route is gated on the matrix cell that carries the
+ * money (`job.money` × `create`): technician `own` (write-once at
+ * completion, PLAN.md §5), owner `all`, and for a dispatcher `none` —
+ * 403 before any payload is read, the revenue guarantee holding at the
+ * door rather than in the handler.
  */
 
 /** The list envelope — the same shape for every role, one card schema each. */
@@ -131,6 +138,34 @@ export const jobsRoutes: FastifyPluginAsync = async (app) => {
       const auth = claimsOf(request);
       const body = jobStatusChangeSchema.parse(request.body);
       return service.changeStatus({ id: auth.sub, role: auth.role }, jobIdParam(request), body, request.context.source);
+    },
+  );
+
+  // §6.2: one transaction, eight steps; idempotent via the Idempotency-Key
+  // header the plugin claims before this handler runs. The response is
+  // the completed card in the actor's own shape — the owner's carries the
+  // money, the technician's never does.
+  app.post(
+    '/v1/jobs/:id/complete',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('job.money', 'create', COMPLETION_ACTORS_MESSAGE),
+      ],
+      config: {
+        // §6.3: technician (own), owner. A dispatcher's `job.money` scope
+        // is `none`, so 403 answers before a payload exists and there is
+        // deliberately no dispatcher entry to validate.
+        responseSchemaByRole: {
+          owner: JobCardOwnerSchema,
+          technician: JobCardTechnicianSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = jobCompleteSchema.parse(request.body);
+      return service.completeJob({ id: auth.sub, role: auth.role }, jobIdParam(request), body, request.context.source);
     },
   );
 };
