@@ -68,6 +68,13 @@ services:
       WORK_WINDOW_END: ${WORK_WINDOW_END:-19:00}
       PING_RETENTION_DAYS: ${PING_RETENTION_DAYS:-90}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Browser origins allowed to call the API. The code's development
+      # default covers localhost only, which is right for a browser on
+      # this machine and wrong for every other device — a phone on the
+      # tailnet loads the app from http://<host>:8082 and that origin has
+      # to be named or the preflight is refused. Set WEB_ORIGINS in .env
+      # to add it (see .env.example).
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
     depends_on:
       db:
         condition: service_healthy
