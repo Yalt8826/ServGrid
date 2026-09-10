@@ -74,7 +74,16 @@ Refs: PLAN-FRONTEND.md §5, PLAN-BACKEND.md §7"
 
 **Why the empty commit.** It stamps a known-good SHA at the exact moment the task started, so `git reset --hard <start-sha>` is a mechanical recovery rather than a judgement call about which files to unpick. It costs one line and turns "If it fails" into a command. Grep for them with `git log --grep='^chore(start)'`.
 
-**The trap: `--allow-empty` does not mean "make an empty commit".** It *permits* one. If anything is staged, the marker silently swallows the whole task — you get one commit whose subject says "start" and whose diff is the entire task, and no rollback point at all. This has happened four times in Phase 0 (T0.12, T0.13, T0.15, T0.16), so it is not a hypothetical.
+**The trap: `--allow-empty` does not mean "make an empty commit".** It *permits* one. If anything is staged, the marker silently swallows the whole task — you get one commit whose subject says "start" and whose diff is the entire task, and no rollback point at all.
+
+**It happened seven times in Phase 0**, which makes it the most repeated mistake in the project so far. Three were caught while still local and split (T0.12, T0.13, T0.16). Four were already pushed by the time they were found, and rewriting published history costs more than it buys — so they stay, and their pre-task SHA is the marker's **parent**:
+
+| Task | Marker | Roll back to |
+|---|---|---|
+| T0.2 database and migration runner | `068990e` | `fe035b0` |
+| T0.5 `packages/shared` | `cfb6841` | `796995e` |
+| T0.11 app shell | `eb0724a` | `21f6a12` |
+| T0.15 distribution and push | `17da723` | `e28719b` |
 
 Make the marker **before** you stage anything, and prove it landed empty:
 
