@@ -9,6 +9,7 @@ import { probeStorage } from './lib/storage.js';
 import cors from '@fastify/cors';
 import { authPlugin } from './plugins/auth.js';
 import { errorsPlugin } from './plugins/errors.js';
+import { idempotencyPlugin } from './plugins/idempotency.js';
 import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { authRoutes } from './modules/auth/routes.js';
@@ -112,6 +113,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(errorsPlugin, { nodeEnv: config.nodeEnv });
   app.register(authPlugin, { jwtSecret: config.jwtSecret });
   app.register(rbacPlugin);
+  app.register(idempotencyPlugin);
   app.register(authRoutes, { jwtSecret: config.jwtSecret });
   app.register(employeesRoutes);
   app.register(consentRoutes);
