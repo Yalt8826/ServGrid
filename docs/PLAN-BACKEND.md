@@ -110,6 +110,8 @@ Every `POST`/`PATCH`/`DELETE` from a mobile client sends `Idempotency-Key: <uuid
 
 The key row and the business rows commit in the same transaction. If they did not, a crash between them would either lose the guard or record a response for work that rolled back.
 
+**[impl] Services join that transaction ambiently, not by threading a client.** The plugin runs each mutation handler inside an `AsyncLocalStorage` context holding the open transaction's client (`db/ambient-tx.ts`); `withTransaction` and `query` join it whenever the caller passes none. That makes the join structural — a service cannot forget to thread the client through and write outside the transaction whose `COMMIT` also stores the response. The store is entered by **wrapping the handler**, not by `enterWith` in a `preHandler`: Fastify resumes its lifecycle in the async context captured before the hooks ran, so an `enterWith` there is invisible to the handler that follows.
+
 `request_hash` is sha256 of the body canonicalised with sorted keys — the client and server must agree on canonicalisation, so it lives in `packages/shared`.
 
 ### 3.3 Request context and audit

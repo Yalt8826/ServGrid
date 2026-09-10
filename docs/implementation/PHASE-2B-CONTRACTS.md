@@ -73,12 +73,24 @@ CREATE UNIQUE INDEX service_contracts_one_active_per_site
 
 **`contract_visits`** — `contract_id`, `seq_no`, `due_date`, `status`, `skipped_reason`. `UNIQUE (contract_id, seq_no)`. **No `job_card_id` column** — the link lives on `job_cards.contract_visit_id`, and the reversal is recorded in §3.4 because a visit may have several job cards over its life, one per attempt.
 
-**Add the FK and the partial unique index that Phase 1 deferred:**
+**Add the FK that Phase 1 deferred — the index is already there:**
 
 ```sql
 ALTER TABLE job_cards ADD CONSTRAINT job_cards_contract_visit_fk
   FOREIGN KEY (contract_visit_id) REFERENCES contract_visits(id);
+```
 
+`job_cards_one_live_per_visit` ships in **migration 007**, not here. An
+earlier draft of this section created it, which would now fail with
+*relation already exists*. T1.1 was right to put it in 007: the column
+exists from 007, so the guarantee can hold from 007, and a partial unique
+index on a column with no rows costs nothing in the meantime. Only the FK
+has to wait, because `contract_visits` does not exist until this
+migration.
+
+For reference, the index as 007 creates it:
+
+```sql
 CREATE UNIQUE INDEX job_cards_one_live_per_visit
   ON job_cards (contract_visit_id)
   WHERE contract_visit_id IS NOT NULL AND status <> 'cancelled';
