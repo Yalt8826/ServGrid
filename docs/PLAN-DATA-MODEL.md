@@ -24,6 +24,7 @@ Migrations are numbered and forward-only. This ordering respects FK dependencies
 | 003 | `identity` | `employees`, `refresh_tokens`, `devices`, `consents` | 0 |
 | 004 | `sync_plumbing` | `idempotency_keys`, `sequences`, `next_in_sequence()` | 0 |
 | 005 | `reference_data` | `companies`, `customers`, `products`, `services` | 0 |
+| 005z | `audit_log` | The generic security trail (§3.1) | 0 |
 | 006 | `customer_products` | Product stack at each site | 1 |
 | 007 | `jobs` | `job_cards`, `job_completions`, `job_completion_parts`, `job_cancellations`, `job_events` | 1 |
 | 008 | `attachments` | Polymorphic attachment table | 1 |
@@ -119,6 +120,12 @@ Those four boolean/enum diagnostics are not decoration. `PLAN.md` §11 names OEM
 **`consents`** — `employee_id`, `kind` (`location_tracking`), `version` (a date string), `accepted_at`, `device_id`, `ip_address`. `UNIQUE (employee_id, kind, version)`.
 
 Versioned so a reworded consent screen requires re-acceptance. This is the DPDP Act evidence trail from `PLAN.md` §7.
+
+**`audit_log`** — append-only. `bigint` identity PK, `at`, `action` (a dotted verb, e.g. `password.reset.break_glass`), `employee_id → employees` (nullable, for actions whose subject is not an employee), `actor` (who did it), `details jsonb`. Index `(employee_id, at DESC)` — *what happened to this account, and when* is the only query it has.
+
+This is the **generic** trail; `job_events` (migration 007) is the *job* trail and neither substitutes for the other. Nothing updates a row, so it carries no `version`, no `touch_updated_at` trigger and no soft delete — the same append-only rule as `consents`. `PLAN-BACKEND.md` §2 anticipates a `plugins/audit.ts` writing here; today the break-glass password reset (§4) is the only writer, recording the token-revocation count in `details`.
+
+**It ships as migration `005z`, and the letter is deliberate.** Numbers 006–010 are pinned to Phase 1 tables by this document and read off it by later tasks, so a Phase 0 append cannot take 006 without moving everything readers expect. `005z` and not `005a`: node-pg-migrate orders filenames with a punctuation-ignoring compare, under which `005a` sorts *before* `005_reference_data` and would refuse to run against a database that had already applied it.
 
 ### 3.2 Reference data
 

@@ -18,13 +18,42 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed/003_products.sql   # dev + stagi
 
 | File | Contents | Environments |
 |---|---|---|
-| `001_owner.sql` | One owner account, `must_change_password` | all — first boot |
+| `001_owner.sql` | An owner account, `must_change_password`. **Run twice in production** — see below | all — first boot |
 | `002_services.sql` | `INSTALL`, `AMC`, `BATT-SWAP`, `SITE-SURVEY`, `REPAIR` | all |
 | `003_products.sql` | ~20 representative UPS/battery SKUs | dev, staging — **not production** (real price list enters production through the API) |
 
 Every file is idempotent (`ON CONFLICT … DO NOTHING`) and prints the
 rows it ended with — a seed is not done until someone has looked at
 what it produced.
+
+## Production needs **two** owner accounts
+
+`001_owner.sql` takes the username as a variable, so run it a second
+time with a different one. This is a Phase 0 **exit criterion**
+(`docs/implementation/PHASE-0-FOUNDATION.md` T0.8), not a nicety:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -v owner_username=owner2 \
+  -v owner_password_hash='<a second PHC hash>' \
+  -v owner_full_name='<the second person>' \
+  -f seed/001_owner.sql
+```
+
+**Why.** Accounts are owner-created, there is no email, no reset flow
+and one owner. If he forgets his password, nobody can reset it. The
+second account is the real answer — an administrative control that
+costs nothing — and the break-glass CLI
+(`pnpm -F api admin:reset-password`) is the answer when *that* is lost
+too. Both must be **exercised**, not merely created: an untested
+recovery path is the same class of belief as an untested backup, and
+this phase already refuses that one.
+
+**It is handed to a person.** The second credential goes to one other
+trusted individual, and the handover is the step that completes it —
+a row in `employees` that nobody holds the password to recovers
+nothing. Tick the exit box when the handover has actually happened,
+and record who holds it (`docs/implementation/T0.16-RUNBOOK.md`).
 
 The owner hash is generated from the same parameters as the API's
 `verifyPassword` (both read `apps/api/src/lib/password.ts`):

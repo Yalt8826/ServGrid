@@ -74,6 +74,26 @@ Refs: PLAN-FRONTEND.md §5, PLAN-BACKEND.md §7"
 
 **Why the empty commit.** It stamps a known-good SHA at the exact moment the task started, so `git reset --hard <start-sha>` is a mechanical recovery rather than a judgement call about which files to unpick. It costs one line and turns "If it fails" into a command. Grep for them with `git log --grep='^chore(start)'`.
 
+**The trap: `--allow-empty` does not mean "make an empty commit".** It *permits* one. If anything is staged, the marker silently swallows the whole task — you get one commit whose subject says "start" and whose diff is the entire task, and no rollback point at all. This has happened four times in Phase 0 (T0.12, T0.13, T0.15, T0.16), so it is not a hypothetical.
+
+Make the marker **before** you stage anything, and prove it landed empty:
+
+```bash
+git status --porcelain          # must be empty
+git commit --allow-empty -m "chore(start): T1.14 outbox drain manager"
+git show --stat HEAD | grep -c '|'   # must print 0
+```
+
+If you find one that already swallowed its work, split it — reset soft, clear the index, re-make the marker, then commit the work:
+
+```bash
+git reset --soft HEAD~1 && git reset
+git commit --allow-empty -m "chore(start): …"
+git add -A && git commit -m "feat(scope): …"
+```
+
+**Never do that to a commit that is already pushed.** Check first (`git branch -r --contains <sha>`); if it is published, leave it and note it in the task's runbook rather than rewriting shared history.
+
 **Commit message rules.**
 
 - Conventional prefix: `feat` `fix` `test` `chore` `docs` `refactor` `perf`.
