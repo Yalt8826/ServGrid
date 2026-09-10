@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError, type ZodIssue, type ZodTypeAny } from 'zod';
-import { ERROR_HTTP_STATUS, type ErrorCode, type ErrorEnvelope } from '@servgrid/shared';
+import { ERROR_HTTP_STATUS, type ErrorCode, type ErrorEnvelope, type Role } from '@servgrid/shared';
 import { responseValidationEnabled, type NodeEnv } from '../config.js';
 
 /**
@@ -14,11 +14,19 @@ import { responseValidationEnabled, type NodeEnv } from '../config.js';
  * is asserted against it before serialisation. Use `.strict()` schemas —
  * the check is an assertion, never a transform, so an unknown key must
  * be a failure rather than something zod quietly drops.
+ *
+ * Routes whose payload depends on the actor's role (§6.3: one job card
+ * shape per role) attach `config.responseSchemaByRole` instead — a map
+ * from role to schema, and the hook asserts against the actor's entry.
+ * Three separate schemas, one asserted per response: a payload that
+ * carries a field another role's shape forbids fails its own schema.
  */
 
 declare module 'fastify' {
   interface FastifyContextConfig {
     responseSchema?: ZodTypeAny;
+    /** Per-role response shapes (§6.3); the hook asserts the actor's entry and nothing else. */
+    responseSchemaByRole?: Partial<Record<Role, ZodTypeAny>>;
   }
 }
 
@@ -133,8 +141,26 @@ export const errorsPlugin = fp<ErrorsPluginOptions>(
     if (!responseValidationEnabled(opts.nodeEnv)) return;
 
     app.addHook('preSerialization', async (request, reply, payload) => {
-      const schema = request.routeOptions.config.responseSchema;
-      if (!schema || reply.statusCode >= 400) return payload;
+      if (reply.statusCode >= 400) return payload;
+      const config = request.routeOptions.config;
+      let schema: ZodTypeAny | undefined;
+      if (config.responseSchemaByRole) {
+        const role = request.auth?.role;
+        schema = role === undefined ? undefined : config.responseSchemaByRole[role];
+        if (!schema) {
+          // A per-role route without this actor's shape is a route
+          // definition bug: fail loudly rather than letting the payload
+          // through unasserted. (Roles the route refuses 403 before any
+          // payload never reach this point.)
+          throw new Error(
+            `responseSchemaByRole has no entry for role ${String(role)} on ` +
+              `${request.method} ${request.routeOptions.url ?? request.url}`,
+          );
+        }
+      } else {
+        schema = config.responseSchema;
+      }
+      if (!schema) return payload;
       const result = schema.safeParse(payload);
       if (!result.success) {
         throw new ResponseValidationError(

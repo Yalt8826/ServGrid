@@ -77,6 +77,20 @@ const selfIds: Partial<Record<Role, string>> = {};
 const usernames: Partial<Record<Role, string>> = {};
 let subject: { id: string };
 
+/** A job assigned to the matrix technician, for the jobs-endpoint probes. */
+let customerId = '';
+let serviceId = '';
+let matrixJobId = '';
+
+async function seedJobAssignedToTechnician(): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO job_cards (job_number, customer_id, service_id, title, status, assigned_to, assigned_at)
+     VALUES ($1, $2, $3, 'Matrix probe job', 'assigned', $4, now()) RETURNING id`,
+    [`JC-T10-${randomBytes(4).toString('hex')}`, customerId, serviceId, selfIds.technician],
+  );
+  return r.rows[0]!.id;
+}
+
 async function seedEmployee(role: Role, username = `emp.t10.${randomBytes(4).toString('hex')}`): Promise<{ id: string; username: string }> {
   const r = await db.query<{ id: string }>(
     `INSERT INTO employees (username, password_hash, full_name, role)
@@ -135,6 +149,10 @@ interface EndpointRow {
 /** Every role's cell is OK where the endpoint is open to all authenticated actors. */
 const ALL_ROLES_OK = { owner: OK, dispatcher: OK, technician: OK, sales_rep: OK } as const;
 const OWNER_ONLY = { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.3: the owner and dispatcher see every job, a technician his own, a sales rep nothing. */
+const JOB_READERS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.3: the status move is "technician (own), owner". */
+const STATUS_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 
 const ENDPOINTS: EndpointRow[] = [
   {
@@ -345,6 +363,52 @@ const ENDPOINTS: EndpointRow[] = [
     expect: OWNER_ONLY,
   },
   {
+    name: 'GET /v1/jobs',
+    method: 'GET',
+    url: '/v1/jobs',
+    // Role-scoped list (§6.3): owner and dispatcher read all, a technician
+    // his own, a sales rep nothing (matrix: job read none).
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/jobs', headers: bearer(actor) }),
+    expect: JOB_READERS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'GET /v1/jobs/:id',
+    method: 'GET',
+    url: '/v1/jobs/:id',
+    // The matrix technician's own job — the technician probe proves the
+    // right row came back; the sales rep's cell is `none`, not `own`.
+    probe: (actor) => app.inject({ method: 'GET', url: `/v1/jobs/${matrixJobId}`, headers: bearer(actor) }),
+    expect: JOB_READERS,
+    assertOk: (actor, res) => {
+      if (actor === 'technician') expect(res.json<{ id: string }>().id).toBe(matrixJobId);
+    },
+  },
+  {
+    name: 'POST /v1/jobs/:id/status',
+    method: 'POST',
+    url: '/v1/jobs/:id/status',
+    // A fresh assigned job per probe: the owner and the assignee step it
+    // (200); the dispatcher's doors are assign and cancel, not the stepper;
+    // the sales rep and the anonymous caller never get past the gate. The
+    // body parses after requireAuth, so `anon` is 401, not 422.
+    probe: async (actor) => {
+      const jobId = await seedJobAssignedToTechnician();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/jobs/${jobId}/status`,
+        headers: bearer(actor),
+        payload: { to: 'en_route', occurredAt: new Date().toISOString() },
+      });
+    },
+    expect: STATUS_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor === 'technician') expect(res.json<{ status: string }>().status).toBe('en_route');
+    },
+  },
+  {
     name: 'GET /healthz',
     method: 'GET',
     url: '/healthz',
@@ -380,6 +444,20 @@ beforeAll(async () => {
     selfIds[role] = session.employee.id;
   }
   subject = await seedEmployee('technician');
+
+  // The jobs-endpoint probes need a real job (migration 007) assigned to
+  // the matrix technician.
+  customerId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO customers (name, phone) VALUES ('Matrix T10 Customer', '9840000001') RETURNING id`,
+    )
+  ).rows[0]!.id;
+  serviceId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO services (code, name) VALUES ('T10-MATRIX', 'Matrix suite service') RETURNING id`,
+    )
+  ).rows[0]!.id;
+  matrixJobId = await seedJobAssignedToTechnician();
 });
 
 afterAll(async () => {
