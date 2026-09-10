@@ -16,14 +16,12 @@ import { scopePredicate } from '../../src/plugins/rbac.js';
  * 2. by executing the composed query and asserting on the rows returned,
  *    never on a count — a count passes while hiding the wrong rows.
  *
- * The `assigned`-on-customer predicate reads `job_cards`, which is
- * migration 007 (Phase 1). Until that lands, the suite stands the table
- * up in its own scratch database with the documented §3.4 columns the
- * predicate touches, so the predicate's semantics are pinned now and the
- * seeding simply switches to the real table later.
- *
- * TODO(T1.x): seed through the real migration-007 job_cards and delete
- * the stub; the predicate text does not change.
+ * The `assigned`-on-customer predicate reads `job_cards`, which landed
+ * with migration 007 (PHASE-1-TECHNICIAN.md T1.1); the seeding runs
+ * against that real table, so the predicate is exercised on the same
+ * shape it will meet in production. (Until T1.1 the suite stood up a
+ * stub with the documented §3.4 columns — deleted when the real table
+ * arrived, as its TODO always said it would be.)
  */
 
 function databaseUrl(): string {
@@ -84,10 +82,17 @@ async function seedCustomer(name: string): Promise<string> {
   return r.rows[0]!.id;
 }
 
+/** The catalogue row every seeded job points at (job_cards.service_id is NOT NULL). */
+const serviceId = { id: '' };
+
+let jobSeq = 0;
+
 async function seedJob(customerId: string, assignedTo: string, status: string, closedAt: Date | null): Promise<string> {
+  jobSeq += 1;
   const r = await db.query<{ id: string }>(
-    `INSERT INTO job_cards (customer_id, assigned_to, status, closed_at) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [customerId, assignedTo, status, closedAt],
+    `INSERT INTO job_cards (job_number, customer_id, service_id, title, assigned_to, status, closed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [`JC-SCOPE-${jobSeq}`, customerId, serviceId.id, `Scope job ${jobSeq}`, assignedTo, status, closedAt],
   );
   return r.rows[0]!.id;
 }
@@ -107,15 +112,11 @@ beforeAll(async () => {
   db = new Pool({ connectionString: scratchUrl.toString(), max: 5 });
   await runMigrations({ pool: db });
 
-  // The §3.4 slice of job_cards the assigned-scope predicate touches.
-  await db.query(`
-    CREATE TABLE job_cards (
-      id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      customer_id uuid NOT NULL REFERENCES customers(id),
-      assigned_to uuid NOT NULL REFERENCES employees(id),
-      status      job_status NOT NULL DEFAULT 'assigned',
-      closed_at   timestamptz
-    )`);
+  serviceId.id = await db
+    .query<{ id: string }>(
+      `INSERT INTO services (code, name) VALUES ('T0-SCOPE', 'Scope suite service') RETURNING id`,
+    )
+    .then((r) => r.rows[0]!.id);
 
   repA.id = await seedEmployee('sales_rep', repA.username);
   repB.id = await seedEmployee('sales_rep', repB.username);
