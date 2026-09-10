@@ -7,11 +7,13 @@
  * basement.
  */
 import { Pressable, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { haptic } from './haptics';
 import { staleInsetStyle } from './uiBase';
+import { useArrival } from './motion';
 
 export type BannerTone = 'danger' | 'warning' | 'success' | 'info';
 
@@ -36,8 +38,12 @@ const TONE_COLOR: Record<BannerTone, string> = {
 
 export function Banner({ tone, message, actions = [], onDismiss, stale = false, testID }: BannerProps): React.ReactNode {
   const rail = TONE_COLOR[tone];
+  // Drops from above with weight (spring.sheet, a hair of overshoot). The
+  // only assertive motion in the product, and it earns it: the alternative
+  // is a technician not noticing his completion was refused (02-MOTION §5.6).
+  const arrival = useArrival(-16);
   return (
-    <View
+    <Animated.View
       testID={testID}
       onLayout={() => {
         if (tone === 'danger' || tone === 'warning') haptic('syncRejected');
@@ -55,6 +61,7 @@ export function Banner({ tone, message, actions = [], onDismiss, stale = false, 
           paddingRight: SPACE[2],
         },
         stale ? staleInsetStyle() : {},
+        arrival,
       ]}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -82,6 +89,6 @@ export function Banner({ tone, message, actions = [], onDismiss, stale = false, 
           Pending sync
         </Text>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }

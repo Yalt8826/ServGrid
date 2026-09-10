@@ -4,12 +4,14 @@
  * accent**; the accent is reserved. `Selection` haptic on toggle.
  */
 import { Pressable, Text } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useState } from 'react';
 
 import { RADII, SEMANTIC, TAP } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
 import { haptic } from './haptics';
+import { usePressScale } from './motion';
 
 export interface ChipProps {
   label: string;
@@ -23,8 +25,12 @@ export function Chip({ label, selected = false, onToggle, disabled = false, test
   const density = useDensity();
   const [pressed, setPressed] = useState(false);
   const height = density === 'field' ? 36 : 32;
+  // A chip is a control, so it takes the press scale; the fill and border
+  // swap on the same touch-down (02-MOTION.md §6, `quick` 140ms).
+  const press = usePressScale(0.97, !disabled);
 
   return (
+    <Animated.View style={press.style}>
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected, disabled }}
@@ -35,8 +41,14 @@ export function Chip({ label, selected = false, onToggle, disabled = false, test
         haptic('pickerSelect');
         onToggle?.();
       }}
-      onPressIn={() => setPressed(true)}
-      onPressOut={() => setPressed(false)}
+      onPressIn={() => {
+        setPressed(true);
+        press.onPressIn();
+      }}
+      onPressOut={() => {
+        setPressed(false);
+        press.onPressOut();
+      }}
       style={{
         height,
         minHeight: height,
@@ -69,5 +81,6 @@ export function Chip({ label, selected = false, onToggle, disabled = false, test
         {label}
       </Text>
     </Pressable>
+    </Animated.View>
   );
 }

@@ -11,11 +11,13 @@
  */
 import { Pressable, Text, View } from 'react-native';
 import { useState } from 'react';
+import Animated from 'react-native-reanimated';
 
 import { COLORS, RADII, SEMANTIC, TAP, type ComponentState } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
 import { haptic } from './haptics';
+import { usePressScale } from './motion';
 import { captionStyle, staleInsetStyle } from './uiBase';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
@@ -47,6 +49,9 @@ export function Button({
 }: ButtonProps): React.ReactNode {
   const density = useDensity();
   const [pressed, setPressed] = useState(false);
+  // Scale on touch-down, spring.press. Disabled and loading buttons do not
+  // move: a control that answers a press it will not act on is a lie.
+  const press = usePressScale(0.97, !disabled && !loading);
   const height = density === 'field' ? 52 : density === 'console' ? 44 : 36;
   const hScale = height / 52;
 
@@ -62,6 +67,7 @@ export function Button({
         },
       ]}
     >
+      <Animated.View style={press.style}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ disabled, busy: loading }}
@@ -70,9 +76,13 @@ export function Button({
         onPress={onPress}
         onPressIn={() => {
           setPressed(true);
+          press.onPressIn();
           if (!disabled && !loading) haptic('primaryActionPress');
         }}
-        onPressOut={() => setPressed(false)}
+        onPressOut={() => {
+          setPressed(false);
+          press.onPressOut();
+        }}
         style={{
           height,
           minHeight: height,
@@ -112,6 +122,7 @@ export function Button({
           />
         ) : null}
       </Pressable>
+      </Animated.View>
       {disabled && disabledReason ? (
         <Text style={[captionStyle.caption, { marginTop: 4 }]}>{disabledReason}</Text>
       ) : null}

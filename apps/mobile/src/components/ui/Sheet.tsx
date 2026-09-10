@@ -2,8 +2,14 @@
  * `Sheet` (03-COMPONENTS.md). Grab handle 32×4 slate.400, optional
  * title row, scrollable content, fixed bottom action bar (72) that
  * never scrolls away. Never full-screen — at least 64pt of the screen
- * stays visible behind. Rises `considered` 300ms spring.sheet;
- * drag-to-dismiss with spring.snap; scrim rgba(22,32,43,0.45) 220ms.
+ * stays visible behind.
+ *
+ * **Motion pending.** The rise (`considered` 300ms, spring.sheet, from the
+ * control that opened it) and drag-to-dismiss (spring.snap, velocity-aware)
+ * are specified in 02-MOTION.md §5.2 and are **not implemented here**. Both
+ * belong with the completion sheet in Phase 1 (T1.19), which is the first
+ * screen that opens one and the only place the from-the-button origin can
+ * be wired. `motion.ts` carries `useArrival`, which is the rise half.
  * Never dismiss on scrim tap when the sheet holds unsaved input — ask.
  */
 import { Pressable, Text, View } from 'react-native';

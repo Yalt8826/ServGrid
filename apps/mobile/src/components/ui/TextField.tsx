@@ -2,7 +2,11 @@
  * `TextField` (03-COMPONENTS.md). Label above; input 52 tall, 1px
  * `line.default`, radius 4; helper or error below as caption.
  *
- * States. Focused: border → `line.focus` 2px, quick 140ms, no glow.
+ * States. Focused: border → `line.focus` 2px, no glow. **The 140ms ease
+ * on that change is not implemented**: border width is a layout property
+ * (02-MOTION.md §9 forbids animating it), so the transition needs an
+ * opacity-animated ring overlay rather than a width tween. The end state
+ * is correct today; only the ease between them is missing.
  * Error: border `feedback.danger`, message replaces helper — shake is
  * banned, the message is the signal. Disabled: `slate.050` fill.
  * Never floating labels, never placeholder-as-label, no inline
