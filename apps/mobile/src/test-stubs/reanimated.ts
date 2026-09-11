@@ -51,6 +51,17 @@ export function withRepeat(to: number): number {
 export function withDelay(_delay: number, to: number): number {
   return to;
 }
+/**
+ * T1.18 (the stepper hero): a sequence resolves to its LAST step's value —
+ * the node pop is `1 → 1.15 → 1` and the stub has no clock, so the final
+ * rest value (1) is the observable outcome, same contract as the `with*`
+ * family above.
+ */
+export function withSequence<T>(...steps: T[]): T {
+  const last = steps[steps.length - 1];
+  if (last === undefined) throw new Error('withSequence needs at least one step.');
+  return last;
+}
 export function cancelAnimation(): void {}
 export function runOnJS<T extends (...args: never[]) => unknown>(fn: T): T {
   return fn;

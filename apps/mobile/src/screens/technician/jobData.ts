@@ -21,7 +21,9 @@ import type { JobStatus, JobCardTechnician } from '@servgrid/shared';
 import {
   annotateWithOutbox,
   type JobView,
+  type UnitView,
 } from './jobView';
+import { timelineByJob, type JobTimelineEntry } from './jobDetail';
 
 /** A job row as the mirror stores it (snake_case, contract flattened). */
 interface JobRecord {
@@ -57,6 +59,42 @@ SELECT j.id, j.job_number, j.title, j.status, j.priority, j.scheduled_for,
        c.latitude AS latitude, c.longitude AS longitude
 FROM jobs j LEFT JOIN customers c ON c.id = j.customer_id
 ORDER BY j.job_number`;
+
+/**
+ * The unit line (§T3): THE UNIT with serial and warranty expiry. The
+ * technician's job-card contract carries no `customer_product_id`, so a
+ * job cannot name its unit; the mirror's `customer_products` are the
+ * site's ACTIVE units, and a customer with exactly one makes the job's
+ * unit unambiguous. A customer with five UPS units names nothing here —
+ * the section is omitted rather than guessed.
+ */
+const UNIT_SELECT = `
+SELECT cp.id, cp.customer_id, cp.free_text_name, cp.serial_number, cp.warranty_expires_on,
+       p.name AS product_name, p.brand AS product_brand, p.capacity_label AS capacity_label
+FROM customer_products cp LEFT JOIN products p ON p.id = cp.product_id`;
+
+interface UnitRecord {
+  id: string;
+  customer_id: string;
+  free_text_name: string | null;
+  serial_number: string;
+  warranty_expires_on: string | null;
+  product_name: string | null;
+  product_brand: string | null;
+  capacity_label: string | null;
+}
+
+function toUnitView(record: UnitRecord): UnitView {
+  const descriptor = [record.product_name, record.capacity_label]
+    .filter((part): part is string => part !== null)
+    .join(' ');
+  return {
+    name: descriptor !== '' ? descriptor : (record.free_text_name ?? 'Unit'),
+    brand: record.product_brand,
+    serialNumber: record.serial_number,
+    warrantyExpiresOn: record.warranty_expires_on,
+  };
+}
 
 function toJobStatus(raw: string): JobStatus {
   // The mirror only ever holds values the sync contract's enum wrote;
@@ -97,9 +135,10 @@ function toJobCard(record: JoinedRecord): JobCardTechnician {
 }
 
 /**
- * Read everything the two screens need, in one pass over each table.
- * `completedAtById` dates a completion by the moment its optimistic
- * write was enqueued — the newest such row per job wins.
+ * Read everything the technician's screens need, in one pass over each
+ * table. `completedAtById` dates a completion by the moment its optimistic
+ * write was enqueued — the newest such row per job wins. `eventsByJobId`
+ * folds the outbox into each job's local timeline (§T3; see `jobDetail`).
  */
 export function readJobData(
   database: MirrorDatabase,
@@ -108,6 +147,7 @@ export function readJobData(
   views: JobView[];
   completedAtById: Record<string, string>;
   pendingCount: number;
+  eventsByJobId: Record<string, JobTimelineEntry[]>;
 } {
   const records = database.getAllSync<JoinedRecord>(JOB_SELECT);
   const outboxRows = rowsForEmployee(database, employeeId);
@@ -126,6 +166,20 @@ export function readJobData(
     }
   }
 
+  // Units per customer; only an unambiguous single unit is named.
+  const unitsByCustomer = new Map<string, UnitRecord[]>();
+  for (const record of database.getAllSync<UnitRecord>(UNIT_SELECT)) {
+    const units = unitsByCustomer.get(record.customer_id) ?? [];
+    units.push(record);
+    unitsByCustomer.set(record.customer_id, units);
+  }
+  const loneUnitByCustomer = new Map<string, UnitView>();
+  for (const [customerId, units] of unitsByCustomer) {
+    if (units.length === 1) loneUnitByCustomer.set(customerId, toUnitView(units[0]!));
+  }
+
+  const eventsByJobId = timelineByJob(outboxRows);
+
   const views: JobView[] = records.map((record) => {
     const state = annotate(record.id);
     return {
@@ -138,12 +192,13 @@ export function readJobData(
           : null,
       pending: state.pending,
       rejectedMessage: state.rejectedMessage,
+      unit: loneUnitByCustomer.get(record.customer_id) ?? null,
     };
   });
 
   const pendingCount = outboxRows.filter((row) => row.status === 'queued' || row.status === 'inflight').length;
 
-  return { views, completedAtById, pendingCount };
+  return { views, completedAtById, pendingCount, eventsByJobId };
 }
 
 /**

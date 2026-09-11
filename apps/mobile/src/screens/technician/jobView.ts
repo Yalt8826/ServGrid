@@ -42,6 +42,25 @@ export interface JobView {
   pending: boolean;
   /** The newest rejected row's server message, verbatim — else null. */
   rejectedMessage: string | null;
+  /**
+   * The unit the job is for (§T3), when the mirror can name it
+   * unambiguously. The technician's job-card sync contract carries no
+   * `customer_product_id` (`JobCardTechnicianSchema`), so `readJobData`
+   * attaches the site's unit only when the customer has exactly one —
+   * never a guessed one. Absent otherwise; optional so pre-T1.18
+   * constructors stay valid.
+   */
+  unit?: UnitView | null;
+}
+
+/** The unit line of the job detail: name, brand, serial, warranty expiry. */
+export interface UnitView {
+  /** Product name (with capacity label) or the free-text third-party name. */
+  name: string;
+  brand: string | null;
+  serialNumber: string;
+  /** `YYYY-MM-DD`, the mirror's `customer_products.warranty_expires_on`. */
+  warrantyExpiresOn: string | null;
 }
 
 /** Statuses that are the technician's live work. */

@@ -33,6 +33,7 @@ import { enqueue } from '../../sync/outbox';
 import type { StoredActor } from '../../lib/types';
 import { moveJobStatus, readJobData, revertJobStatus } from './jobData';
 import { primaryActionOf, statusChangeOp, type JobView } from './jobView';
+import type { JobTimelineEntry } from './jobDetail';
 
 // Process-level session cache: the mirror, the drain and the flag answer
 // are per-employee singletons — the screens re-render, the plumbing does
@@ -100,6 +101,8 @@ export interface TechnicianMirrorState {
   views: JobView[];
   completedAtById: Record<string, string>;
   pendingCount: number;
+  /** Each job's local timeline (outbox-derived, §T3) — the detail reads it. */
+  eventsByJobId: Record<string, JobTimelineEntry[]>;
 }
 
 export interface TechnicianMirrorDeps extends TechnicianMirrorState {
