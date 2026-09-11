@@ -18,6 +18,11 @@ export const Pressable = 'Pressable';
 export const ScrollView = 'ScrollView';
 export const Modal = 'Modal';
 export const ActivityIndicator = 'ActivityIndicator';
+// T1.17: pull to refresh on the dashboard carries the gesture only —
+// the PendingBadge is the indicator and the platform spinner is painted
+// transparent. The stub keeps the host element so the tree shows the
+// (transparent) control and its refreshing state.
+export const RefreshControl = 'RefreshControl';
 
 /** Only what the primitives touch; `create` is identity under tests. */
 export const StyleSheet = {
