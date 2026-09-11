@@ -639,16 +639,193 @@ export const errorEnvelopeSchema = z.object({
   }),
 });
 
-// ── sync (§7) ───────────────────────────────────────────────────────────────
+// ── sync (§7 — bootstrap, delta, batch) ─────────────────────────────────────
+//
+// The offline mirror's three doors (PLAN-BACKEND.md §7, PLAN-DATA-MODEL.md
+// §6). The mirror holds five collections for a technician: his jobs (the
+// same card shape the REST surface returns him, contract inline), the
+// customers those jobs touch and their product stacks, and the active
+// catalogue. Rows leave the mirror two ways — a `deleted` tombstone (soft
+// delete) or an `out_of_scope` tombstone (the reassigned job) — and a
+// tombstone never deletes an outbox row; the server decides on drain.
 
-export const syncOperationSchema = z.object({
-  localId: z.string().min(1),
-  dependsOn: z.string().optional(),
-  idempotencyKey: uuid,
-  method: z.enum(['POST', 'PATCH', 'DELETE']),
-  path: z.string().startsWith('/v1/'),
-  body: z.unknown().optional(),
-});
+/** Catalogue row as the mirror holds it — active rows only; a deactivation arrives as a `deleted` tombstone. */
+export const SyncProductSchema = z
+  .object({
+    id: uuid,
+    sku: z.string(),
+    name: z.string(),
+    category: z.enum(['ups', 'battery', 'inverter', 'accessory', 'spare']),
+    brand: z.string().nullable(),
+    modelNumber: z.string().nullable(),
+    capacityLabel: z.string().nullable(),
+    unit: z.string().nullable(),
+    defaultPrice: moneyString.nullable(),
+    warrantyMonths: z.number().int().nullable(),
+    version: z.number().int(),
+  })
+  .strict();
 
-export const syncBatchSchema = z.object({ operations: z.array(syncOperationSchema).max(50) });
+/** Job-type catalogue row, active rows only. */
+export const SyncServiceSchema = z
+  .object({
+    id: uuid,
+    code: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    defaultCharge: moneyString.nullable(),
+    version: z.number().int(),
+  })
+  .strict();
+
+/** A site the actor's jobs touch — reached through a job, never the whole customer table. */
+export const SyncCustomerSchema = z
+  .object({
+    id: uuid,
+    name: z.string(),
+    phone: z.string(),
+    altPhone: z.string().nullable(),
+    addressLine1: z.string().nullable(),
+    addressLine2: z.string().nullable(),
+    city: z.string().nullable(),
+    state: z.string().nullable(),
+    pincode: z.string().nullable(),
+    latitude: z.number().nullable(),
+    longitude: z.number().nullable(),
+    notes: z.string().nullable(),
+    companyId: uuid.nullable(),
+    version: z.number().int(),
+  })
+  .strict();
+
+/** One unit standing at a site (§3.3) — active rows only; a released serial arrives as a `deleted` tombstone. */
+export const SyncCustomerProductSchema = z
+  .object({
+    id: uuid,
+    customerId: uuid,
+    productId: uuid.nullable(),
+    freeTextName: z.string().nullable(),
+    serialNumber: z.string(),
+    quantity: z.number().int(),
+    installedOn: businessDateSchema.nullable(),
+    warrantyExpiresOn: businessDateSchema.nullable(),
+    notes: z.string().nullable(),
+    version: z.number().int(),
+  })
+  .strict();
+
+/**
+ * A row that has stopped being this actor's business (§7). `deleted` — the
+ * row went `is_active = false`. `out_of_scope` — the row is perfectly alive
+ * but no longer the actor's: the job reassigned from Ravi to Anitha is not
+ * deleted and not inactive, it has simply stopped being Ravi's. The client
+ * deletes the mirror row and drops it from any list — and keeps any outbox
+ * row pointing at it (§7: the server decides on drain).
+ */
+export const syncTombstoneSchema = z
+  .object({
+    entity: z.enum(['job', 'customer', 'customer_product', 'product', 'service']),
+    id: uuid,
+    reason: z.enum(['deleted', 'out_of_scope']),
+  })
+  .strict();
+export type SyncTombstone = z.infer<typeof syncTombstoneSchema>;
+
+/** The bounded working set — a technician's is tens of rows, not the whole database (§7). */
+export const syncWorkingSetSchema = z
+  .object({
+    jobs: z.array(JobCardTechnicianSchema),
+    customers: z.array(SyncCustomerSchema),
+    customerProducts: z.array(SyncCustomerProductSchema),
+    products: z.array(SyncProductSchema),
+    services: z.array(SyncServiceSchema),
+  })
+  .strict();
+export type SyncWorkingSet = z.infer<typeof syncWorkingSetSchema>;
+
+/** `GET /v1/sync/bootstrap` — the cold-start set plus the cursor to delta from. */
+export const syncBootstrapResponseSchema = z
+  .object({
+    data: syncWorkingSetSchema,
+    cursor: isoDateTime,
+  })
+  .strict();
+export type SyncBootstrapResponse = z.infer<typeof syncBootstrapResponseSchema>;
+
+/**
+ * `GET /v1/sync/delta` — the working set's changes since `cursor` plus
+ * tombstones, plus the cursor to carry into the next call. `hasMore` pages
+ * a client that has been offline a fortnight; the cursor only advances
+ * (it is the server's `updated_at`, never the device clock).
+ */
+export const syncDeltaResponseSchema = z
+  .object({
+    data: syncWorkingSetSchema,
+    tombstones: z.array(syncTombstoneSchema),
+    cursor: isoDateTime,
+    hasMore: z.boolean(),
+  })
+  .strict();
+export type SyncDeltaResponse = z.infer<typeof syncDeltaResponseSchema>;
+
+/**
+ * One queued outbox operation, verbatim from the handset (§7). The
+ * idempotency key is generated once at enqueue and kept across every retry
+ * (§3.2); `dependsOn` names an EARLIER operation's `localId` and
+ * short-circuits — a rejected parent returns its child `skipped`,
+ * unattempted. `headers` carries the sparse extras a target route needs
+ * (`If-Match` today); the server allowlists them.
+ */
+export const syncOperationSchema = z
+  .object({
+    localId: z.string().min(1).max(100),
+    dependsOn: z.string().min(1).max(100).optional(),
+    idempotencyKey: uuid,
+    method: z.enum(['POST', 'PATCH', 'DELETE']),
+    path: z.string().startsWith('/v1/').max(500),
+    body: z.unknown().optional(),
+    headers: z.record(z.string()).optional(),
+  })
+  .strict();
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
+
+/**
+ * Per-operation result (§7). `duplicate` is a SUCCESS — the idempotency
+ * layer replayed a stored response, the client marks the item done.
+ * `status` is the HTTP status of the attempted call; 0 means the
+ * operation was never attempted (`skipped` behind a failed dependency).
+ */
+export const syncOperationResultSchema = z
+  .object({
+    localId: z.string(),
+    outcome: z.enum(['applied', 'duplicate', 'rejected', 'skipped']),
+    status: z.number().int(),
+    body: z.unknown().optional(),
+    error: z
+      .object({
+        code: z.string(),
+        message: z.string(),
+        details: z.unknown().optional(),
+      })
+      .optional(),
+  })
+  .strict();
+export type SyncOperationResult = z.infer<typeof syncOperationResultSchema>;
+
+/** `POST /v1/sync/batch` — the outbox drain. Cap 50 (§7); larger queues page. */
+export const SYNC_BATCH_MAX_OPERATIONS = 50;
+
+export const syncBatchSchema = z
+  .object({ operations: z.array(syncOperationSchema).max(SYNC_BATCH_MAX_OPERATIONS) })
+  .strict();
+export type SyncBatchRequest = z.infer<typeof syncBatchSchema>;
+
+/** Always HTTP 200 if the envelope parsed — individual failures live in `results` (§7). */
+export const syncBatchResponseSchema = z
+  .object({
+    results: z.array(syncOperationResultSchema),
+    /** Carry this straight into `GET /v1/sync/delta` (§7: drain, then delta). */
+    cursor: isoDateTime,
+  })
+  .strict();
+export type SyncBatchResponse = z.infer<typeof syncBatchResponseSchema>;

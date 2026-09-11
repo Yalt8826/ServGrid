@@ -20,6 +20,7 @@ import { devicesRoutes } from './modules/devices/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
 import { jobsRoutes } from './modules/jobs/routes.js';
 import { locationRoutes } from './modules/location/routes.js';
+import { syncRoutes } from './modules/sync/routes.js';
 
 /**
  * The Fastify instance (PLAN-BACKEND.md §2 server.ts): plugin
@@ -126,6 +127,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(jobsRoutes);
   app.register(devicesRoutes);
   app.register(locationRoutes, { workWindow: config.workWindow });
+  app.register(syncRoutes);
   app.register(cashRoutes);
 
   const ownsPool = options.db === undefined;
