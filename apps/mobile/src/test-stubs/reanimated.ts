@@ -63,6 +63,18 @@ export function clamp(value: number): number {
 }
 
 /**
+ * Colour interpolation, same final-state semantics as the `with*`
+ * family: the value arriving here is the target (a `useToggleProgress`
+ * driven style), so the output range's far end wins once the progress
+ * has reached it. This is what the T7 ladder row's 140ms colour change
+ * reads as under test — the resolved colour, with no clock.
+ */
+export function interpolateColor(value: number, _inputRange: number[], outputRange: string[]): string {
+  const last = outputRange[outputRange.length - 1];
+  return value >= 1 && last !== undefined ? last : (outputRange[0] ?? 'transparent');
+}
+
+/**
  * Easing + reduced motion (T0.13): NavTabBar slides its underline with
  * `withTiming(x, { easing: Easing.bezier(...) })`. The easing factory is
  * identity — the stub has no clock to ease — and reduced motion follows
