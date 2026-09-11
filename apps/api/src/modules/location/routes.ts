@@ -1,5 +1,11 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { locationPingBatchSchema, pingBatchResultSchema } from '@servgrid/shared';
+import {
+  locationPingBatchSchema,
+  pingBatchResultSchema,
+  trackingHealthSchema,
+  type Action,
+  type Resource,
+} from '@servgrid/shared';
 import { createSlidingWindowLimiter } from '../../lib/rate-limit.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
@@ -12,8 +18,12 @@ import { createLocationService } from './service.js';
  * a rejected ping is a normal outcome, not a client error, and the
  * client must clear its buffer on any of these rather than retry forever.
  *
- * On-demand requests and the health reads are later tasks on the same
- * module (§8: /requests is Phase 4's console; /health/me is T1.x's chip).
+ * Plus the self-scoped health read `GET /v1/location/health/me` — the
+ * TrackingHealthChip's data (T1.12). The roster reads are later phases'
+ * work (§8: /health is Phase 2/4, /employees Phase 4) and are
+ * deliberately not registered here: a path that does not exist answers
+ * the framework's generic 404 to every role alike, so it cannot leak
+ * that other employees' health rows exist.
  */
 
 /** §13 rate limits: ping ingest 60/min per device. Keyed on the signed
@@ -32,6 +42,32 @@ function claimsOf(request: FastifyRequest) {
   const auth = request.auth;
   if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
   return auth;
+}
+
+/** The refusal for a role asking the chip endpoint for something that is
+ * not his own row — a dispatcher's `location.health` read is `all` (the
+ * Phase 2 roster warning), and this is not that surface. */
+const HEALTH_ME_FORBIDDEN_MESSAGE = 'Tracking health shows your own handset only.';
+
+/**
+ * preHandler for `/me`-shaped self-service surfaces whose matrix cell is
+ * `own`: 403 unless the shared matrix gives this role exactly `own` on
+ * the cell. `requirePermission` would let a scope-`all` role through,
+ * and `requireAll` would refuse the roles the route exists for — the
+ * self-service surface sits precisely on the `own` cell, so that is the
+ * cell it asks for. Which roles pass is the matrix's decision alone
+ * (technician and sales rep today, §8); no role list lives in this file.
+ */
+function requireOwnPermission(
+  resource: Resource,
+  action: Action,
+  message: string,
+) {
+  return async function requireOwn(request: FastifyRequest) {
+    if (request.scope(resource, action) !== 'own') {
+      throw new AppError('FORBIDDEN', message);
+    }
+  };
 }
 
 export const locationRoutes: FastifyPluginAsync<{ workWindow: { start: string; end: string } }> = async (
@@ -70,6 +106,22 @@ export const locationRoutes: FastifyPluginAsync<{ workWindow: { start: string; e
         );
       }
       return result;
+    },
+  );
+
+  // §8: the health chip's own read — the one health endpoint that ships in
+  // Phase 1, and the one that is easy to miss. The actor id comes from the
+  // token, never the path, and the repo's WHERE clause carries it, so the
+  // response is his row and nothing about anyone else (T1.12).
+  app.get(
+    '/v1/location/health/me',
+    {
+      preHandler: [app.requireAuth, requireOwnPermission('location.health', 'read', HEALTH_ME_FORBIDDEN_MESSAGE)],
+      config: { responseSchema: trackingHealthSchema },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      return service.myHealth(auth.sub);
     },
   );
 };

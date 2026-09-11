@@ -84,3 +84,48 @@ export async function insertPings(
   );
   return r.rows.map((row) => row.recorded_at_ms);
 }
+
+/** One row of `v_employee_tracking_health`, shaped for the wire. The
+ * nullable columns ride through the view's LEFT JOINs — no device install
+ * yet, or no ping ever, is NULL on the wire, not an absent field.
+ * `lastPingAt` is serialised in SQL (`to_json(...)#>>'{}'`, the jobs
+ * repo's pattern) because pg would otherwise hand back a Date object the
+ * response schema cannot assert on. */
+export interface TrackingHealthRow {
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  deviceId: string | null;
+  locationPermission: string | null;
+  notificationsEnabled: boolean | null;
+  lastPingAt: string | null;
+  minutesSince: number | null;
+  health: string;
+}
+
+/**
+ * The actor's own health row (PLAN-BACKEND.md §8 `/v1/location/health/me`).
+ * The self-scoping is the predicate in this query text — `WHERE
+ * employee_id = $1`, bound to the token's subject, never to a path
+ * parameter — so the endpoint cannot return anyone else's row by
+ * construction, and the view itself carries no coordinates to leak. The
+ * view only holds ACTIVE employees; NULL comes back for an actor
+ * deactivated after his token was minted, and the service refuses that.
+ */
+export async function findOwnHealth(db: Db, employeeId: string): Promise<TrackingHealthRow | null> {
+  const r = await db.query<TrackingHealthRow>(
+    `SELECT employee_id AS "employeeId",
+            employee_name AS "employeeName",
+            role::text    AS role,
+            device_id     AS "deviceId",
+            location_permission AS "locationPermission",
+            notifications_enabled AS "notificationsEnabled",
+            to_json(last_ping_at)#>>'{}' AS "lastPingAt",
+            minutes_since::float8 AS "minutesSince",
+            health
+     FROM v_employee_tracking_health
+     WHERE employee_id = $1::uuid`,
+    [employeeId],
+  );
+  return r.rows[0] ?? null;
+}

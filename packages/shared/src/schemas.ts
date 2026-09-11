@@ -342,6 +342,34 @@ export const pingBatchResultSchema = z.object({
 export type LocationPingPayload = z.infer<typeof locationPingSchema>;
 export type PingBatchResultParsed = z.infer<typeof pingBatchResultSchema>;
 
+// ── tracking health (§8: /v1/location/health/me) ────────────────────────────
+
+/**
+ * One row of `v_employee_tracking_health` (PLAN-DATA-MODEL.md §4, migration
+ * 009) as `GET /v1/location/health/me` returns it — the actor's own row and
+ * nobody else's. `notificationsEnabled` rides through from the newest
+ * device row and is deliberately NOT folded into `health` (§4): a
+ * technician with notifications off is still tracking correctly, so the
+ * client renders it as a separate chip state. The device and ping columns
+ * are nullable through the view's LEFT JOINs — no device install yet, or no
+ * ping ever, is an honest null, not an absent field.
+ */
+export const trackingHealthSchema = z
+  .object({
+    employeeId: uuid,
+    employeeName: z.string(),
+    role: roleSchema,
+    deviceId: uuid.nullable(),
+    locationPermission: z.enum(['none', 'foreground', 'background']).nullable(),
+    notificationsEnabled: z.boolean().nullable(),
+    lastPingAt: isoDateTime.nullable(),
+    minutesSince: z.number().nullable(),
+    health: z.enum(['not_tracked', 'permission_missing', 'never_reported', 'stale', 'active']),
+  })
+  .strict();
+
+export type TrackingHealth = z.infer<typeof trackingHealthSchema>;
+
 // ── auth (§4) ───────────────────────────────────────────────────────────────
 
 /**
