@@ -17,11 +17,10 @@
  *
  * The logout gate's count is the outbox's queued+inflight rows for this
  * employee, `rejected`/`failed` excluded by contract (PLAN-FRONTEND.md
- * §5). The outbox itself is T1.14 — not merged when this screen ships —
- * so the route feeds the honest count of the queue that exists today
- * (zero: there is nowhere for a row to wait yet). When T1.14 lands, the
- * drain's pending count replaces the literal; the screen is already
- * driven by the seam, so no screen code changes.
+ * §5). T1.15's mirror session supplies the live count and the *Retry
+ * now* drain; before it opens the count is zero — honest, since nothing
+ * can be queued before the mirror exists. The screen stays driven by the
+ * seam; no screen code changed.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -35,6 +34,7 @@ import type { TrackingHealth } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
 import { api } from '../../../src/lib/api';
 import { matchAutostartVendor } from '../../../src/location/autostart';
+import { useMirrorSession } from '../../../src/sync/MirrorProvider';
 import { ProfileScreen, type LadderRowState } from '../../../src/screens/technician/ProfileScreen';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
@@ -54,6 +54,11 @@ async function readFlag(key: string): Promise<boolean> {
 export default function Screen() {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
+  // T1.15: the mirror session is live, so the gate's count is the real
+  // outbox — queued + inflight rows for this employee, `rejected` and
+  // `failed` excluded by contract (§5). Zero before it opens, honestly:
+  // nothing can be queued before the mirror exists.
+  const mirrorSession = useMirrorSession();
 
   const loadLadderRows = async (): Promise<LadderRowState[]> => {
     const vendor = matchAutostartVendor(Device.manufacturer ?? Device.deviceName ?? null);
@@ -115,11 +120,12 @@ export default function Screen() {
           return res.data;
         }}
         loadLadderRows={loadLadderRows}
-        // T1.14's outbox is the real source. Until it merges there is no
-        // queue: zero is the honest count, and the gate stays open.
-        pendingSyncCount={0}
+        // The outbox is the source (T1.14), fed by the mirror session's
+        // live count (T1.15).
+        pendingSyncCount={mirrorSession?.pendingCount ?? 0}
         retrySync={() => {
-          // The drain arrives with T1.14; today a retry has nothing to drain.
+          // The drain's manual trigger — one single-flight cycle.
+          mirrorSession?.syncNow();
         }}
         logout={() => {
           void (async () => {
