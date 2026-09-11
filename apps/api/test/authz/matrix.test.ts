@@ -219,6 +219,9 @@ const COMPLETION_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sa
 const CANCEL_ACTORS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: rescheduling (PATCH of scheduled_for) is "dispatcher, owner" — on site, the technician cancels with a new date instead. */
 const RESCHEDULE_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §7 (T1.8): the sync doors are the technician handset's — Phase 1 builds his working set, the
+ * sales-rep mirror arrives with the sales module, and dispatcher/owner work online by design. */
+const SYNC_ACTORS = { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 
 const ENDPOINTS: EndpointRow[] = [
   {
@@ -684,6 +687,59 @@ const ENDPOINTS: EndpointRow[] = [
       const location = res.headers['location'];
       expect(typeof location).toBe('string');
       expect((location as string).includes('X-Amz-Signature')).toBe(true);
+    },
+  },
+  {
+    name: 'GET /v1/sync/bootstrap',
+    method: 'GET',
+    url: '/v1/sync/bootstrap',
+    // §7 (T1.8): the cold-start working set, the technician's alone — his
+    // jobs and the customers they touch, never another role's surface. A
+    // 200 is the five-collection envelope with a cursor on it.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/sync/bootstrap', headers: bearer(actor) }),
+    expect: SYNC_ACTORS,
+    assertOk: (_actor, res) => {
+      const body = res.json<{ data: { jobs: unknown[] }; cursor: string }>();
+      expect(Array.isArray(body.data.jobs)).toBe(true);
+      expect(body.cursor).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
+    },
+  },
+  {
+    name: 'GET /v1/sync/delta',
+    method: 'GET',
+    url: '/v1/sync/delta',
+    // §7 (T1.8): the catch-up door. The probe sends an old-but-well-formed
+    // cursor so the technician's 200 proves the envelope, not a 422 — a
+    // cursor that never moved delivers an empty page, which IS the answer.
+    probe: (actor) =>
+      app.inject({
+        method: 'GET',
+        url: '/v1/sync/delta?cursor=2026-01-01T00%3A00%3A00.000000Z',
+        headers: bearer(actor),
+      }),
+    expect: SYNC_ACTORS,
+    assertOk: (_actor, res) => {
+      const body = res.json<{ data: { jobs: unknown[] }; tombstones: unknown[]; hasMore: boolean }>();
+      expect(Array.isArray(body.data.jobs)).toBe(true);
+      expect(Array.isArray(body.tombstones)).toBe(true);
+      expect(typeof body.hasMore).toBe('boolean');
+    },
+  },
+  {
+    name: 'POST /v1/sync/batch',
+    method: 'POST',
+    url: '/v1/sync/batch',
+    // §7 (T1.8): the outbox drain. An empty queue is a well-formed
+    // envelope and always HTTP 200 with a cursor, whatever the actor could
+    // have queued — the role gate is what refuses everyone but the
+    // technician here.
+    probe: (actor) =>
+      app.inject({ method: 'POST', url: '/v1/sync/batch', headers: bearer(actor), payload: { operations: [] } }),
+    expect: SYNC_ACTORS,
+    assertOk: (_actor, res) => {
+      const body = res.json<{ results: unknown[]; cursor: string }>();
+      expect(Array.isArray(body.results)).toBe(true);
+      expect(body.cursor).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
     },
   },
   {
