@@ -4,6 +4,10 @@
  * login's response via the session store — arriving here without one
  * means no fresh login said consent was owed, so the honest redirect is
  * out, not a re-ask.
+ *
+ * On acceptance the flow continues into the permission ladder (T1.16,
+ * PLAN.md §7 "Onboarding, in this order"): consent states the window,
+ * then the ladder collects the permissions one screen at a time.
  */
 import { Redirect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,7 +39,7 @@ export default function ConsentRoute() {
       <ConsentScreen
         api={api}
         version={consent.version}
-        onAccepted={() => router.replace(landingRouteFor(actor.role))}
+        onAccepted={() => router.replace('/ladder')}
       />
     </SafeAreaView>
   );

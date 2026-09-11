@@ -33,14 +33,29 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["expo-font", { "fonts": [] }]
+      [
+        "expo-font",
+        {
+          "fonts": []
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false
     },
     "extra": {
       "apiBaseUrl": "http://localhost:8787",
-      "router": { "origin": false }
+      "router": {
+        "origin": false
+      }
     }
   }
 }

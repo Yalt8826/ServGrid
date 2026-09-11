@@ -25,6 +25,7 @@ export default function AuthLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="consent" />
+        <Stack.Screen name="ladder" />
         <Stack.Screen name="change-password" />
       </Stack>
     </QueryProvider>
