@@ -13,12 +13,16 @@
 import * as SQLite from 'expo-sqlite';
 
 import { MIRROR_DDL, MIRROR_SCHEMA_VERSION, type Mirror, type MirrorDatabase } from './mirror';
+import { ensureOutboxTable } from '../sync/outbox';
 
 export const MIRROR_DB_NAME = 'servgrid.db';
 
 export function openSqliteMirror(): Mirror {
   const database: MirrorDatabase = SQLite.openDatabaseSync(MIRROR_DB_NAME);
   database.execSync(MIRROR_DDL);
+  // T1.14: the outbox is the mirror's co-tenant in this file — created by
+  // the same open, so one door still prepares the whole database.
+  ensureOutboxTable(database);
   // Stamped once; a future schema change reads it and migrates. ON CONFLICT
   // DO NOTHING — re-opening an existing mirror must not clobber the version.
   database.runSync(

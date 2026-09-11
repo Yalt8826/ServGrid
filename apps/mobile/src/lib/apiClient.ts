@@ -10,6 +10,11 @@
  * - Only a `TOKEN_REUSED`, or a 401 on a refresh round trip that actually
  *   completed, logs anyone out — and the session is cleared exactly once,
  *   with a failed clear surfaced rather than swallowed.
+ *
+ * T1.14 adds one transport nuance: a FormData body (the outbox binary
+ * pass's multipart upload) passes through unstringified, so attachment
+ * uploads get the same 401 → refresh-once → retry-once contract with the
+ * same reuse-a-caller-supplied-key rule as every JSON call.
  */
 import type { TokenStore, StoredSession } from './tokenStore';
 import type { Role, ErrorCode, ErrorEnvelope } from './types';
@@ -189,10 +194,17 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
       'X-Device-Id': await deviceHeaderValue(),
     };
     if (accessToken !== undefined) headers.Authorization = `Bearer ${accessToken}`;
-    let wireBody: string | undefined;
+    let wireBody: string | FormData | undefined;
     if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
-      wireBody = JSON.stringify(body);
+      if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        // The outbox binary pass (T1.14): a multipart upload travels as
+        // FormData and must reach fetch unstringified — the runtime sets
+        // the Content-Type itself, because it carries the boundary.
+        wireBody = body;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        wireBody = JSON.stringify(body);
+      }
     }
     if (method !== 'GET' && idempotencyKey !== undefined) {
       // Mutations carry a key; the same logical operation keeps it across
