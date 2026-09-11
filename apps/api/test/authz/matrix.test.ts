@@ -9,6 +9,7 @@ import {
   employeeListResponseSchema,
   errorEnvelopeSchema,
   pingBatchResultSchema,
+  trackingHealthSchema,
   type ErrorCode,
   type ErrorEnvelope,
   type LoginResponse,
@@ -551,6 +552,23 @@ const ENDPOINTS: EndpointRow[] = [
     assertOk: (_actor, res) => {
       const result = pingBatchResultSchema.parse(res.json());
       expect(result.accepted + result.rejected.length).toBe(1);
+    },
+  },
+  {
+    name: 'GET /v1/location/health/me',
+    method: 'GET',
+    url: '/v1/location/health/me',
+    // §8 (T1.12): the health chip's self-scoped read. The route asks for
+    // the `own` cell on `location.health` × read — the technician and the
+    // sales rep have it; the dispatcher's `all` is the Phase 2 roster
+    // surface, not this chip, and the owner's `all` is the Phase 4 console
+    // — so both are 403 here whatever their cell's breadth. A 200 is the
+    // actor's own single row keyed off the token.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/location/health/me', headers: bearer(actor) }),
+    expect: { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: OK, anon: UNAUTHENTICATED },
+    assertOk: (actor, res) => {
+      const row = trackingHealthSchema.parse(res.json());
+      expect(row.employeeId).toBe(selfIds[actor!]);
     },
   },
   {

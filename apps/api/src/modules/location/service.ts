@@ -1,5 +1,7 @@
-import type { LocationPingPayload, PingBatchResultParsed, PingRejectCode } from '@servgrid/shared';
+import type { LocationPingPayload, PingBatchResultParsed, PingRejectCode, TrackingHealth } from '@servgrid/shared';
 import { getPool } from '../../db/pool.js';
+import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
+import { AppError } from '../../plugins/errors.js';
 import { isWithinWorkWindow, type WorkWindow } from '../../lib/time.js';
 import * as repo from './repo.js';
 
@@ -125,7 +127,33 @@ export function createLocationService(deps: LocationServiceDeps) {
     return { accepted, rejected, flagged };
   }
 
-  return { ingestPings };
+  /**
+   * GET /v1/location/health/me — the actor's own row of
+   * `v_employee_tracking_health` (PLAN-BACKEND.md §8), the data behind the
+   * profile's TrackingHealthChip. A dedicated self-scoped read, not the
+   * owner's console query with a WHERE bolted on: the repo's predicate is
+   * `employee_id = $1` bound to the token's subject, so there is no
+   * parameter a future edit could forget. A missing row means the actor
+   * was deactivated after this token was minted (the view carries active
+   * employees only) — the same refusal `GET /v1/employees/me` gives.
+   */
+  async function myHealth(employeeId: string): Promise<TrackingHealth> {
+    const row = await repo.findOwnHealth(getPool(), employeeId);
+    if (!row) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+    return {
+      employeeId: row.employeeId,
+      employeeName: row.employeeName,
+      role: row.role as TrackingHealth['role'],
+      deviceId: row.deviceId,
+      locationPermission: row.locationPermission as TrackingHealth['locationPermission'],
+      notificationsEnabled: row.notificationsEnabled,
+      lastPingAt: row.lastPingAt,
+      minutesSince: row.minutesSince,
+      health: row.health as TrackingHealth['health'],
+    };
+  }
+
+  return { ingestPings, myHealth };
 }
 
 export type LocationService = ReturnType<typeof createLocationService>;
