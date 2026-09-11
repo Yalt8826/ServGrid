@@ -40,6 +40,15 @@ export default defineConfig({
         replacement: here('./src/test-stubs/expo-secure-store.ts'),
       },
       {
+        // T1.13: the SQLite mirror runs against a REAL SQLite engine under
+        // vitest — Node's built-in node:sqlite behind expo-sqlite's sync
+        // surface (no mocked database). The seam also counts module
+        // evaluations, which is how the role-gate test proves a dispatcher
+        // session never even imports expo-sqlite.
+        find: /^expo-sqlite$/,
+        replacement: here('./src/test-stubs/expo-sqlite.ts'),
+      },
+      {
         find: /^expo-crypto$/,
         replacement: here('./src/test-stubs/expo-crypto.ts'),
       },
