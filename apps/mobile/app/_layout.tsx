@@ -12,6 +12,7 @@ import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import { api } from '../src/lib/api';
+import { armLocationTracking } from '../src/location/trackingGate';
 import { initPush } from '../src/push/notifications';
 import { registerPendingPushToken } from '../src/push/push';
 import { PLEX_FONT_SOURCES } from '../src/fonts/sources';
@@ -24,6 +25,14 @@ import { useSessionStore } from '../src/state/sessionStore';
 // the background sync task and the foreground listener; the pending
 // token ships after the bootstrap outcome is known.
 initPush();
+
+// Location tracking (T1.16): importing the gate registers the background
+// task at MODULE SCOPE — the OS may revive the app straight into it, so
+// the definition must exist before anything user-driven runs. Arming
+// adds the foreground flush (drain what the OS batched while the app
+// was away). Native only; the web bundle resolves a no-op stub and never
+// imports the task module (PLAN-FRONTEND.md §6).
+armLocationTracking();
 
 // Best-effort: a double-call or missing native module must not crash
 // start-up — the splash is presentation, not state.
