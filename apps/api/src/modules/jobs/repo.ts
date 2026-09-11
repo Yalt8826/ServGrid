@@ -150,11 +150,13 @@ export async function updateJobStatus(db: Db, jobId: string, to: JobStatus): Pro
 
 export interface JobEventInsert {
   jobCardId: string;
-  eventType: 'status_changed' | 'completed';
+  /** The event types the jobs module writes so far (§6.1–§6.3). */
+  eventType: 'status_changed' | 'completed' | 'cancelled' | 'rescheduled' | 'created';
   actorId: string;
   /** The client's occurredAt, already clamped by the service (§6.3). */
   occurredAt: string;
-  fromStatus: JobStatus;
+  /** Null for an event that is not a status move (a successor's `created`). */
+  fromStatus: JobStatus | null;
   toStatus: JobStatus;
   source: 'mobile' | 'web' | 'system';
   /** Set only when a clamp happened — the payload IS the clamp record. */
@@ -382,9 +384,7 @@ export interface ClosureActor {
   kind: 'cancelled' | 'completed';
   fullName: string;
   at: Date;
-}
-
-/**
+}/**
  * Who already closed this job — the JOB_ALREADY_CLOSED message names the
  * person and the moment (§6.1: "naming who cancelled it and when"). A
  * job carries at most one closure row, so LIMIT 1 cannot hide a second.
@@ -402,6 +402,154 @@ export async function findClosureActor(db: Db, jobId: string): Promise<ClosureAc
     [jobId],
   );
   return r.rows[0] ?? null;
+}
+
+// ── cancellation and rescheduling (§6.3) ────────────────────────────────────
+
+export interface JobCancelLockRow {
+  id: string;
+  status: JobStatus;
+  assigned_to: string | null;
+  /** Non-null only on a contract visit — Phase 2B flips the visit's status instead (§6.3). */
+  contract_visit_id: string | null;
+  // The fields the successor card copies (§6.3: same customer, same service).
+  customer_id: string;
+  service_id: string;
+  customer_product_id: string | null;
+  title: string;
+  description: string | null;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  contact_name: string | null;
+  contact_phone: string | null;
+}
+
+/**
+ * The row lock the whole cancellation holds to commit — the successor
+ * card, the cancellation row, the close and the event all run under it,
+ * so a completion or a status move racing the cancellation waits instead
+ * of interleaving (§6.2 step 1's shape, carried over).
+ */
+export async function lockJobForCancellation(db: Db, jobId: string): Promise<JobCancelLockRow | null> {
+  const r = await db.query<JobCancelLockRow>(
+    `SELECT id, status, assigned_to, contract_visit_id, customer_id, service_id,
+            customer_product_id, title, description, priority, contact_name, contact_phone
+     FROM job_cards WHERE id = $1 FOR UPDATE`,
+    [jobId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface CancellationInsert {
+  jobCardId: string;
+  cancelledBy: string;
+  cancelledAt: string;
+  reasonCode: string;
+  reasonNote: string | null;
+  /** Set when the transaction raised a successor card (§6.3). */
+  replacementJobId: string | null;
+}
+
+/**
+ * The 1:1 closure row (§3.4). `job_cancellations_other_justified` is the
+ * database's rule — 'other' without a note is refused HERE even if a
+ * caller skipped the schema; the service maps the violation to a
+ * readable 422 and never re-decides the rule.
+ */
+export async function insertCancellation(db: Db, c: CancellationInsert): Promise<void> {
+  await db.query(
+    `INSERT INTO job_cancellations
+       (job_card_id, cancelled_by, cancelled_at, reason_code, reason_note, replacement_job_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [c.jobCardId, c.cancelledBy, c.cancelledAt, c.reasonCode, c.reasonNote, c.replacementJobId],
+  );
+}
+
+/**
+ * Close the card at the moment of cancellation (`job_closed_coherent`
+ * ties the pair; the touch trigger bumps version). Same shape as
+ * completeJobCard — the endpoints that close jobs own `closed_at`.
+ */
+export async function cancelJobCard(db: Db, jobId: string, closedAt: string): Promise<void> {
+  await db.query(`UPDATE job_cards SET status = 'cancelled', closed_at = $2 WHERE id = $1`, [
+    jobId,
+    closedAt,
+  ]);
+}
+
+export interface SuccessorJobInsert {
+  jobNumber: string;
+  customerId: string;
+  serviceId: string;
+  customerProductId: string | null;
+  title: string;
+  description: string | null;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  /** The cancelled job's `rescheduleTo`, at IST midnight so `business_date` lands on the day asked for. */
+  scheduledFor: string;
+  contactName: string | null;
+  contactPhone: string | null;
+  /** The canceller — a human raised this card, unlike the generator's system cards (§3.4). */
+  createdBy: string;
+}
+
+/**
+ * The successor card (§6.3): same customer, same service, new date,
+ * `unassigned` — `job_assignment_coherent` holds because both sides of
+ * the assignment pair start NULL. Returns the id the cancellation row
+ * links as `replacement_job_id`.
+ */
+export async function insertSuccessorJob(db: Db, s: SuccessorJobInsert): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO job_cards
+       (job_number, customer_id, service_id, customer_product_id, title, description,
+        priority, status, scheduled_for, contact_name, contact_phone, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'unassigned', $8, $9, $10, $11)
+     RETURNING id`,
+    [
+      s.jobNumber,
+      s.customerId,
+      s.serviceId,
+      s.customerProductId,
+      s.title,
+      s.description,
+      s.priority,
+      s.scheduledFor,
+      s.contactName,
+      s.contactPhone,
+      s.createdBy,
+    ],
+  );
+  return r.rows[0]!.id;
+}
+
+export interface JobRescheduleLockRow {
+  id: string;
+  status: JobStatus;
+  /** The version the `If-Match` precondition is checked against. */
+  version: number;
+  scheduled_for: Date | null;
+}
+
+/**
+ * The row lock the reschedule holds. Status is read so the event's
+ * from/to can record that the card did NOT move — rescheduling leaves
+ * status alone (§6.3).
+ */
+export async function lockJobForReschedule(db: Db, jobId: string): Promise<JobRescheduleLockRow | null> {
+  const r = await db.query<JobRescheduleLockRow>(
+    'SELECT id, status, version, scheduled_for FROM job_cards WHERE id = $1 FOR UPDATE',
+    [jobId],
+  );
+  return r.rows[0] ?? null;
+}
+
+/**
+ * The reschedule itself — a write to `scheduled_for` and nothing else
+ * (§6.3: "It is not a cancellation"). No `closed_at`, no status; the
+ * touch trigger bumps `version` under the caller's If-Match.
+ */
+export async function rescheduleJobCard(db: Db, jobId: string, scheduledFor: string): Promise<void> {
+  await db.query('UPDATE job_cards SET scheduled_for = $2 WHERE id = $1', [jobId, scheduledFor]);
 }
 
 // ── the list (§6.3 GET /v1/jobs) ────────────────────────────────────────────
