@@ -1,50 +1,89 @@
 /**
- * `PendingBadge` (PLAN-FRONTEND.md §5, UI/plan-2/03-COMPONENTS.md). The
- * persistent count of queued + inflight outbox rows, in the header on
- * every screen for offline roles. It answers the technician's one quiet
- * question — "is my work queued or lost?" — and doubles as the fastest
- * field diagnostic there is: a badge that only goes up is a sync failure,
- * visible without anyone opening a log.
+ * `PendingBadge` (UI/plan-2/04-TECHNICIAN.md §T1 anatomy "⟳ 3",
+ * 02-MOTION.md §5.3): the visible proof that queued work exists — and,
+ * while a drain runs, the refresh indicator itself. Pull to refresh
+ * **drains the outbox and this badge is the indicator — never a platform
+ * spinner** (§6): there is no spinner anywhere in this component.
  *
- * The count reads `mono` (Plex Sans tabular) so it does not jitter as it
- * changes. It renders NOTHING at zero — the drained state is quiet, per
- * the component spec ("disappears" when the queue empties) and per the
- * dashboard rule that permanent chrome trains people to ignore it. The
- * drain's per-item tick and exit motion are T1.17's polish; this is the
- * load-bearing minimum T1.15's offline cold start asserts on.
+ * At zero it renders nothing. The count ticks in tabular figures so
+ * nothing reflows as it drains; at zero the badge scales out with
+ * `spring.press` (§5.3). Never a continuous animation — the badge is
+ * either still, or settling out of existence.
+ *
+ * Tapping it drains immediately — the one refresh gesture a standing,
+ * one-handed technician can always reach.
  */
-import { Text, View } from 'react-native';
+import { Pressable, Text } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { useEffect } from 'react';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { DURATION, RADII, SEMANTIC, SPRING } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 
 export interface PendingBadgeProps {
-  /** Queued + inflight rows for this employee (`pendingSyncCount`). */
+  /** Queued + inflight rows (the outbox's own count, `rejected` and
+   * `failed` excluded — kept rows are not pending work). */
   count: number;
+  /** A drain cycle is running: the badge holds still and visible. */
+  draining?: boolean;
+  onPress?: () => void;
   testID?: string;
 }
 
-export function PendingBadge({ count, testID }: PendingBadgeProps): React.ReactNode {
+export function PendingBadge({ count, draining = false, onPress, testID }: PendingBadgeProps): React.ReactNode {
+  // §5.3: the scale-out at zero is the satisfying half of the badge —
+  // the count drains down, then the badge leaves. Reduced motion (or the
+  // test seam) flips it instantly; movement is removed, feedback kept.
+  const visible = useSharedValue(count > 0 ? 1 : 0);
+
+  useEffect(() => {
+    visible.value = count > 0 ? withSpring(1, SPRING.press) : withTiming(0, { duration: DURATION.quick });
+  }, [count, visible]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: visible.value,
+    transform: [{ scale: visible.value }],
+  }));
+
   if (count <= 0) return null;
+
   return (
-    <View
-      testID={testID}
-      accessibilityLabel={`${count} ${count === 1 ? 'item' : 'items'} waiting to sync`}
-      style={{
-        alignSelf: 'stretch',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'flex-end',
-        minHeight: 36,
-        paddingHorizontal: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: SEMANTIC.line.default,
-        backgroundColor: SEMANTIC.bg.dense,
-      }}
-    >
-      <Text style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary }} testID={testID ? `${testID}-count` : undefined}>
-        {count} pending
-      </Text>
-    </View>
+    <Animated.View style={style}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          draining ? `Syncing ${count} items` : `${count} items waiting to sync — tap to sync now`
+        }
+        testID={testID}
+        onPress={onPress}
+        disabled={draining}
+        hitSlop={8}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          minHeight: 32,
+          paddingHorizontal: 10,
+          borderRadius: RADII.control,
+          borderWidth: 1,
+          borderColor: draining ? SEMANTIC.line.strong : SEMANTIC.line.default,
+          backgroundColor: SEMANTIC.bg.raised,
+        }}
+      >
+        <Text
+          style={{
+            ...textStyle('label'),
+            color: SEMANTIC.text.primary,
+            fontVariant: ['tabular-nums'],
+            marginRight: 6,
+          }}
+          testID={testID ? `${testID}-count` : undefined}
+        >
+          {String(count)}
+        </Text>
+        <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary }}>
+          {draining ? 'Syncing' : 'Pending'}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }

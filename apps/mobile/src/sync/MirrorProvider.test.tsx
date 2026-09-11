@@ -367,12 +367,15 @@ describe('PendingBadge', () => {
     expect(findByTestID(toJson(renderer), 'pending-badge')).toBeUndefined();
   });
 
-  it('renders the count mono/tabular, labelled for the screen reader', async () => {
+  it('renders the count tabular, labelled for the screen reader', async () => {
     const renderer = await create(<PendingBadge count={3} testID="pending-badge" />);
     const badge = findByTestID(toJson(renderer), 'pending-badge');
     expect(badge).toBeTruthy();
     // The host stub splits the JSX text interpolation; join before matching.
-    expect(allText(toJson(renderer)).join('')).toContain('3 pending');
-    expect(badge?.props.accessibilityLabel).toBe('3 items waiting to sync');
+    // T1.17's badge renders the count and its label as sibling texts.
+    const text = allText(toJson(renderer)).join('');
+    expect(text).toContain('3');
+    expect(text).toContain('Pending');
+    expect(badge?.props.accessibilityLabel).toBe('3 items waiting to sync — tap to sync now');
   });
 });

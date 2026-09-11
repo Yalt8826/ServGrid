@@ -74,6 +74,13 @@ export default defineConfig({
         find: /^@react-native-async-storage\/async-storage$/,
         replacement: here('./src/test-stubs/async-storage.ts'),
       },
+      {
+        // T1.17: FlashList is the jobs list on the handset; under vitest
+        // its rows render through the string-typed host seam like every
+        // other list, with the real row components and their logic.
+        find: /^@shopify\/flash-list$/,
+        replacement: here('./src/test-stubs/flash-list.ts'),
+      },
     ],
   },
 });
