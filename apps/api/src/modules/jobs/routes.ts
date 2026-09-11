@@ -4,26 +4,39 @@ import {
   JobCardDispatcherSchema,
   JobCardOwnerSchema,
   JobCardTechnicianSchema,
+  jobCancelSchema,
   jobCompleteSchema,
+  jobRescheduleSchema,
   jobStatusChangeSchema,
   jobStatusSchema,
   uuid,
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
-import { COMPLETION_ACTORS_MESSAGE, createJobsService } from './service.js';
+import {
+  CANCEL_ACTORS_MESSAGE,
+  COMPLETION_ACTORS_MESSAGE,
+  createJobsService,
+} from './service.js';
 
 /**
  * Jobs routes (PLAN-BACKEND.md §6.3): the reads and the status move of
  * T1.5 — `GET /v1/jobs`, `GET /v1/jobs/:id`, `POST /v1/jobs/:id/status` —
- * plus T1.6's `POST /v1/jobs/:id/complete`. Creation, assignment,
- * cancellation and the timeline are later tasks on the same module.
+ * T1.6's `POST /v1/jobs/:id/complete`, and T1.7's two date-writing
+ * paths: `POST /v1/jobs/:id/cancel` (which may raise a successor) and
+ * `PATCH /v1/jobs/:id` of `scheduled_for` (which never does). Creation,
+ * assignment and the timeline are later tasks on the same module.
  *
  * Response shape **by role** is three separate schemas (`JobCardTechnician`
  * / `JobCardDispatcher` / `JobCardOwner`, §6.3) — attached per request via
  * `responseSchemaByRole`, so the errors plugin asserts the actor's own
  * shape and a leaked money field is a failed response, not a schema
  * someone forgot to narrow.
+ *
+ * Cancelling and rescheduling are deliberately different doors (§6.3):
+ * cancel closes the card, writes `job_cancellations` and may raise a
+ * successor in the same transaction; PATCH moves `scheduled_for` under
+ * `If-Match` and leaves status and cancellations alone.
  *
  * The completion route is gated on the matrix cell that carries the
  * money (`job.money` × `create`): technician `own` (write-once at
@@ -75,6 +88,25 @@ function claimsOf(request: FastifyRequest) {
   const auth = request.auth;
   if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
   return auth;
+}
+
+/**
+ * PATCH carries `If-Match: <version>` — the optimistic-concurrency guard
+ * (§6.3, same shape as the employees module's): two dispatchers working
+ * the same queue must not overwrite each other's edit unnoticed. A stale
+ * version comes back 409 VERSION_CONFLICT naming the current one.
+ */
+function ifMatchVersion(request: FastifyRequest): number {
+  const raw = request.headers['if-match'];
+  const text = Array.isArray(raw) ? raw[0] : raw;
+  const version = Number(text);
+  if (text === undefined || !Number.isInteger(version) || version < 1) {
+    throw new AppError(
+      'VALIDATION_FAILED',
+      'This change did not say which version of the record it is editing — reload and try again.',
+    );
+  }
+  return version;
 }
 
 export const jobsRoutes: FastifyPluginAsync = async (app) => {
@@ -166,6 +198,66 @@ export const jobsRoutes: FastifyPluginAsync = async (app) => {
       const auth = claimsOf(request);
       const body = jobCompleteSchema.parse(request.body);
       return service.completeJob({ id: auth.sub, role: auth.role }, jobIdParam(request), body, request.context.source);
+    },
+  );
+
+  // §6.3: the wasted trip, recorded by whoever is there — dispatcher,
+  // owner, or the technician whose job it is. The matrix cell is
+  // `job` × `update`: a sales rep holds none of it and is 403 at the
+  // door; a technician passes the gate and is scoped to his own row in
+  // the service. With a `rescheduleTo` the successor card is raised in
+  // the SAME transaction and linked by `job_cancellations.replacement_job_id`.
+  app.post(
+    '/v1/jobs/:id/cancel',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('job', 'update', CANCEL_ACTORS_MESSAGE),
+      ],
+      config: {
+        // §6.3: dispatcher, owner, technician (own) — the cancelled card
+        // is answered in the actor's own shape.
+        responseSchemaByRole: {
+          owner: JobCardOwnerSchema,
+          dispatcher: JobCardDispatcherSchema,
+          technician: JobCardTechnicianSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = jobCancelSchema.parse(request.body);
+      return service.cancelJob({ id: auth.sub, role: auth.role }, jobIdParam(request), body, request.context.source);
+    },
+  );
+
+  // §6.3: rescheduling — a PATCH of `scheduled_for` under `If-Match`,
+  // emitting a `rescheduled` event and leaving status alone. It is NOT a
+  // cancellation; the office's door, not the technician's.
+  app.patch(
+    '/v1/jobs/:id',
+    {
+      preHandler: app.requireAuth,
+      config: {
+        // §6.3: dispatcher, owner — no technician or sales-rep card to
+        // validate, the service refuses those roles before any write.
+        responseSchemaByRole: {
+          owner: JobCardOwnerSchema,
+          dispatcher: JobCardDispatcherSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const ifMatch = ifMatchVersion(request);
+      const body = jobRescheduleSchema.parse(request.body);
+      return service.rescheduleJob(
+        { id: auth.sub, role: auth.role },
+        jobIdParam(request),
+        ifMatch,
+        body,
+        request.context.source,
+      );
     },
   );
 };

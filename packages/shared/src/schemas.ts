@@ -144,6 +144,23 @@ export const jobCancelSchema = z
     message: 'A cancellation with reason “other” requires a note.',
   });
 
+/**
+ * PATCH /v1/jobs/:id of `scheduled_for` (§6.3) — rescheduling. Moving a
+ * job to another day is NOT a cancellation (PLAN-DATA-MODEL.md §3.4):
+ * this is the office's path for it, sent under `If-Match`, emitting a
+ * `rescheduled` event and leaving status alone. The technician on site
+ * does not call this — he cancels with a `rescheduleTo` and lets the
+ * successor carry the new date.
+ */
+export const jobRescheduleSchema = z
+  .object({
+    scheduledFor: isoDateTime,
+  })
+  .strict();
+
+export type JobCancel = z.infer<typeof jobCancelSchema>;
+export type JobReschedule = z.infer<typeof jobRescheduleSchema>;
+
 // ── job card responses — one schema per role, no optional-field overlaps ────
 
 export const JobCardTechnicianSchema = z

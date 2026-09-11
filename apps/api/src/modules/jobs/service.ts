@@ -9,6 +9,7 @@ import {
 import { AppError } from '../../plugins/errors.js';
 import { getPool } from '../../db/pool.js';
 import { withTransaction } from '../../db/tx.js';
+import { allocateNumber } from '../../lib/sequences.js';
 import type { PoolClient } from 'pg';
 import type { RequestSource } from '../../plugins/request-context.js';
 import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
@@ -38,6 +39,15 @@ import * as repo from './repo.js';
  *
  * `en_route` is skippable: `assigned → in_progress` is accepted, because
  * a technician already on site should not have to lie to the app (§6.1).
+ *
+ * Cancelling and rescheduling are DIFFERENT operations that happen to
+ * both change a date (§6.3, §3.4): the cancel endpoint may raise a
+ * successor card when the work can still happen (`rescheduleTo`), while
+ * `PATCH /v1/jobs/:id` of `scheduled_for` moves the very same card under
+ * `If-Match` and never closes anything. They produce different events
+ * (`cancelled` vs `rescheduled`), different rows (`job_cancellations` vs
+ * none), and different consequences for a contract visit in Phase 2B —
+ * if they ever merge into one code path, separate them before continuing.
  */
 
 /** §6.2/§6.3: `occurredAt` may not be in the future nor older than this. */
@@ -57,6 +67,11 @@ const NOT_FOUND_MESSAGE = "We couldn't find that job.";
 const STATUS_ACTORS_MESSAGE = 'Job status is moved by the technician on site or the owner.';
 /** §6.3: completion is "technician (own), owner" — the matrix cell is `job.money` × `create`, which a dispatcher does not hold at all. */
 export const COMPLETION_ACTORS_MESSAGE = 'A job is completed by the technician who did the work or the owner.';
+/** §6.3: cancellation is "dispatcher, owner, technician (own)" — the matrix cell is `job` × `update`, which a sales rep does not hold at all. */
+export const CANCEL_ACTORS_MESSAGE = 'A job is cancelled by the office or the technician it is assigned to.';
+/** §6.3: PATCH is "dispatcher, owner" — a technician on site cancels with a new date instead of patching the card. */
+export const RESCHEDULE_ACTORS_MESSAGE =
+  'Rescheduling a job is done by the office — on site, cancel the job with the new date instead.';
 /** §6.2: "The warranty rule is a prompt, not a constraint" — nothing here forces cost to zero; the client confirms on site. */
 
 /** §3.1: the message is shown verbatim — it says what to do, not what failed. */
@@ -98,6 +113,23 @@ export function clampOccurredAt(occurredAt: string, now: number = Date.now()): C
     return { occurredAt: new Date(sent > now ? now : floor).toISOString(), clamped: true };
   }
   return { occurredAt: new Date(sent).toISOString(), clamped: false };
+}
+
+/** §6.3: the bound on `rescheduleTo` — a successor cannot be raised for a day already gone. */
+const RESCHEDULE_TO_PAST_MESSAGE = 'That date is already past — pick today or a day ahead.';
+
+/** The IST business date of `now` — the same `business_date()` the overdue filter and the day buckets read (migration 001). */
+export function istToday(now: number = Date.now()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(now));
+}
+
+/**
+ * A `YYYY-MM-DD` at IST midnight — the earliest instant OF that business
+ * day, so the generated `scheduled_date` column lands exactly on the day
+ * the caller asked for, wherever in the world the server clock sits.
+ */
+export function istMidnight(date: string): string {
+  return new Date(`${date}T00:00:00+05:30`).toISOString();
 }
 
 /** Which card projection an actor's role reads (§6.3) — three variants, never a merged one. */
@@ -336,7 +368,186 @@ export function createJobsService() {
     });
   }
 
-  return { listJobs, getJobCard, changeStatus, completeJob };
+  /**
+   * POST /v1/jobs/:id/cancel (§6.3) — the technician's or office's
+   * terminal close. With a `rescheduleTo` and an ordinary job, the
+   * successor card is raised INSIDE this same transaction and linked by
+   * `job_cancellations.replacement_job_id`, so the wasted trip and the
+   * fresh commitment commit together or not at all. A contract visit is
+   * Phase 2B: the branch is left, the visit flip is the hook below, and
+   * no successor is created here — the generator raises the fresh card
+   * when the visit comes due, and creating one now would double-raise.
+   */
+  async function cancelJob(
+    actor: Actor,
+    jobId: string,
+    input: { reasonCode: string; reasonNote?: string; rescheduleTo?: string },
+    source: RequestSource,
+  ): Promise<JobCardTechnician | JobCardDispatcher | JobCardOwner> {
+    // The row's cancellation moment is the server's clock — unlike
+    // completion there is no client `occurredAt` in the payload to clamp.
+    const cancelledAt = new Date().toISOString();
+
+    return withTransaction(async (client) => {
+      try {
+        const job = await repo.lockJobForCancellation(client, jobId);
+        if (job === null) {
+          throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+        }
+        if (actor.role === 'technician' && job.assigned_to !== actor.id) {
+          throw new AppError('OUT_OF_SCOPE', OUT_OF_SCOPE_MESSAGE);
+        }
+        if (job.status === 'cancelled' || job.status === 'completed') {
+          const closure = await repo.findClosureActor(client, jobId);
+          throw new AppError(
+            'JOB_ALREADY_CLOSED',
+            closure === null ? `This job is already ${job.status}.` : closedMessage(closure),
+          );
+        }
+
+        let successorId: string | null = null;
+        if (input.rescheduleTo !== undefined && job.contract_visit_id === null) {
+          if (input.rescheduleTo < istToday()) {
+            throw new AppError('VALIDATION_FAILED', RESCHEDULE_TO_PAST_MESSAGE);
+          }
+          // A fresh number from the same fiscal-year sequence any created
+          // job draws from — allocated on this transaction's client, so a
+          // rolled-back cancellation does not even leave a gap's claim.
+          const jobNumber = await allocateNumber('job', { db: client, at: new Date(cancelledAt) });
+          successorId = await repo.insertSuccessorJob(client, {
+            jobNumber,
+            customerId: job.customer_id,
+            serviceId: job.service_id,
+            customerProductId: job.customer_product_id,
+            title: job.title,
+            description: job.description,
+            priority: job.priority,
+            scheduledFor: istMidnight(input.rescheduleTo),
+            contactName: job.contact_name,
+            contactPhone: job.contact_phone,
+            createdBy: actor.id,
+          });
+          await repo.insertJobEvent(client, {
+            jobCardId: successorId,
+            eventType: 'created',
+            actorId: actor.id,
+            occurredAt: cancelledAt,
+            fromStatus: null, // a new card, not a move — the trail never implies one
+            toStatus: 'unassigned',
+            source,
+            payload: { cancelledJobId: jobId },
+          });
+        }
+
+        // Phase 2B: the visit returns to `scheduled` with
+        // `due_date = rescheduleTo`, or becomes `skipped` without one.
+        if (job.contract_visit_id !== null) {
+          await onContractVisitCancelled(client, job.contract_visit_id, input.rescheduleTo ?? null, actor.id);
+        }
+
+        await repo.insertCancellation(client, {
+          jobCardId: jobId,
+          cancelledBy: actor.id,
+          cancelledAt,
+          reasonCode: input.reasonCode,
+          reasonNote: input.reasonNote ?? null,
+          replacementJobId: successorId,
+        });
+        await repo.cancelJobCard(client, jobId, cancelledAt);
+        await repo.insertJobEvent(client, {
+          jobCardId: jobId,
+          eventType: 'cancelled',
+          actorId: actor.id,
+          occurredAt: cancelledAt,
+          fromStatus: job.status,
+          toStatus: 'cancelled',
+          source,
+          payload: {
+            reasonCode: input.reasonCode,
+            ...(input.reasonNote !== undefined ? { reasonNote: input.reasonNote } : {}),
+            ...(successorId !== null ? { replacementJobId: successorId } : {}),
+          },
+        });
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw mapDbRefusal(error);
+      }
+
+      const variant = variantForRole(actor.role);
+      const card = await repo.findCard(client, variant, jobId);
+      if (card === null) {
+        // Unreachable: the row is locked in this transaction and the close
+        // above succeeded. Never guess about a locked row.
+        throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
+      }
+      return toCard(variant, card);
+    });
+  }
+
+  /**
+   * PATCH /v1/jobs/:id of `scheduled_for` (§6.3) — rescheduling, the
+   * office's path. Under `If-Match` (a lost race is 409 naming the
+   * current version), emitting `rescheduled`, and deliberately touching
+   * neither status nor `job_cancellations`: a moved appointment is not a
+   * wasted trip. No past-date bound here — an open job whose day has
+   * passed is exactly what Overdue exists to surface, and the office may
+   * have honest reasons to set a date in the past the filter must still
+   * see.
+   */
+  async function rescheduleJob(
+    actor: Actor,
+    jobId: string,
+    ifMatch: number,
+    input: { scheduledFor: string },
+    source: RequestSource,
+  ): Promise<JobCardDispatcher | JobCardOwner> {
+    if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+      throw new AppError('FORBIDDEN', RESCHEDULE_ACTORS_MESSAGE);
+    }
+
+    return withTransaction(async (client) => {
+      const job = await repo.lockJobForReschedule(client, jobId);
+      if (job === null) {
+        throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+      }
+      if (job.version !== ifMatch) {
+        throw new AppError(
+          'VERSION_CONFLICT',
+          'This job changed after you opened it — reload it and try again.',
+          { currentVersion: job.version },
+        );
+      }
+
+      const scheduledFor = new Date(input.scheduledFor).toISOString();
+      await repo.rescheduleJobCard(client, jobId, scheduledFor);
+      await repo.insertJobEvent(client, {
+        jobCardId: jobId,
+        eventType: 'rescheduled',
+        actorId: actor.id,
+        occurredAt: new Date().toISOString(),
+        fromStatus: job.status,
+        toStatus: job.status, // the point: the card did not move
+        source,
+        payload: {
+          scheduledFor: {
+            from: job.scheduled_for === null ? null : new Date(job.scheduled_for).toISOString(),
+            to: scheduledFor,
+          },
+        },
+      });
+
+      const variant = variantForRole(actor.role);
+      const card = await repo.findCard(client, variant, jobId);
+      if (card === null) {
+        // Unreachable: the row is locked in this transaction and the
+        // update above succeeded. Never guess about a locked row.
+        throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
+      }
+      return toCard(variant, card) as JobCardDispatcher | JobCardOwner;
+    });
+  }
+
+  return { listJobs, getJobCard, changeStatus, completeJob, cancelJob, rescheduleJob };
 }
 
 // ── completion (§6.2) ───────────────────────────────────────────────────────
@@ -350,7 +561,7 @@ export function createJobsService() {
  * constraint's name. Moving a rule from the constraints into this
  * service would be the wrong fix in the other direction.
  */
-const COMPLETION_CONSTRAINT_MESSAGES: Readonly<Record<string, string>> = {
+const CONSTRAINT_MESSAGES: Readonly<Record<string, string>> = {
   completion_cost_non_negative: 'The amount cannot be negative.',
   completion_discount_non_negative: 'The discount cannot be negative.',
   completion_discount_bounded:
@@ -365,6 +576,7 @@ const COMPLETION_CONSTRAINT_MESSAGES: Readonly<Record<string, string>> = {
     'That serial is already recorded at another site — remove it there before installing it here.',
   job_completion_parts_product_or_name: 'Name the part — pick a product or type what it is.',
   job_completion_parts_quantity_positive: 'A part quantity must be more than zero.',
+  job_cancellations_other_justified: 'A cancellation with reason “other” requires a note.',
 };
 
 /** Said when a rule this table has no sentence for refuses the row — the rule stays in the database either way. */
@@ -386,7 +598,7 @@ function isPgViolation(error: unknown): error is PgViolation {
 
 function mapDbRefusal(error: unknown): Error {
   if (!isPgViolation(error)) return error instanceof Error ? error : new Error(String(error));
-  const known = error.constraint === undefined ? undefined : COMPLETION_CONSTRAINT_MESSAGES[error.constraint];
+  const known = error.constraint === undefined ? undefined : CONSTRAINT_MESSAGES[error.constraint];
   // 23514 check · 22003/22001 value too large · 23505 unique · 23503 foreign key
   if (error.code === '23514' || error.code === '22003' || error.code === '22001') {
     return new AppError('VALIDATION_FAILED', known ?? CONSTRAINT_FALLBACK_MESSAGE);
@@ -464,6 +676,26 @@ async function onContractVisitCompleted(
   _actorId: string,
 ): Promise<void> {
   /* Phase 2B: UPDATE contract_visits SET status = 'completed' … */
+}
+
+/**
+ * §6.3 — the contract-visit branch of cancellation. Phase 2B: with a
+ * `rescheduleTo` the visit returns to `scheduled` with
+ * `due_date = rescheduleTo` (the generator then raises a fresh card when
+ * it comes due — no successor is created here, or the work would
+ * double-raise); without one the visit becomes `skipped`, carrying the
+ * cancellation reason, and the customer has spent it. `contract_visits`
+ * is created by migration 015, which also adds job_cards.contract_visit_id's
+ * FOREIGN KEY; until then nothing reaches this hook. The skipped test in
+ * test/integration/cancellation.test.ts marks where the branch is asserted.
+ */
+async function onContractVisitCancelled(
+  _client: PoolClient,
+  _contractVisitId: string,
+  _rescheduleTo: string | null,
+  _actorId: string,
+): Promise<void> {
+  /* Phase 2B: UPDATE contract_visits SET status = $rescheduleTo ? 'scheduled' : 'skipped', due_date = … */
 }
 
 /** POST /v1/jobs/:id/complete (§6.2) — one transaction, eight steps. */

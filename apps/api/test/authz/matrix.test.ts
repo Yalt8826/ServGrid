@@ -214,6 +214,10 @@ const JOB_READERS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORB
 const STATUS_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: completion is "technician (own), owner", gated on `job.money` × `create` — a dispatcher's cell there is `none` outright. */
 const COMPLETION_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.3: cancellation is "dispatcher, owner, technician (own)" — the `job` × `update` cell, which a sales rep does not hold. */
+const CANCEL_ACTORS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.3: rescheduling (PATCH of scheduled_for) is "dispatcher, owner" — on site, the technician cancels with a new date instead. */
+const RESCHEDULE_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 
 const ENDPOINTS: EndpointRow[] = [
   {
@@ -489,6 +493,52 @@ const ENDPOINTS: EndpointRow[] = [
     expect: COMPLETION_ACTORS,
     assertOk: (actor, res) => {
       if (actor === 'technician') expect(res.json<{ status: string }>().status).toBe('completed');
+    },
+  },
+  {
+    name: 'POST /v1/jobs/:id/cancel',
+    method: 'POST',
+    url: '/v1/jobs/:id/cancel',
+    // A fresh assigned job per probe (§6.3): the assignee and the office
+    // close it; a technician's cell is `own`, so the row check in the
+    // service is what puts him inside; the sales rep holds none of the
+    // `job` × `update` cell and is 403 before the body is read; the
+    // anonymous caller is 401.
+    probe: async (actor) => {
+      const jobId = await seedJobAssignedToTechnician();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/jobs/${jobId}/cancel`,
+        headers: bearer(actor),
+        payload: { reasonCode: 'no_access', reasonNote: 'Matrix probe cancellation.' },
+      });
+    },
+    expect: CANCEL_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor !== null) expect(res.json<{ status: string }>().status).toBe('cancelled');
+    },
+  },
+  {
+    name: 'PATCH /v1/jobs/:id',
+    method: 'PATCH',
+    url: '/v1/jobs/:id',
+    // Rescheduling (§6.3): the office's door, under `If-Match` — a fresh
+    // job is at version 1, so the probe sends that; a technician, even on
+    // his own job, is 403 (his on-site reschedule is cancel with a
+    // `rescheduleTo`); a sales rep and the anonymous caller never pass
+    // the gate.
+    probe: async (actor) => {
+      const jobId = await seedJobAssignedToTechnician();
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/jobs/${jobId}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { scheduledFor: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
+      });
+    },
+    expect: RESCHEDULE_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor !== null) expect(res.json<{ status: string }>().status).toBe('assigned'); // status left alone
     },
   },
   {
