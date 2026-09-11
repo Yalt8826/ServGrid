@@ -1,29 +1,36 @@
-# Cold start with no signal (PLAN-FRONTEND.md §5.1).
+# Cold start with no signal (PLAN-FRONTEND.md §5.1, T1.15).
 #
 # Airplane mode, an expired access token, and a stored session: the app
-# must open straight onto the role's landing route — no login screen, no
-# spinner that resolves into a logout. A refresh that cannot reach the
+# must open straight onto the role's landing route rendering THE MIRROR —
+# yesterday's jobs, the pending badge intact — with no login screen and
+# no spinner that resolves into a logout. A refresh that cannot reach the
 # network is a retry, never a rejection.
 #
-# Runs properly in Phase 1 when there is a mirror to render (PHASE-0
-# spec, T0.11); the flow is written here so the contract is testable the
-# moment the first real screen lands.
-#
 # Setup performed by the driver before this flow runs:
-#   1. Install the app and log in once as a technician (stored session).
-#   2. Force-stop the app.
-#   3. Expire the access token on the server (or wait 15 minutes).
-#   4. Enable airplane mode.
-#   5. Relaunch the app cold.
+#   1. Install the app and log in once as a technician with at least one
+#      assigned job scheduled for yesterday; stay online until the first
+#      sync lands (the mirror fills).
+#   2. Enable airplane mode and complete that job's paper trail in the
+#      app once — i.e. queue at least one outbox row — so the badge has a
+#      count to hold. (An action taken offline enqueues without draining.)
+#   3. Force-stop the app.
+#   4. Expire the access token on the server (or wait 15 minutes).
+#   5. Keep airplane mode on and relaunch the app cold.
 
 appId: com.servgrid.app
-name: cold-start-offline — expired token, airplane mode, landing route renders
+name: cold-start-offline — expired token, airplane mode, mirror renders with badge
 ---
 - launchApp:
     clearState: false
 - assertVisible:
     id: '(app)/dashboard'
     label: 'the role landing route is rendered — no login screen'
+- assertVisible:
+    id: 'mirror-job-row'
+    label: 'the dashboard renders the mirror — yesterday''s jobs, no fetch behind them'
+- assertVisible:
+    id: 'pending-badge'
+    label: 'the pending badge is intact: queued work is visible, not lost'
 - assertNotVisible:
     text: '.*Sign in.*'
     label: 'login must not appear: a network-failed refresh never logs out'

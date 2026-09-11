@@ -11,6 +11,9 @@ import { Stack } from 'expo-router';
 import type { ReactNode } from 'react';
 import { NavShell } from '../../src/navigation/NavShell';
 import { RoleGate } from '../../src/navigation/RoleGate';
+import { api } from '../../src/lib/api';
+import { MirrorProvider } from '../../src/sync/MirrorProvider';
+import { systemTriggers } from '../../src/sync/triggers';
 import { configureQueryClient } from '../../src/state/runtimeQueryClient';
 import { useSessionStore } from '../../src/state/sessionStore';
 
@@ -24,8 +27,18 @@ function QueryProvider({ children }: { children: ReactNode }) {
 export default function AppLayout() {
   return (
     <QueryProvider>
-      <RoleGate>
-        <NavShell>
+      {/*
+       * T1.15: the mirror session opens here, off the splash path — the
+       * root layout has already bootstrapped the session from the token
+       * store (a local read), so nothing above or below this provider
+       * awaits the network before first render. `send` and `triggers`
+       * are the platform seams; Metro resolves `triggers` to its
+       * `.native.ts` counterpart on the handset and this file's default
+       * (inert) counterpart on web, where no offline role exists.
+       */}
+      <MirrorProvider send={api.request} triggers={systemTriggers}>
+        <RoleGate>
+          <NavShell>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="dashboard" />
             <Stack.Screen name="jobs/index" />
@@ -63,8 +76,9 @@ export default function AppLayout() {
             <Stack.Screen name="profile/tracking" />
             <Stack.Screen name="profile/settings" />
           </Stack>
-        </NavShell>
-      </RoleGate>
+          </NavShell>
+        </RoleGate>
+      </MirrorProvider>
     </QueryProvider>
   );
 }
