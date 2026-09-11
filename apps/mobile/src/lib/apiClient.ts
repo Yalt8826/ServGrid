@@ -50,6 +50,12 @@ export interface RequestInitLite {
   idempotencyKey?: string;
   /** Skip the Authorization header (login, refresh). */
   anonymous?: boolean;
+  /**
+   * Extra request headers for contracts that live in headers, not the
+   * body — the cash amendment's `If-Match: <version>` optimistic
+   * concurrency guard (PLAN-BACKEND.md §10) is the first consumer.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface LoginDevice {
@@ -175,6 +181,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
     body: unknown,
     idempotencyKey: string | undefined,
     accessToken: string | undefined,
+    extraHeaders: Record<string, string> | undefined,
   ): Promise<RawResponse> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
@@ -192,6 +199,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
       // every retry (PLAN-FRONTEND.md §5 — never regenerate).
       headers['Idempotency-Key'] = idempotencyKey;
     }
+    if (extraHeaders !== undefined) Object.assign(headers, extraHeaders);
     try {
       const res = await fetchImpl(url, { method, headers, body: wireBody });
       let json: unknown = null;
@@ -269,6 +277,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
       { refreshToken: session.refreshToken },
       key,
       undefined,
+      undefined,
     );
     if (res.networkError !== null) return 'refresh-failed-retryable';
     if (res.status === 429 || res.status >= 500) return 'refresh-failed-retryable';
@@ -317,6 +326,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         opts?.body,
         idempotencyKey,
         opts?.anonymous ? undefined : session?.accessToken,
+        opts?.headers,
       );
 
       // A revoked-chain rejection can arrive on any call; it is terminal
@@ -339,7 +349,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         }
         // refreshed — exactly one retry, with the same Idempotency-Key.
         const fresh = await store.load();
-        res = await rawSend(method, url, opts?.body, idempotencyKey, fresh?.accessToken);
+        res = await rawSend(method, url, opts?.body, idempotencyKey, fresh?.accessToken, opts?.headers);
         if (is401(res)) {
           // One refresh and one retry is the whole contract; a second 401
           // is returned, never a second refresh and never a logout.
@@ -352,7 +362,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
     },
 
     async login(username, password, device) {
-      const res = await rawSend('POST', `${baseUrl}/v1/auth/login`, { username, password, device }, await uuid(), undefined);
+      const res = await rawSend('POST', `${baseUrl}/v1/auth/login`, { username, password, device }, await uuid(), undefined, undefined);
       if (!res.ok) return toResult(res);
       const body = res.json as {
         accessToken?: unknown;
@@ -417,6 +427,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
           { refreshToken: session.refreshToken },
           await uuid(),
           session.accessToken,
+          undefined,
         );
       }
       await clearSession();
