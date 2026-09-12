@@ -14,6 +14,7 @@ import type { PoolClient } from 'pg';
 import type { RequestSource } from '../../plugins/request-context.js';
 import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
 import * as repo from './repo.js';
+import * as dispatcherRepo from './repo.dispatcher.js';
 
 /**
  * Jobs service (PLAN-BACKEND.md §6). The status machine's transition
@@ -132,15 +133,22 @@ export function istMidnight(date: string): string {
   return new Date(`${date}T00:00:00+05:30`).toISOString();
 }
 
-/** Which card projection an actor's role reads (§6.3) — three variants, never a merged one. */
+/**
+ * Which card projection THIS file builds for a role (§6.3) — technician
+ * and owner from `repo.ts`; the dispatcher's lives in repo.dispatcher.ts
+ * (the view-reading, lint-guarded file) and is branched to at the call
+ * sites below, never merged into one row the service trims.
+ */
 function variantForRole(role: Role): repo.CardVariant {
   switch (role) {
     case 'owner':
       return 'owner';
-    case 'dispatcher':
-      return 'dispatcher';
     case 'technician':
       return 'technician';
+    case 'dispatcher':
+      // Unreachable: every dispatcher read branches to dispatcherRepo
+      // before a variant is chosen (PLAN-BACKEND.md §5 rule 2).
+      throw new AppError('INTERNAL', 'The dispatcher card is read from the dispatcher view.');
     case 'sales_rep':
       throw new AppError('FORBIDDEN', FORBIDDEN_MESSAGE);
   }
@@ -171,7 +179,7 @@ function toTechnicianCard(row: repo.TechnicianCardRow): JobCardTechnician {
   };
 }
 
-function toDispatcherCard(row: repo.DispatcherCardRow): JobCardDispatcher {
+function toDispatcherCard(row: dispatcherRepo.DispatcherCardRow): JobCardDispatcher {
   return {
     id: row.id,
     jobNumber: row.job_number,
@@ -199,12 +207,10 @@ function toOwnerCard(row: repo.OwnerCardRow): JobCardOwner {
   };
 }
 
-function toCard(variant: repo.CardVariant, row: repo.CardRowBase): JobCardTechnician | JobCardDispatcher | JobCardOwner {
+function toCard(variant: repo.CardVariant, row: repo.CardRowBase): JobCardTechnician | JobCardOwner {
   switch (variant) {
     case 'technician':
       return toTechnicianCard(row as repo.TechnicianCardRow);
-    case 'dispatcher':
-      return toDispatcherCard(row as repo.DispatcherCardRow);
     case 'owner':
       return toOwnerCard(row as repo.OwnerCardRow);
   }
@@ -256,31 +262,77 @@ function decodeCursor(cursor: string): repo.ListCursor {
   throw new AppError('VALIDATION_FAILED', 'That page reference is stale — reload the list.');
 }
 
+/** The filters both list repositories carry, decoded from the query string. */
+function listFilterOf(query: JobListQuery): repo.JobListFilter {
+  return {
+    statuses: query.statuses,
+    technicianId: query.technicianId,
+    customerId: query.customerId,
+    from: query.from,
+    to: query.to,
+    overdue: query.overdue,
+    q: query.q,
+  };
+}
+
 export function createJobsService() {
-  /** GET /v1/jobs — one role-shaped page. `scope` is the rbac predicate (null = unrestricted). */
+  /**
+   * The actor's own card, read back after a write inside the caller's
+   * transaction (§6.3). The dispatcher's comes from the view — the write
+   * paths touch `job_cards` because only the database may change a card,
+   * but the read he is answered with obeys §5 rule 2 like every other
+   * dispatcher read. Unreachable-null is refused loudly: never guess
+   * about a locked row.
+   */
+  async function readBackCard(
+    actor: Actor,
+    client: PoolClient,
+    jobId: string,
+  ): Promise<JobCardTechnician | JobCardDispatcher | JobCardOwner> {
+    if (actor.role === 'dispatcher') {
+      const row = await dispatcherRepo.findDispatcherCard(client, jobId);
+      if (row === null) {
+        throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
+      }
+      return toDispatcherCard(row);
+    }
+    const variant = variantForRole(actor.role);
+    const card = await repo.findCard(client, variant, jobId);
+    if (card === null) {
+      throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
+    }
+    return toCard(variant, card);
+  }
+
+  /**
+   * GET /v1/jobs — one role-shaped page. `scope` is the rbac predicate
+   * (null = unrestricted). The dispatcher's page comes from
+   * repo.dispatcher.ts and `v_job_cards_dispatcher` — the same endpoint,
+   * a different query surface, held to the no-money-tables rule (§5
+   * rule 2); `?overdue=true` reads `is_overdue` from the view rather
+   * than recomputing it here, so list, dashboard and report cannot
+   * disagree about what overdue means.
+   */
   async function listJobs(
     actor: Actor,
     scope: { sql: string; params: readonly unknown[] } | null,
     query: JobListQuery,
   ): Promise<JobListPage> {
-    const variant = variantForRole(actor.role);
     const limit = query.limit ?? DEFAULT_PAGE_SIZE;
-    const page = await repo.listCards(
-      getPool(),
-      variant,
-      scope,
-      {
-        statuses: query.statuses,
-        technicianId: query.technicianId,
-        customerId: query.customerId,
-        from: query.from,
-        to: query.to,
-        overdue: query.overdue,
-        q: query.q,
-      },
-      query.cursor === undefined ? null : decodeCursor(query.cursor),
-      limit,
-    );
+    const cursor = query.cursor === undefined ? null : decodeCursor(query.cursor);
+    const filter = listFilterOf(query);
+
+    if (actor.role === 'dispatcher') {
+      const page = await dispatcherRepo.listDispatcherCards(getPool(), scope, filter, cursor, limit);
+      const rows = page.hasMore ? page.rows.slice(0, limit) : page.rows;
+      return {
+        items: rows.map(toDispatcherCard),
+        nextCursor: page.hasMore ? encodeCursor(rows[rows.length - 1]!) : null,
+      };
+    }
+
+    const variant = variantForRole(actor.role);
+    const page = await repo.listCards(getPool(), variant, scope, filter, cursor, limit);
     const rows = page.hasMore ? page.rows.slice(0, limit) : page.rows;
     return {
       items: rows.map((row) => toCard(variant, row)),
@@ -293,10 +345,19 @@ export function createJobsService() {
    * technician's scope is `assigned_to = actor`, checked on the fetched
    * row so a stranger's job is 403 OUT_OF_SCOPE and a missing one 404,
    * never a merged answer (the list endpoint scopes in SQL instead —
-   * plugins/rbac.ts). The money columns are not in the technician's
-   * query at all, so the check and the projection cannot disagree.
+   * plugins/rbac.ts). The dispatcher's row comes from the view (§5 rule
+   * 2); the money columns are in nobody's query here but the owner's, so
+   * the check and the projection cannot disagree.
    */
   async function getJobCard(actor: Actor, jobId: string): Promise<JobCardTechnician | JobCardDispatcher | JobCardOwner> {
+    if (actor.role === 'dispatcher') {
+      const row = await dispatcherRepo.findDispatcherCard(getPool(), jobId);
+      if (row === null) {
+        throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+      }
+      return toDispatcherCard(row);
+    }
+
     const variant = variantForRole(actor.role);
     const row = await repo.findCard(getPool(), variant, jobId);
     if (row === null) {
@@ -473,14 +534,7 @@ export function createJobsService() {
         throw mapDbRefusal(error);
       }
 
-      const variant = variantForRole(actor.role);
-      const card = await repo.findCard(client, variant, jobId);
-      if (card === null) {
-        // Unreachable: the row is locked in this transaction and the close
-        // above succeeded. Never guess about a locked row.
-        throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
-      }
-      return toCard(variant, card);
+      return readBackCard(actor, client, jobId);
     });
   }
 
@@ -536,14 +590,7 @@ export function createJobsService() {
         },
       });
 
-      const variant = variantForRole(actor.role);
-      const card = await repo.findCard(client, variant, jobId);
-      if (card === null) {
-        // Unreachable: the row is locked in this transaction and the
-        // update above succeeded. Never guess about a locked row.
-        throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
-      }
-      return toCard(variant, card) as JobCardDispatcher | JobCardOwner;
+      return (await readBackCard(actor, client, jobId)) as JobCardDispatcher | JobCardOwner;
     });
   }
 

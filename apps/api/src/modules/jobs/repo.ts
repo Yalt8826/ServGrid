@@ -1,5 +1,6 @@
 import type { JobStatus } from '@servgrid/shared';
 import type { Db } from '../auth/repo.js';
+import type { DispatcherCardRow } from './repo.dispatcher.js';
 
 /**
  * Jobs SQL (PLAN-BACKEND.md §2 module shape, §6.1/§6.3). Every function
@@ -7,17 +8,23 @@ import type { Db } from '../auth/repo.js';
  * transaction client of a caller's `withTransaction`, the same rule
  * auth/repo.ts and employees/repo.ts run under.
  *
- * The three card projections are three separate column lists, not one
- * wide row the service trims (§6.3: response shape by role is enforced
- * by three separate schemas — and the queries behind them mirror that
- * split, so a technician's read never even joins `job_completions`).
- * `job_cards` carries no money columns (migration 007's load-bearing
- * decision); money enters only through the owner variant's LEFT JOIN,
- * which is the one query with `job_completions` in it.
+ * The card projections are separate column lists, not one wide row the
+ * service trims (§6.3: response shape by role is enforced by separate
+ * schemas — and the queries behind them mirror that split, so a
+ * technician's read never even joins `job_completions`). `job_cards`
+ * carries no money columns (migration 007's load-bearing decision);
+ * money enters only through the owner variant's LEFT JOIN, which is the
+ * one query with `job_completions` in it.
+ *
+ * The dispatcher's card is NOT here: since T2.2 his reads go through
+ * repo.dispatcher.ts, which selects `v_job_cards_dispatcher` under the
+ * no-money-tables lint rule (PLAN-BACKEND.md §5 rule 2) — a dispatcher
+ * query that wandered to `job_completions` fails the build, not the
+ * customer's confidentiality.
  */
 
-/** Which of the three per-role card projections to build (§6.3). */
-export type CardVariant = 'technician' | 'dispatcher' | 'owner';
+/** Which of this file's per-role card projections to build (§6.3). The dispatcher reads repo.dispatcher.ts. */
+export type CardVariant = 'technician' | 'owner';
 
 interface VariantDef {
   columns: string;
@@ -29,9 +36,10 @@ interface VariantDef {
  * `is_overdue` is computed, not stored (§6.3: "overdue is a filter, not a
  * state"): an open job whose `scheduled_date` — the generated IST business
  * date — has passed. COALESCE keeps a job with no date yet honest (not
- * overdue) instead of NULL-ish. When `v_job_cards_dispatcher` lands with
- * the dispatcher phase it reads the same expression; until then the
- * definition lives here, once.
+ * overdue) instead of NULL-ish. The dispatcher's definition of the same
+ * expression moved into `v_job_cards_dispatcher` itself (migration 013);
+ * this copy exists only for the owner variant, which reads `job_cards`
+ * directly and may.
  */
 const OVERDUE_SQL = `COALESCE(
   jc.status NOT IN ('completed', 'cancelled') AND jc.scheduled_date < business_date(now()),
@@ -42,15 +50,6 @@ const VARIANT_DEFS: Readonly<Record<CardVariant, VariantDef>> = {
     columns: `jc.id, jc.job_number, jc.title, jc.status, jc.priority,
       jc.scheduled_for, jc.customer_id, jc.assigned_to, jc.contact_name,
       jc.contact_phone, jc.description, jc.version`,
-    joins: '',
-  },
-  dispatcher: {
-    columns: `jc.id, jc.job_number, jc.title, jc.status, jc.priority,
-      jc.scheduled_for, jc.customer_id, c.name AS customer_name,
-      jc.assigned_to,
-      ${OVERDUE_SQL} AS is_overdue,
-      (jc.contract_visit_id IS NOT NULL) AS is_contract_visit,
-      jc.version`,
     joins: '',
   },
   owner: {
@@ -91,13 +90,6 @@ export interface TechnicianCardRow extends CardRowBase {
   contact_name: string | null;
   contact_phone: string | null;
   description: string | null;
-}
-
-export interface DispatcherCardRow extends CardRowBase {
-  customer_name: string;
-  assigned_to: string | null;
-  is_overdue: boolean;
-  is_contract_visit: boolean;
 }
 
 export interface OwnerCardRow extends DispatcherCardRow {
