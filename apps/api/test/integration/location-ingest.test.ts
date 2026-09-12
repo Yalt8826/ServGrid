@@ -225,6 +225,15 @@ beforeAll(async () => {
   await seedAndLogin('technician', 'install-tech', TECH);
   await seedAndLogin('dispatcher', 'install-dispatcher', DISPATCHER);
   await seedAndLogin('sales_rep', 'install-rep', SALES_REP);
+
+  // Ping ingest ships dark (PLAN-EXECUTION.md §3): enable it for the two
+  // tracked roles the suite drives; the flag mechanics themselves are
+  // flags.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     VALUES ($1, 'tech.location', true), ($2, 'tech.location', true)`,
+    [TECH.id, SALES_REP.id],
+  );
 });
 
 afterAll(async () => {

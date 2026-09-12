@@ -43,3 +43,19 @@ export type FeatureFlagState = Readonly<Record<FeatureFlag, boolean>>;
 export function defaultFeatureFlags(): FeatureFlagState {
   return Object.fromEntries(FEATURE_FLAGS.map((flag) => [flag, false])) as FeatureFlagState;
 }
+
+/**
+ * Effective flags for one employee: the defaults (every flag off) with
+ * that employee's stored overrides applied on top. The single evaluation
+ * point — `GET /v1/auth/me`, the sync and ping gates and the owner's flag
+ * console all answer through it, so two readers can never disagree.
+ * Unknown flag names in `overrides` (a renamed flag lingering in the
+ * table) are ignored rather than trusted.
+ */
+export function evaluateFeatureFlags(overrides: Readonly<Record<string, boolean>>): FeatureFlagState {
+  const effective: Record<FeatureFlag, boolean> = { ...defaultFeatureFlags() };
+  for (const flag of FEATURE_FLAGS) {
+    if (flag in overrides) effective[flag] = overrides[flag]!;
+  }
+  return effective;
+}

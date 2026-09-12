@@ -245,6 +245,15 @@ beforeAll(async () => {
   await seedEmployee('technician', TECH_B);
   await seedEmployee('dispatcher', DISPATCHER);
   await seedEmployee('sales_rep', SALES_REP);
+
+  // The offline tier ships dark (PLAN-EXECUTION.md §3): the suite turns
+  // sync on for its two technicians the way the owner's flip would —
+  // the flag mechanics themselves are flags.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'tech.offline', true FROM employees WHERE username IN ($1, $2)`,
+    [TECH_A.username, TECH_B.username],
+  );
 });
 
 afterAll(async () => {

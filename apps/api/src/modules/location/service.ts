@@ -3,6 +3,7 @@ import { getPool } from '../../db/pool.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
 import { isWithinWorkWindow, type WorkWindow } from '../../lib/time.js';
+import { isFlagOn } from '../flags/service.js';
 import * as repo from './repo.js';
 
 /**
@@ -71,6 +72,19 @@ export function createLocationService(deps: LocationServiceDeps) {
   ): Promise<PingBatchResult> {
     const rejected: Array<{ index: number; code: PingRejectCode }> = [];
     const flagged: number[] = [];
+
+    // T0 rollback tier first (PLAN-EXECUTION.md Phase 1 rollback table):
+    // `tech.location` off means "server stops accepting". The batch still
+    // answers HTTP 200 — a rejected ping is a normal outcome (§8), and a
+    // per-ping DISABLED is what makes the handset clear its buffer
+    // instead of retrying the batch forever.
+    if (pings.length > 0 && !(await isFlagOn(employeeId, 'tech.location'))) {
+      return {
+        accepted: 0,
+        flagged: [],
+        rejected: pings.map((_, index) => ({ index, code: 'DISABLED' as const })),
+      };
+    }
 
     // Candidates that passed validation, deduplicated within the batch:
     // the table's own key is (employee_id, recorded_at), so a second ping
