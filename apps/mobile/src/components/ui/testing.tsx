@@ -9,6 +9,8 @@ import TestRenderer from 'react-test-renderer';
 
 export { React, act, TestRenderer };
 
+export type ReactTestRenderer = TestRenderer.ReactTestRenderer;
+
 export async function create(element: React.ReactElement): Promise<TestRenderer.ReactTestRenderer> {
   let renderer!: TestRenderer.ReactTestRenderer;
   await act(async () => {

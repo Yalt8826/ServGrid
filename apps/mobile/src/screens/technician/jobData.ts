@@ -148,6 +148,8 @@ export function readJobData(
   completedAtById: Record<string, string>;
   pendingCount: number;
   eventsByJobId: Record<string, JobTimelineEntry[]>;
+  /** The catalogue the complete sheet's parts picker offers (T1.19). */
+  products: Array<{ id: string; name: string; category: string }>;
 } {
   const records = database.getAllSync<JoinedRecord>(JOB_SELECT);
   const outboxRows = rowsForEmployee(database, employeeId);
@@ -198,7 +200,14 @@ export function readJobData(
 
   const pendingCount = outboxRows.filter((row) => row.status === 'queued' || row.status === 'inflight').length;
 
-  return { views, completedAtById, pendingCount, eventsByJobId };
+  // The parts catalogue (T1.19): the mirror's products, name order —
+  // the same rows the sync working set upserts, so the picker is local
+  // truth like everything else on this screen.
+  const products = database
+    .getAllSync<{ id: string; name: string; category: string }>('SELECT id, name, category FROM products ORDER BY name')
+    .map((product) => ({ id: product.id, name: product.name, category: product.category }));
+
+  return { views, completedAtById, pendingCount, eventsByJobId, products };
 }
 
 /**
