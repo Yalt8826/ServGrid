@@ -46,7 +46,8 @@
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
-      ]
+      ],
+      "./plugins/withGoogleServices"
     ],
     "experiments": {
       "typedRoutes": false

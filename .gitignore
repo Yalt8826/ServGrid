@@ -10,3 +10,12 @@ coverage/
 *.tsbuildinfo
 .DS_Store
 docs/zcode-implementation/
+
+# Secrets and per-app FCM config — credential material, never committed
+# (T0.15-RUNBOOK.md step 2)
+secrets/
+apps/mobile/google-services.json
+
+# Native projects are generated (CNG): prebuild, never commit
+apps/mobile/android/
+apps/mobile/ios/

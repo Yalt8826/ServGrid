@@ -14,7 +14,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { api } from '../src/lib/api';
 import { armLocationTracking } from '../src/location/trackingGate';
 import { initPush } from '../src/push/notifications';
-import { registerPendingPushToken } from '../src/push/push';
+import { acquirePushToken, registerPendingPushToken } from '../src/push/push';
 import { PLEX_FONT_SOURCES } from '../src/fonts/sources';
 import { bootstrapSession } from '../src/state/bootstrapSession';
 import { configureQueryClient } from '../src/state/runtimeQueryClient';
@@ -51,11 +51,18 @@ export default function RootLayout() {
         if (outcome.authenticated && outcome.actor !== null) {
           configureQueryClient(outcome.actor.role);
           useSessionStore.getState().setAuthenticated(outcome.actor);
-          // Session exists — ship any FCM token parked before login
-          // (T0.15: token delivery is the failure-prone half of FCM).
+          // Acquire this launch's FCM token, then ship any token parked
+          // before login (T0.15: token delivery is the failure-prone half
+          // of FCM). acquirePushToken parks what it gets and ships it
+          // itself when authenticated; registerPendingPushToken covers a
+          // token acquired on an earlier anonymous launch.
+          void acquirePushToken().catch(() => {});
           void registerPendingPushToken().catch(() => {});
         } else {
           useSessionStore.getState().setAnonymous();
+          // Anonymous launches still acquire: the token parks in pending
+          // storage and ships on the next successful login (push.ts gate).
+          void acquirePushToken().catch(() => {});
         }
       })
       .catch(() => {});

@@ -5,3 +5,7 @@ web-build/
 *.tsbuildinfo
 coverage/
 .expo/
+
+# Native project is generated (CNG) — prebuild, never commit
+android/
+ios/

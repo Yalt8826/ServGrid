@@ -77,6 +77,15 @@ export function initPush(): void {
     // Headless task for background/killed deliveries. defineTask is
     // global and one-shot per task name.
     TaskManager.defineTask(SYNC_ON_PUSH_TASK, () => runWake());
+    // defineTask alone is NOT enough (found on hardware, T0.15 probe
+    // 2026-09-12): background/terminated data-only deliveries reach the
+    // task only when it is also REGISTERED with the SDK. Without this,
+    // the foreground listener works and every backgrounded wake dies
+    // silently — the exact failure 6b of the runbook exists to surface.
+    void Notifications.registerTaskAsync(SYNC_ON_PUSH_TASK).catch(() => {
+      // Unregistered background wake — the foreground listener and the
+      // sync triggers still cover the session; retried next launch.
+    });
   } catch {
     // Not installed yet or registration refused — the foreground
     // listener below still handles foreground deliveries.
