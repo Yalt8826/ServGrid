@@ -159,7 +159,11 @@ export function timelineEntryOf(row: OutboxRow): JobTimelineEntry | null {
   if (row.path.endsWith('/completions')) {
     return { id: row.id, label: statusPillOf('completed').label, at: row.createdAt, to: 'completed' };
   }
-  if (row.path.endsWith('/cancellations')) {
+  if (row.path.endsWith('/cancel')) {
+    // POST /v1/jobs/:id/cancel (§6.3) — the technician's on-site
+    // cancellation (T1.20). The wire path this device queues is
+    // `/cancel`, so that is what folds; a cancellation must show in the
+    // docket's timeline from the moment of the tap, not after sync.
     return { id: row.id, label: statusPillOf('cancelled').label, at: row.createdAt, to: 'cancelled' };
   }
   return null;
