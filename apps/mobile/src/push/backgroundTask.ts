@@ -2,11 +2,11 @@
  * The headless sync trigger — the half of §12.1 that makes a data-only
  * push correct rather than just timely. The message carries no job
  * content; this task IS the handler: it triggers a refetch of the sync
- * queries (the full sync engine lands in a later phase — until then the
- * invalidated queries are whatever the running app has mounted, which
- * the probe test asserts), raises the local notification from the rows
- * just received, and must never throw (a rejected executor marks the
- * task failed in the OS and it will not be re-delivered).
+ * queries for the online-role surfaces mounted in react-query, hands the
+ * technician's half to the T2.6 composition (`handlePushWake` — one delta
+ * sync, then local notifications raised from the rows that arrived), and
+ * must never throw (a rejected executor marks the task failed in the OS
+ * and it will not be re-delivered).
  *
  * Registered as a headless Android task via `expo-task-manager`, so it
  * runs with the app backgrounded or killed — the exact condition the
@@ -15,15 +15,16 @@
  */
 import { getQueryClient } from '../state/runtimeQueryClient';
 import { useSessionStore } from '../state/sessionStore';
+import { handlePushWake } from '../notifications/handler';
 
 /** The expo-task-manager task name this module owns. */
 export const SYNC_ON_PUSH_TASK = 'servgrid-sync-on-push';
 
 /**
- * Queries the push means "the server has new work". Phase 0 has no sync
- * engine yet; the login/job queries are the closest real surface and the
- * same keys the sync engine will invalidate. Exported so tests can
- * assert against the same list.
+ * Queries the push means "the server has new work". The online roles'
+ * dashboards read through react-query; the offline role's mirror is
+ * refreshed by the delta sync inside `handlePushWake` instead. Exported
+ * so tests can assert against the same list.
  */
 export const PUSH_INVALIDATED_QUERY_KEYS = [
   ['jobs', 'list'],
@@ -31,11 +32,12 @@ export const PUSH_INVALIDATED_QUERY_KEYS = [
 ] as const;
 
 /**
- * One push delivery, foreground or background. Returns whether the
- * notification should be raised locally — the handler raises it from
- * rows it actually received, never from payload content (§12.1: a push
- * that carried the job would be stale the moment the office changed
- * something, and would leak job details to a logged-out handset).
+ * One push delivery, foreground or background. Returns whether the wake
+ * produced something observable — a notification raised from rows the
+ * sync actually received, or (with no mirror session) the query
+ * invalidation for the online surfaces. Never the payload: there is no
+ * payload content to show (§12.1), and a job the delta did not return
+ * raises nothing.
  */
 export async function handleDataOnlyPush(): Promise<boolean> {
   // A push to a logged-out handset must not fetch anything (its tokens
@@ -50,13 +52,16 @@ export async function handleDataOnlyPush(): Promise<boolean> {
     }
     hasClient = true;
   } catch {
-    // No query client yet (push raced the cold start). Nothing to
-    // refresh — the next foreground will sync anyway.
+    // No query client yet (push raced the cold start). The T2.6 sync
+    // below does not depend on one — a missing client only means no
+    // react-query surface needed refreshing.
   }
 
-  // The local notification is raised from the rows the sync just
-  // received. Until the sync engine exists the sync is the query
-  // invalidation itself, so the probe raises a bare confirmation —
-  // enough to prove delivery, never carrying job content.
-  return hasClient;
+  // The technician's half (T2.6, PLAN-FRONTEND.md §6): one delta sync,
+  // then LOCAL notifications composed from the rows that arrived. A
+  // missing mirror session degrades to no notification inside the
+  // handler — the next foreground sync recovers, every push is optional.
+  const raised = await handlePushWake();
+
+  return hasClient || raised;
 }
