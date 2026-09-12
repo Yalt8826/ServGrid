@@ -1,5 +1,6 @@
 import {
   canTransition,
+  type DispatcherSummary,
   type JobCardDispatcher,
   type JobCardOwner,
   type JobCardTechnician,
@@ -77,6 +78,8 @@ export const RESCHEDULE_ACTORS_MESSAGE =
   'Rescheduling a job is done by the office — on site, cancel the job with the new date instead.';
 /** §6.3: assign and bulk-assign are "dispatcher, owner" — the matrix cell is `job.assign`, which a technician or rep does not hold. */
 export const ASSIGN_ACTORS_MESSAGE = 'A job is assigned by the office — the dispatcher or the owner.';
+/** T2.7 (§D1): the summary figures are an all-rows console read — "dispatcher, owner"; a technician's `assigned` scope counts his own day, not the desk's. */
+export const SUMMARY_ACTORS_MESSAGE = 'The dashboard figures are read by the office — the field app has its own screens.';
 /** §6.3: the picker names a technician; anything else on that cell is a form error, not a 404. */
 const NOT_A_TECHNICIAN_MESSAGE = 'Pick a technician from the roster — that account is not an active technician.';
 /** §6.3: a stale version on a job with nobody on it has no name to give — the sentence stays actionable anyway. */
@@ -897,7 +900,25 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
     }));
   }
 
-  return { listJobs, getJobCard, changeStatus, completeJob, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad };
+  /**
+   * GET /v1/jobs/summary — the dispatcher dashboard's four figures
+   * (T2.7, UI/plan-2/05-DISPATCHER.md §D1). Counted in one query over
+   * `v_job_cards_dispatcher` in repo.dispatcher.ts, under the same lint
+   * rules as every dispatcher read: `is_overdue` is the VIEW's column,
+   * and done-today mirrors `v_technician_load`'s definition word for
+   * word, so the figure, the list and the load bars cannot disagree.
+   */
+  async function dispatcherSummary(): Promise<DispatcherSummary> {
+    const counts = await dispatcherRepo.summarizeDispatcherJobs(getPool());
+    return {
+      overdue: counts.overdue,
+      unassigned: counts.unassigned,
+      today: counts.today,
+      doneToday: counts.doneToday,
+    };
+  }
+
+  return { listJobs, getJobCard, changeStatus, completeJob, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
 }
 
 // ── completion (§6.2) ───────────────────────────────────────────────────────

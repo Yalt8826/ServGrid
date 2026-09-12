@@ -505,6 +505,23 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/jobs/summary',
+    method: 'GET',
+    url: '/v1/jobs/summary',
+    // The dashboard figures (T2.7, §D1): an all-rows console read, so
+    // the gate is requireAll on `job` × `read` behind `dispatch.console`
+    // — a technician's `own` cell counts his day, not the desk's, and
+    // is refused here.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/jobs/summary', headers: bearer(actor) }),
+    expect: { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const body = res.json<{ overdue: number; unassigned: number; today: number; doneToday: number }>();
+      for (const key of ['overdue', 'unassigned', 'today', 'doneToday'] as const) {
+        expect(typeof body[key], key).toBe('number');
+      }
+    },
+  },
+  {
     name: 'POST /v1/jobs/:id/status',
     method: 'POST',
     url: '/v1/jobs/:id/status',
@@ -723,6 +740,31 @@ const ENDPOINTS: EndpointRow[] = [
     assertOk: (_actor, res) => {
       const result = pingBatchResultSchema.parse(res.json());
       expect(result.accepted + result.rejected.length).toBe(1);
+    },
+  },
+  {
+    name: 'GET /v1/location/health',
+    method: 'GET',
+    url: '/v1/location/health',
+    // §8 (T2.7): the roster warning on the dispatcher's dashboard — the
+    // Phase 2 half of the health table. The gate is requireAll on
+    // `location.health` × read behind `dispatch.console`: the office
+    // roles hold `all`, the tracked roles hold `own` and are served by
+    // /health/me, so they are refused at this door, never handed a
+    // collection to enumerate. The rows carry health and last-ping age;
+    // no coordinate key exists anywhere in the payload (the money-leak
+    // walk holds that boundary by key, T2.7's "if it fails").
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/location/health', headers: bearer(actor) }),
+    expect: { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const rows = res.json<Array<Record<string, unknown>>>();
+      expect(Array.isArray(rows)).toBe(true);
+      for (const row of rows) {
+        expect(row, 'a health row').toHaveProperty('health');
+        expect(row).toHaveProperty('minutesSince');
+        expect(row).not.toHaveProperty('latitude');
+        expect(row).not.toHaveProperty('longitude');
+      }
     },
   },
   {

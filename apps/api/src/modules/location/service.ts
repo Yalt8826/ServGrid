@@ -57,6 +57,22 @@ function temporalOrWindowCode(ping: LocationPingPayload, nowMs: number, window: 
   return null;
 }
 
+/** One repo row shaped for the wire — the projection myHealth and
+ * rosterHealth share, so the chip and the roster cannot drift. */
+function toHealth(row: repo.TrackingHealthRow): TrackingHealth {
+  return {
+    employeeId: row.employeeId,
+    employeeName: row.employeeName,
+    role: row.role as TrackingHealth['role'],
+    deviceId: row.deviceId,
+    locationPermission: row.locationPermission as TrackingHealth['locationPermission'],
+    notificationsEnabled: row.notificationsEnabled,
+    lastPingAt: row.lastPingAt,
+    minutesSince: row.minutesSince,
+    health: row.health as TrackingHealth['health'],
+  };
+}
+
 export function createLocationService(deps: LocationServiceDeps) {
   /**
    * POST /v1/location/pings — validate per ping, insert the survivors in
@@ -154,20 +170,23 @@ export function createLocationService(deps: LocationServiceDeps) {
   async function myHealth(employeeId: string): Promise<TrackingHealth> {
     const row = await repo.findOwnHealth(getPool(), employeeId);
     if (!row) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
-    return {
-      employeeId: row.employeeId,
-      employeeName: row.employeeName,
-      role: row.role as TrackingHealth['role'],
-      deviceId: row.deviceId,
-      locationPermission: row.locationPermission as TrackingHealth['locationPermission'],
-      notificationsEnabled: row.notificationsEnabled,
-      lastPingAt: row.lastPingAt,
-      minutesSince: row.minutesSince,
-      health: row.health as TrackingHealth['health'],
-    };
+    return toHealth(row);
   }
 
-  return { ingestPings, myHealth };
+  /**
+   * GET /v1/location/health — the roster's rows of the same view, for
+   * the dispatcher's dashboard warning (T2.7) and the owner's Phase 4
+   * console. One shape with `/health/me` on purpose: a health row means
+   * the same thing everywhere it renders. The route's permission gate is
+   * the matrix's `location.health` cell (dispatcher `all`, rep/tech
+   * `own` — and their self-scoped surface is `/health/me`, not this).
+   */
+  async function rosterHealth(): Promise<TrackingHealth[]> {
+    const rows = await repo.listRosterHealth(getPool());
+    return rows.map(toHealth);
+  }
+
+  return { ingestPings, myHealth, rosterHealth };
 }
 
 export type LocationService = ReturnType<typeof createLocationService>;

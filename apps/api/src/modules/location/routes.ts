@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import {
   locationPingBatchSchema,
   pingBatchResultSchema,
@@ -9,6 +10,7 @@ import {
 import { createSlidingWindowLimiter } from '../../lib/rate-limit.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import { dispatchConsoleEnabled } from '../flags/gates.js';
 import { createLocationService } from './service.js';
 
 /**
@@ -18,12 +20,16 @@ import { createLocationService } from './service.js';
  * a rejected ping is a normal outcome, not a client error, and the
  * client must clear its buffer on any of these rather than retry forever.
  *
- * Plus the self-scoped health read `GET /v1/location/health/me` — the
- * TrackingHealthChip's data (T1.12). The roster reads are later phases'
- * work (§8: /health is Phase 2/4, /employees Phase 4) and are
- * deliberately not registered here: a path that does not exist answers
- * the framework's generic 404 to every role alike, so it cannot leak
- * that other employees' health rows exist.
+ * The health reads ship in phases (§8's table): `GET
+ * /v1/location/health/me` (Phase 1, the chip on his own profile) and,
+ * since T2.7, `GET /v1/location/health` — the roster warning on the
+ * dispatcher's dashboard, the same surface the owner's Phase 4 console
+ * will read. Both select `v_employee_tracking_health`: a health value
+ * and a last-ping age, with no coordinate column in the view at all.
+ * `/v1/location/employees` (Phase 4 — positions) is still deliberately
+ * not registered: a path that does not exist answers the framework's
+ * generic 404 to every role alike, so it cannot leak that other
+ * employees' positions exist.
  */
 
 /** §13 rate limits: ping ingest 60/min per device. Keyed on the signed
@@ -48,6 +54,11 @@ function claimsOf(request: FastifyRequest) {
  * not his own row — a dispatcher's `location.health` read is `all` (the
  * Phase 2 roster warning), and this is not that surface. */
 const HEALTH_ME_FORBIDDEN_MESSAGE = 'Tracking health shows your own handset only.';
+
+/** The roster read's refusal (T2.7): `location.health` × `read` is `all`
+ * for the office roles only — a tracked role's `own` cell is served by
+ * `/health/me`, never by a collection he could enumerate. */
+const HEALTH_ROSTER_FORBIDDEN_MESSAGE = 'Tracking health is read by the office.';
 
 /**
  * preHandler for `/me`-shaped self-service surfaces whose matrix cell is
@@ -123,5 +134,36 @@ export const locationRoutes: FastifyPluginAsync<{ workWindow: { start: string; e
       const auth = claimsOf(request);
       return service.myHealth(auth.sub);
     },
+  );
+
+  // §8 (T2.7): the roster read — the dispatcher's dashboard warning, and
+  // how this file finally carries a second health surface. The gate is
+  // `requireAll` on the matrix's `location.health` × `read` cell, not
+  // requirePermission: the cell is `all` for the office roles and `own`
+  // for the tracked ones, and `own` is served by `/health/me` — a
+  // technician asking the roster for a collection to enumerate is
+  // refused at the door (403), not handed a narrower answer. The console
+  // flag rides along because the warning is part of the dispatcher's
+  // console — the same T0 rollback tier as the figures and the picker —
+  // and a health payload answers no one else's surface. The response is
+  // attached per role so the money-leak suite's discovery walks it, and
+  // its walk entry asserts the boundary the hard way: health and age,
+  // never a coordinate.
+  app.get(
+    '/v1/location/health',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('location.health', 'read', HEALTH_ROSTER_FORBIDDEN_MESSAGE),
+        dispatchConsoleEnabled,
+      ],
+      config: {
+        responseSchemaByRole: {
+          owner: z.array(trackingHealthSchema),
+          dispatcher: z.array(trackingHealthSchema),
+        },
+      },
+    },
+    async () => service.rosterHealth(),
   );
 };

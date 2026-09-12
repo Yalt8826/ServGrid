@@ -129,3 +129,30 @@ export async function findOwnHealth(db: Db, employeeId: string): Promise<Trackin
   );
   return r.rows[0] ?? null;
 }
+
+/**
+ * The whole roster's health rows (PLAN-BACKEND.md §8 `GET
+ * /v1/location/health`, T2.7): the dispatcher's dashboard warning and
+ * the owner's Phase 4 console read the same projection. The selection is
+ * the VIEW — active employees only, health value and last-ping age, and
+ * no coordinate column exists to select — so this read cannot grow a
+ * position without a migration changing the view first, exactly the
+ * reviewable chokepoint §5 wants. This is a `location.health` read, never
+ * a step towards `location.read`.
+ */
+export async function listRosterHealth(db: Db): Promise<TrackingHealthRow[]> {
+  const r = await db.query<TrackingHealthRow>(
+    `SELECT employee_id AS "employeeId",
+            employee_name AS "employeeName",
+            role::text    AS role,
+            device_id     AS "deviceId",
+            location_permission AS "locationPermission",
+            notifications_enabled AS "notificationsEnabled",
+            to_json(last_ping_at)#>>'{}' AS "lastPingAt",
+            minutes_since::float8 AS "minutesSince",
+            health
+     FROM v_employee_tracking_health
+     ORDER BY employee_name`,
+  );
+  return r.rows;
+}

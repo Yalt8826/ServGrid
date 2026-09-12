@@ -304,6 +304,28 @@ export const TechnicianLoadSchema = z
 
 export type TechnicianLoad = z.infer<typeof TechnicianLoadSchema>;
 
+// ── dispatcher dashboard (§6.3 GET /v1/jobs/summary, UI/plan-2/05 §D1) ──────
+
+/**
+ * `GET /v1/jobs/summary` — the dashboard's four figures (overdue,
+ * unassigned, today, done today), counted server-side from
+ * `v_job_cards_dispatcher` with the same definitions the list reads, so
+ * the figure and the row cannot disagree about what overdue means
+ * (migration 013's whole point; T2.1). Counted, never derived client-side
+ * by paging: a figure that silently stops at the page boundary lies to
+ * the one role that acts on it.
+ */
+export const DispatcherSummarySchema = z
+  .object({
+    overdue: z.number().int().min(0),
+    unassigned: z.number().int().min(0),
+    today: z.number().int().min(0),
+    doneToday: z.number().int().min(0),
+  })
+  .strict(); // money-free by construction — the view has no value column
+
+export type DispatcherSummary = z.infer<typeof DispatcherSummarySchema>;
+
 // ── customers (§5 rule 3, §6.4) ─────────────────────────────────────────────
 
 export const CustomerCreateSchema = z
