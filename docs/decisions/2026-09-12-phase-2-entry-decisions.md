@@ -1,6 +1,6 @@
 # Phase 2 entry decisions — memos for the owner
 
-Date: 2026-09-12 · Status: **DRAFT — awaiting owner decision**
+Date: 2026-09-12 · Status: **DECIDED — both recommendations accepted by the owner, 2026-09-12**
 
 Phase 2 (Dispatcher) has two hard entry gates (Job Logs human trials; FCM proven end
 to end) and, per `docs/implementation/PHASE-2-DISPATCHER.md` ("Also decided before
@@ -43,7 +43,7 @@ risk the plan names. Recommended: **collapse to one** — the client counts the 
 the delta removed and posts a single summary: *"3 of your jobs were reassigned. You
 don't need to do anything."* Single reassigns keep the A1 copy.
 
-**Decision:** ☐ A1 ☐ A2 ☐ A3 · Bulk collapse: ☐ yes ☐ no — Signed: __________ Date: ________
+**Decision:** ☑ **A1** ☐ A2 ☐ A3 · Bulk collapse: ☑ **yes** — Decided by the owner, 2026-09-12 (accepted the recommendation as written).
 
 ---
 
@@ -78,9 +78,12 @@ send path (one check against `WORK_WINDOW_START/END` + `priority`); released pus
 fire at window-open in a batch. The technician's own window is IST-fixed per
 `.env`; no per-employee calendars exist in Phase 2.
 
-**Decision:** ☐ B1 ☐ B2 ☐ B3 — Signed: __________ Date: ________
+**Decision:** ☑ **B1** ☐ B2 ☐ B3 — Decided by the owner, 2026-09-12 (accepted the recommendation as written, including the hold-and-release refinement and the `urgent` bypass).
 
 ---
 
-*When both boxes are signed, this file becomes the record and `PLAN-BACKEND.md`
-§15 items 5–6 get their "Closed:" annotation in the next docs pass.*
+*Both decisions were taken on 2026-09-12 on the owner's instruction, accepting the
+recommended options as written. This file is the record; `PLAN-BACKEND.md` §15
+items 5–6 carry the corresponding "Closed:" annotations. T2.5 implements the
+hold-and-release send path and T2.6 composes the A1 copy with the bulk collapse —
+neither exists yet, and both are Phase 2 work.*
