@@ -114,6 +114,20 @@ const PREDICATES: Partial<Record<Resource, ResourcePredicates>> = {
       params: [actorId],
     }),
   },
+  'customer.stack': {
+    table: 'customer_products',
+    // §6.4: a technician's scope on the stack is `assigned`, not `all` —
+    // he corrects the equipment record at a site he has or has had a job
+    // for, never at large. Same reach as `customer` × `assigned`, one
+    // join further: the STACK row scopes through its customer. Registered
+    // with the customers module (T2.4); the matrix grants technician
+    // `assigned` on update/delete, so the predicate had to exist before a
+    // scoped stack write could run.
+    assigned: ({ actorId, paramStart, qualifier }) => ({
+      sql: `EXISTS (SELECT 1 FROM job_cards jc WHERE jc.customer_id = ${qualifier}.customer_id AND jc.assigned_to = $${paramStart})`,
+      params: [actorId],
+    }),
+  },
 };
 
 export interface ScopePredicateInput extends ScopePredicateOptions {

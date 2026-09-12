@@ -233,11 +233,53 @@ export const CustomerCreateSchema = z
   })
   .strict();
 
-/** The dispatcher form: `companyId` absent — and stripped server-side even if sent. */
-export const DispatcherCustomerCreateSchema = CustomerCreateSchema.omit({ companyId: true }).strict();
+/**
+ * The dispatcher's create payload (§5 rule 3): `companyId` is STRIPPED by
+ * this transform — not rejected, and not merely absent from the form. A
+ * field a role cannot read is a field it must not be able to write, and
+ * stripping it here means the value cannot survive any future handler
+ * someone adds on top of this schema: the row lands with company_id NULL.
+ */
+export const DispatcherCustomerCreateSchema = CustomerCreateSchema.transform((payload) => {
+  const rest = { ...payload };
+  delete rest.companyId;
+  return rest;
+});
 
 export type CustomerCreate = z.infer<typeof CustomerCreateSchema>;
 export type DispatcherCustomerCreate = z.infer<typeof DispatcherCustomerCreateSchema>;
+
+/** PATCH /v1/customers/:id (§6.4) — every field optional, one required. `companyId` is an owner and rep field (PLAN.md §5); null detaches the site. */
+export const customerPatchSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    phone: z.string().min(1).max(32).optional(),
+    altPhone: z.string().max(32).nullish(),
+    addressLine1: z.string().max(200).nullish(),
+    addressLine2: z.string().max(200).nullish(),
+    city: z.string().max(100).nullish(),
+    pincode: z.string().max(10).nullish(),
+    notes: z.string().max(2000).nullish(),
+    companyId: uuid.nullish(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+
+/**
+ * The dispatcher's PATCH: `companyId` cannot survive it — the same
+ * transform stripping as the create schema (§5 rule 3), so a payload made
+ * only of `companyId` becomes "nothing to change" and is refused after
+ * the strip, never honoured.
+ */
+export const dispatcherCustomerPatchSchema = customerPatchSchema
+  .transform((payload) => {
+    const rest = { ...payload };
+    delete rest.companyId;
+    return rest;
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+
+export type CustomerPatch = z.infer<typeof customerPatchSchema>;
 
 // ── cash handover (§10) ─────────────────────────────────────────────────────
 
@@ -857,3 +899,115 @@ export const syncBatchResponseSchema = z
   })
   .strict();
 export type SyncBatchResponse = z.infer<typeof syncBatchResponseSchema>;
+
+// ── customers, stack and catalogue REST (§6.4) ──────────────────────────────
+//
+// The §6.4 endpoints answer with the same row shapes the mirror carries
+// (§7) — the REST surface and the offline mirror showing two different
+// shapes for one table is a sync bug waiting for a field to disagree
+// about. The dispatcher's customer row is the one deliberate exception:
+// `companyId` is absent from it, because company data is a field he
+// cannot read (PLAN.md §5) — absent, never null-with-a-flag.
+
+export const CustomerSchema = SyncCustomerSchema;
+export type CustomerRecord = z.infer<typeof CustomerSchema>;
+
+/** The dispatcher never sees company data (PLAN.md §5: `company_id` is an owner and rep field). */
+export const CustomerDispatcherSchema = CustomerSchema.omit({ companyId: true }).strict();
+export type CustomerDispatcher = z.infer<typeof CustomerDispatcherSchema>;
+
+/** One unit standing at a site — active rows only (§3.3). */
+export const CustomerStackItemSchema = SyncCustomerProductSchema;
+export type CustomerStackItem = z.infer<typeof CustomerStackItemSchema>;
+
+/** GET /v1/customers/:id — the site plus its active stack (§6.4). */
+export const CustomerDetailSchema = CustomerSchema.extend({
+  stack: z.array(CustomerStackItemSchema),
+}).strict();
+export const CustomerDetailDispatcherSchema = CustomerDispatcherSchema.extend({
+  stack: z.array(CustomerStackItemSchema),
+}).strict();
+export type CustomerDetail = z.infer<typeof CustomerDetailSchema>;
+export type CustomerDetailDispatcher = z.infer<typeof CustomerDetailDispatcherSchema>;
+
+/**
+ * PATCH /v1/customers/:id/stack/:itemId (§6.4) — the correction case: a
+ * wrong serial, a warranty end, a miscounted quantity. Adding and
+ * removing a unit are the POST and DELETE doors; the payload here is
+ * exactly the three fields §6.4 names.
+ */
+export const stackItemPatchSchema = z
+  .object({
+    serialNumber: z.string().min(1).max(200).optional(),
+    quantity: z.number().int().min(1).max(9999).optional(),
+    warrantyExpiresOn: z.string().date().nullish(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+export type StackItemPatch = z.infer<typeof stackItemPatchSchema>;
+
+/** The catalogue (§6.4): read by everyone, written only by the owner — the same rows the mirror carries. */
+export const ProductSchema = SyncProductSchema;
+export const ServiceSchema = SyncServiceSchema;
+export type ProductRecord = z.infer<typeof ProductSchema>;
+export type ServiceRecord = z.infer<typeof ServiceSchema>;
+
+export const PRODUCT_CATEGORIES = ['ups', 'battery', 'inverter', 'accessory', 'spare'] as const;
+export const productCategorySchema = z.enum(PRODUCT_CATEGORIES);
+
+export const productCreateRequestSchema = z
+  .object({
+    sku: z.string().min(1).max(100),
+    name: z.string().min(1).max(200),
+    category: productCategorySchema,
+    brand: z.string().max(200).optional(),
+    modelNumber: z.string().max(200).optional(),
+    capacityLabel: z.string().max(100).optional(),
+    unit: z.string().max(20).optional(),
+    defaultPrice: moneyString.optional(),
+    warrantyMonths: z.number().int().min(0).max(1200).optional(),
+  })
+  .strict();
+export type ProductCreateRequest = z.infer<typeof productCreateRequestSchema>;
+
+/**
+ * `sku` is deliberately absent — it is UNIQUE outright (§3.2), so a
+ * correction goes through deactivation and a new SKU, never a rewrite of
+ * a code that sales and completions already cite. Deactivation is
+ * `isActive: false` — never a DELETE (§6.4).
+ */
+export const productPatchRequestSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    brand: z.string().max(200).nullish(),
+    modelNumber: z.string().max(200).nullish(),
+    capacityLabel: z.string().max(100).nullish(),
+    unit: z.string().max(20).nullish(),
+    defaultPrice: moneyString.nullish(),
+    warrantyMonths: z.number().int().min(0).max(1200).nullish(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+export type ProductPatchRequest = z.infer<typeof productPatchRequestSchema>;
+
+export const serviceCreateRequestSchema = z
+  .object({
+    code: z.string().min(1).max(50),
+    name: z.string().min(1).max(200),
+    description: z.string().max(1000).optional(),
+    defaultCharge: moneyString.optional(),
+  })
+  .strict();
+export type ServiceCreateRequest = z.infer<typeof serviceCreateRequestSchema>;
+
+export const servicePatchRequestSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(1000).nullish(),
+    defaultCharge: moneyString.nullish(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+export type ServicePatchRequest = z.infer<typeof servicePatchRequestSchema>;
