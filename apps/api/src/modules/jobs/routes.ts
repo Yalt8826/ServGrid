@@ -31,7 +31,11 @@ import {
  * / `JobCardDispatcher` / `JobCardOwner`, §6.3) — attached per request via
  * `responseSchemaByRole`, so the errors plugin asserts the actor's own
  * shape and a leaked money field is a failed response, not a schema
- * someone forgot to narrow.
+ * someone forgot to narrow. Since T2.2 the dispatcher's row is also a
+ * different QUERY: repo.dispatcher.ts selects `v_job_cards_dispatcher`
+ * under the money-table lint rule, and the recursive money-leak suite
+ * (test/authz/money-leak.test.ts) walks every dispatcher-reachable
+ * endpoint above this module to hold the line.
  *
  * Cancelling and rescheduling are deliberately different doors (§6.3):
  * cancel closes the card, writes `job_cancellations` and may raise a
@@ -128,8 +132,13 @@ export const jobsRoutes: FastifyPluginAsync = async (app) => {
       const auth = claimsOf(request);
       // null for owner/dispatcher (scope `all`); FORBIDDEN for sales_rep
       // (scope `none`); the technician's `own` predicate is composed into
-      // the list's WHERE clause — never filtered after the fact.
-      const scope = request.scopePredicate('job', 'read', { qualifier: 'jc' });
+      // the list's WHERE clause — never filtered after the fact. The
+      // qualifier names the row alias each role's query runs against:
+      // `job_cards jc` for the field, `v_job_cards_dispatcher v` for the
+      // desk (repo.dispatcher.ts, PLAN-BACKEND.md §5 rule 2).
+      const scope = request.scopePredicate('job', 'read', {
+        qualifier: auth.role === 'dispatcher' ? 'v' : 'jc',
+      });
       const query = jobListQuerySchema.parse(request.query ?? {});
       return service.listJobs({ id: auth.sub, role: auth.role }, scope, query);
     },

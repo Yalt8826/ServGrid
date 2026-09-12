@@ -1,0 +1,23 @@
+// EXPECTED TO FAIL LINT — this file exists to be copied to a temp path by
+// apps/api/test/integration/jobs-dispatcher.test.ts and run under eslint,
+// which MUST report servgrid-rules/no-sql-money-tables for the
+// job_completions reference. It is imported by nothing and carries a
+// non-.ts extension so no build, test runner or lint gate ever sees it
+// as a module; it is a fixture, not code.
+//
+// The shape it proves fatal is exactly the one T2.2 forbids: a dispatcher
+// query that starts from the view and then reaches for the money table
+// (PLAN-BACKEND.md §5 rule 2).
+
+export async function leakedDiscount(
+  db: { query(sql: string): Promise<unknown> },
+  jobId: string,
+): Promise<unknown> {
+  return db.query(
+    `SELECT v.id, done.cost, done.discount_amount
+       FROM v_job_cards_dispatcher v
+       LEFT JOIN job_completions done ON done.job_card_id = v.id
+      WHERE v.id = $1`,
+    [jobId],
+  );
+}
