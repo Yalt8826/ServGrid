@@ -112,9 +112,48 @@ export class MirrorUnavailableError extends Error {
   }
 }
 
-/** The capability check itself, exported for provider setup to branch on. */
+/**
+ * The capability check itself, exported for provider setup to branch on.
+ *
+ * **Offline capability is a property of role AND platform, not role alone.**
+ * `ROLE_CAPABILITIES` answers only half of it: a technician is an offline
+ * role, but `PLAN.md` §1 gives technicians and sales reps Android only —
+ * the web build exists for the owner. So there is no such thing as an
+ * offline *session* on web, and asking for one is how this went wrong:
+ * `roleHasMirror('technician')` returned true in a browser, the provider
+ * opened a mirror, and `expo-sqlite`'s web implementation (wa-sqlite)
+ * failed with `SharedArrayBuffer is not defined` — it needs cross-origin
+ * isolation the dev server does not send.
+ *
+ * That error also escaped the provider's try/catch, because wa-sqlite
+ * initialises inside a Web Worker and a throw on the worker thread never
+ * reaches the awaiting promise. Which is the argument for gating rather
+ * than catching: the only reliable way not to handle that failure is not
+ * to cause it.
+ *
+ * A technician who opens the web build therefore runs **online-only** —
+ * no mirror, no outbox — exactly like a dispatcher. That is a development
+ * convenience for looking at screens, not a supported configuration.
+ */
 export function roleHasMirror(role: Role): boolean {
-  return ROLE_CAPABILITIES[role].offline;
+  return ROLE_CAPABILITIES[role].offline && !isWebRuntime();
+}
+
+/**
+ * Deliberately inlined rather than imported from `lib/config`: that module
+ * reads `expo-constants`, which drags `expo-modules-core` into this file's
+ * import graph and breaks every vitest suite that touches the mirror.
+ * `mirror.ts` is imported by web code, so it stays free of native modules.
+ * Under vitest (node environment) there is no `document`, so this is false
+ * and the suites keep exercising the native path — the one the mirror
+ * actually has to be right about.
+ */
+function isWebRuntime(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof document !== 'undefined' &&
+    window.document?.nodeType === 9 // DOCUMENT_NODE — not a test shim
+  );
 }
 
 /**

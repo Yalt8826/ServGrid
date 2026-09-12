@@ -27,6 +27,7 @@ import {
   applyDeltaPage,
   clearMirror,
   openMirror,
+  roleHasMirror,
   readCursor,
   readRows,
   type Mirror,
@@ -391,4 +392,69 @@ describe('user switch', () => {
     // The outbox (T1.14) is filtered by employee_id, not wiped — clearing
     // the mirror must not (and here cannot) reach another module's table.
   });
+});
+
+describe('the mirror capability is role AND platform, not role alone', () => {
+  // PLAN.md §1: technicians and sales reps are Android-only; the web build
+  // exists for the owner. So there is no offline *session* on web, and a
+  // role-only gate is how a browser ended up asking wa-sqlite for a
+  // database and getting `SharedArrayBuffer is not defined`.
+  const withDocument = (fn: () => void): void => {
+    const g = globalThis as { window?: unknown; document?: unknown };
+    const hadWindow = 'window' in g;
+    const hadDocument = 'document' in g;
+    const prevWindow = g.window;
+    const prevDocument = g.document;
+    const doc = { nodeType: 9 };
+    g.document = doc;
+    g.window = { document: doc };
+    try {
+      fn();
+    } finally {
+      if (hadWindow) g.window = prevWindow;
+      else delete g.window;
+      if (hadDocument) g.document = prevDocument;
+      else delete g.document;
+    }
+  };
+
+  it('an offline role has a mirror on native', () => {
+    expect(roleHasMirror('technician')).toBe(true);
+    expect(roleHasMirror('sales_rep')).toBe(true);
+  });
+
+  it('an online role never has one', () => {
+    expect(roleHasMirror('dispatcher')).toBe(false);
+    expect(roleHasMirror('owner')).toBe(false);
+  });
+
+  it('NO role has one in a browser — including the offline roles', () => {
+    withDocument(() => {
+      for (const role of ['technician', 'sales_rep', 'dispatcher', 'owner'] as const) {
+        expect(roleHasMirror(role), `${role} must not open a mirror on web`).toBe(false);
+      }
+    });
+  });
+
+  it('openMirror refuses on web rather than reaching expo-sqlite', async () => {
+    // The provider does catch, but wa-sqlite initialises in a Web Worker
+    // and a throw on the worker thread never reaches the awaiting promise.
+    // Not causing the failure is the only reliable way not to handle it.
+    await withDocumentAsync(async () => {
+      await expect(openMirror('technician')).rejects.toThrow(/technician/);
+    });
+  });
+
+  async function withDocumentAsync(fn: () => Promise<void>): Promise<void> {
+    const g = globalThis as { window?: unknown; document?: unknown };
+    const doc = { nodeType: 9 };
+    g.document = doc;
+    g.window = { document: doc };
+    try {
+      await fn();
+    } finally {
+      delete g.window;
+      delete g.document;
+    }
+  }
 });
