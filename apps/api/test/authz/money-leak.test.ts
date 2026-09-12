@@ -124,6 +124,10 @@ const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'GET', url: '/v1/jobs/:id' },
   { method: 'POST', url: '/v1/jobs/:id/cancel' },
   { method: 'PATCH', url: '/v1/jobs/:id' },
+  // T2.3: assignment, bulk reassign and the picker.
+  { method: 'POST', url: '/v1/jobs/:id/assign' },
+  { method: 'POST', url: '/v1/jobs/bulk-assign' },
+  { method: 'GET', url: '/v1/technicians/load' },
 ];
 
 /** The IST noon `offsetDays` from today — an unambiguous instant inside a business day. */
@@ -227,6 +231,25 @@ let techId = '';
 let doneJobId = '';
 let cancelJobId = '';
 let patchJobId = '';
+// T2.3 walk fixtures: one job per assignment door.
+let assignJobId = '';
+let bulkJobId1 = '';
+let bulkJobId2 = '';
+
+/** The dispatcher's console and bulk flags are ON here — the walk must reach 200 to walk a payload at all. */
+async function seedDispatcherFlags(employeeId: string): Promise<void> {
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled, updated_by)
+     VALUES ($1, 'dispatch.console', true, $1), ($1, 'dispatch.bulk', true, $1)`,
+    [employeeId],
+  );
+}
+
+/** The current version of a job row — the `If-Match` the walk's assigns must carry. */
+async function versionOf(jobId: string): Promise<number> {
+  return (await db.query<{ version: number }>('SELECT version FROM job_cards WHERE id = $1', [jobId]))
+    .rows[0]!.version;
+}
 
 beforeAll(async () => {
   admin = new Pool({ connectionString: adminUrlFor(databaseUrl()), max: 2 });
@@ -258,6 +281,7 @@ beforeAll(async () => {
 
   await seedEmployee('dispatcher', DISPATCHER);
   await seedEmployee('owner', OWNER);
+  await seedDispatcherFlags(DISPATCHER.id);
 
   techId = (
     await db.query<{ id: string }>(
@@ -284,6 +308,11 @@ beforeAll(async () => {
   patchJobId = await seedJob({ status: 'assigned' });
   // One more open job with a past date, so the list serves a real page.
   await seedJob({ status: 'assigned', scheduledFor: istNoonUtc(-3) });
+  // T2.3's doors: one unassigned job for the single assign, two open jobs
+  // for the bulk.
+  assignJobId = await seedJob({ status: 'unassigned' });
+  bulkJobId1 = await seedJob({ status: 'assigned' });
+  bulkJobId2 = await seedJob({ status: 'unassigned' });
 });
 
 afterAll(async () => {
@@ -389,6 +418,53 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     const hits: string[] = [];
     walkKeys(JSON.parse(res.body), '$', hits);
     expect(hits, `money keys leaked on reschedule: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('POST /v1/jobs/:id/assign — the card read back after the assignment', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/jobs/${assignJobId}/assign`,
+      headers: { ...bearer(DISPATCHER), 'if-match': String(await versionOf(assignJobId)) },
+      payload: { technicianId: techId },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on assign: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('POST /v1/jobs/bulk-assign — partial results walked through results[].job', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/jobs/bulk-assign',
+      headers: bearer(DISPATCHER),
+      payload: {
+        technicianId: techId,
+        jobIds: [
+          { id: bulkJobId1, ifMatch: await versionOf(bulkJobId1) },
+          { id: bulkJobId2, ifMatch: await versionOf(bulkJobId2) },
+        ],
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body).results).toHaveLength(2);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on bulk-assign: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('GET /v1/technicians/load — the picker rows, recursed', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/technicians/load', headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(Array.isArray(JSON.parse(res.body))).toBe(true);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on technician load: ${hits.join(', ')}`).toEqual([]);
+    // The picker is where the dispatcher gets names — but never completions.
+    expect(res.body).not.toContain('ompletion');
   });
 
   it('the fixture is self-proving: the OWNER reads the money the dispatcher must not', async () => {

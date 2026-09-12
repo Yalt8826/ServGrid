@@ -151,6 +151,16 @@ async function seedJobAssignedToTechnician(): Promise<string> {
   return r.rows[0]!.id;
 }
 
+/** A fresh UNASSIGNED job at version 1 — the assign probes' target (T2.3). */
+async function seedJobUnassigned(): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO job_cards (job_number, customer_id, service_id, title, status)
+     VALUES ($1, $2, $3, 'Matrix probe job', 'unassigned') RETURNING id`,
+    [`JC-T10-${randomBytes(4).toString('hex')}`, customerId, serviceId],
+  );
+  return r.rows[0]!.id;
+}
+
 async function seedEmployee(role: Role, username = `emp.t10.${randomBytes(4).toString('hex')}`): Promise<{ id: string; username: string }> {
   const r = await db.query<{ id: string }>(
     `INSERT INTO employees (username, password_hash, full_name, role)
@@ -219,6 +229,8 @@ const COMPLETION_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sa
 const CANCEL_ACTORS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: rescheduling (PATCH of scheduled_for) is "dispatcher, owner" — on site, the technician cancels with a new date instead. */
 const RESCHEDULE_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.3 (T2.3): assignment and bulk reassign are "dispatcher, owner" — the `job.assign` cell, which a technician and a rep do not hold. */
+const ASSIGN_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §7 (T1.8): the sync doors are the technician handset's — Phase 1 builds his working set, the
  * sales-rep mirror arrives with the sales module, and dispatcher/owner work online by design. */
 const SYNC_ACTORS = { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
@@ -568,6 +580,75 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'POST /v1/jobs/:id/assign',
+    method: 'POST',
+    url: '/v1/jobs/:id/assign',
+    // Assignment (§6.3, T2.3): the office's door — the `job.assign` cell
+    // is the owner's and the dispatcher's; a technician and a rep hold
+    // `none` and are 403 before the body is read. A fresh unassigned job
+    // is at version 1, so the probe sends that; the console flag rides
+    // enabled for the office roles (see beforeAll). The anonymous caller
+    // is 401 at requireAuth, before the precondition is even read.
+    probe: async (actor) => {
+      const jobId = await seedJobUnassigned();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/jobs/${jobId}/assign`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { technicianId: selfIds.technician },
+      });
+    },
+    expect: ASSIGN_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor !== null) {
+        const card = res.json<{ status: string; assignedTo: string | null }>();
+        expect(card.status).toBe('assigned');
+        expect(card.assignedTo).toBe(selfIds.technician);
+      }
+    },
+  },
+  {
+    name: 'POST /v1/jobs/bulk-assign',
+    method: 'POST',
+    url: '/v1/jobs/bulk-assign',
+    // Bulk reassign (§6.3, T2.3): the same `job.assign` cell, behind the
+    // separate `dispatch.bulk` flag (also riding enabled here). One job
+    // at version 1 — the partial-result behaviour itself is
+    // integration/assign.test.ts's subject; this row pins who may call.
+    probe: async (actor) => {
+      const jobId = await seedJobUnassigned();
+      return app.inject({
+        method: 'POST',
+        url: '/v1/jobs/bulk-assign',
+        headers: bearer(actor),
+        payload: { technicianId: selfIds.technician, jobIds: [{ id: jobId, ifMatch: 1 }] },
+      });
+    },
+    expect: ASSIGN_ACTORS,
+    assertOk: (_actor, res) => {
+      const body = res.json<{ results: Array<{ ok: boolean; job?: { assignedTo: string | null } }> }>();
+      expect(body.results).toHaveLength(1);
+      expect(body.results[0]!.ok).toBe(true);
+      expect(body.results[0]!.job!.assignedTo).toBe(selfIds.technician);
+    },
+  },
+  {
+    name: 'GET /v1/technicians/load',
+    method: 'GET',
+    url: '/v1/technicians/load',
+    // The picker (§6.3, T2.3): dispatcher and owner read `v_technician_load`
+    // — and get technician NAMES, since /v1/employees is owner-only; a
+    // technician and a rep hold none of `job.assign` read. The row for the
+    // matrix technician proves the right rows came back.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/technicians/load', headers: bearer(actor) }),
+    expect: ASSIGN_ACTORS,
+    assertOk: (_actor, res) => {
+      const rows = res.json<Array<{ employeeId: string; technicianName: string }>>();
+      expect(Array.isArray(rows)).toBe(true);
+      expect(rows.some((row) => row.employeeId === selfIds.technician)).toBe(true);
+    },
+  },
+  {
     name: 'POST /v1/devices',
     method: 'POST',
     url: '/v1/devices',
@@ -873,6 +954,19 @@ beforeAll(async () => {
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
      SELECT id, 'tech.offline', true FROM employees WHERE username = $1`,
     [usernames.technician],
+  );
+
+  // Same for the dispatcher surface (T2.3): the assign/bulk/load probes
+  // exercise ROLE authorization, so the two office roles ride with
+  // `dispatch.console` and `dispatch.bulk` enabled — the flags' own
+  // switchable behaviour is integration/flags.test.ts's and
+  // integration/assign.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, f.flag, true
+     FROM employees
+     CROSS JOIN (VALUES ('dispatch.console'), ('dispatch.bulk')) AS f(flag)
+     WHERE employees.role IN ('owner', 'dispatcher')`,
   );
 
   // The jobs-endpoint probes need a real job (migration 007) assigned to

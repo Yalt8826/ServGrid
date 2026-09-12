@@ -67,6 +67,36 @@ export async function findDispatcherCard(db: Db, jobId: string): Promise<Dispatc
   return r.rows[0] ?? null;
 }
 
+// ── the assignment picker (§6.3 GET /v1/technicians/load) ───────────────────
+
+export interface TechnicianLoadRow {
+  employee_id: string;
+  technician_name: string;
+  open_today: string;
+  done_today: string;
+  open_total: string;
+  active_since: Date | null;
+}
+
+/**
+ * `v_technician_load` (migration 013) for the picker and the dashboard's
+ * load list — the same object, so the picker and the count cannot
+ * disagree about who is busy. One per ACTIVE technician, busiest first —
+ * the order the picker renders. The counts arrive as Postgres `bigint`
+ * text and are numbered in the service; `active_since` is the promised
+ * start of the job he is currently ON. This file is under the
+ * no-sql-money-tables lint rule on purpose: the view reads job_cards and
+ * employees, and it must stay that way.
+ */
+export async function listTechnicianLoad(db: Db): Promise<TechnicianLoadRow[]> {
+  const r = await db.query<TechnicianLoadRow>(
+    `SELECT employee_id, technician_name, open_today, done_today, open_total, active_since
+     FROM v_technician_load
+     ORDER BY open_total DESC, technician_name`,
+  );
+  return r.rows;
+}
+
 export interface DispatcherListFilter {
   statuses?: JobStatus[];
   technicianId?: string;

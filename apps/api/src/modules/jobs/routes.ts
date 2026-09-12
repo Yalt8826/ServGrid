@@ -1,9 +1,13 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z, type ZodTypeAny } from 'zod';
 import {
+  BulkAssignResponseSchema,
   JobCardDispatcherSchema,
   JobCardOwnerSchema,
   JobCardTechnicianSchema,
+  TechnicianLoadSchema,
+  jobAssignSchema,
+  jobBulkAssignSchema,
   jobCancelSchema,
   jobCompleteSchema,
   jobRescheduleSchema,
@@ -13,7 +17,9 @@ import {
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import { isFlagOn } from '../flags/service.js';
 import {
+  ASSIGN_ACTORS_MESSAGE,
   CANCEL_ACTORS_MESSAGE,
   COMPLETION_ACTORS_MESSAGE,
   createJobsService,
@@ -98,19 +104,62 @@ function claimsOf(request: FastifyRequest) {
  * PATCH carries `If-Match: <version>` — the optimistic-concurrency guard
  * (§6.3, same shape as the employees module's): two dispatchers working
  * the same queue must not overwrite each other's edit unnoticed. A stale
- * version comes back 409 VERSION_CONFLICT naming the current one.
+ * version comes back 409 VERSION_CONFLICT naming the current one. The
+ * refusal for a MISSING header is the caller's choice: the PATCH treats
+ * it as a malformed edit (422), while assign treats it as the missing
+ * precondition it is (428, below) — the status written for a conditional
+ * request that refused to say what it was conditional on.
  */
-function ifMatchVersion(request: FastifyRequest): number {
+function ifMatchVersion(request: FastifyRequest, missing: () => AppError): number {
   const raw = request.headers['if-match'];
   const text = Array.isArray(raw) ? raw[0] : raw;
   const version = Number(text);
   if (text === undefined || !Number.isInteger(version) || version < 1) {
-    throw new AppError(
-      'VALIDATION_FAILED',
-      'This change did not say which version of the record it is editing — reload and try again.',
-    );
+    throw missing();
   }
   return version;
+}
+
+/** PATCH's wording: a malformed edit. */
+const RESCHEDULE_MISSING_IF_MATCH = (): AppError =>
+  new AppError(
+    'VALIDATION_FAILED',
+    'This change did not say which version of the record it is editing — reload and try again.',
+  );
+
+/** Assign's wording (§6.3): a missing precondition — 428, never a silent success. */
+const ASSIGN_MISSING_IF_MATCH = (): AppError =>
+  new AppError(
+    'PRECONDITION_REQUIRED',
+    'This assignment did not say which version of the job it saw — reload the queue and try again.',
+  );
+
+/**
+ * §6.3: assign and bulk-assign sit behind `dispatch.console` — the flag
+ * is the T0 rollback tier for the dispatcher surface, and a surface the
+ * flag gates is gated HERE, not only in the app: a stale or tampered
+ * client must not find the endpoint lit. `dispatch.bulk` is deliberately
+ * a second flag — the risky half must switch off without taking the
+ * working half down (PHASE-2-DISPATCHER.md T2.3).
+ */
+const CONSOLE_DISABLED_MESSAGE = 'The dispatch console is switched off for your account.';
+const BULK_DISABLED_MESSAGE =
+  'Bulk reassign is switched off for your account — assign the jobs one at a time.';
+
+async function dispatchConsoleEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'dispatch.console'))) {
+    throw new AppError('FLAG_DISABLED', CONSOLE_DISABLED_MESSAGE);
+  }
+}
+
+async function dispatchBulkEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'dispatch.bulk'))) {
+    throw new AppError('FLAG_DISABLED', BULK_DISABLED_MESSAGE);
+  }
 }
 
 export const jobsRoutes: FastifyPluginAsync = async (app) => {
@@ -258,7 +307,7 @@ export const jobsRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request) => {
       const auth = claimsOf(request);
-      const ifMatch = ifMatchVersion(request);
+      const ifMatch = ifMatchVersion(request, RESCHEDULE_MISSING_IF_MATCH);
       const body = jobRescheduleSchema.parse(request.body);
       return service.rescheduleJob(
         { id: auth.sub, role: auth.role },
@@ -268,5 +317,98 @@ export const jobsRoutes: FastifyPluginAsync = async (app) => {
         request.context.source,
       );
     },
+  );
+
+  // §6.3: assignment — `{ technicianId }` under a REQUIRED `If-Match:
+  // version`. Three dispatchers work the same unassigned queue every
+  // morning; two of them opening the same job and picking a technician is
+  // a routine Tuesday. The row lock is taken before the version is
+  // compared (service.ts "If it fails"), so a lost race comes back as 409
+  // VERSION_CONFLICT naming the current assignee instead of an overwrite.
+  // A call that carries no `If-Match` at all is 428 PRECONDITION_REQUIRED.
+  app.post(
+    '/v1/jobs/:id/assign',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('job.assign', 'update', ASSIGN_ACTORS_MESSAGE),
+        dispatchConsoleEnabled,
+      ],
+      config: {
+        // §6.3: dispatcher, owner — the reassigned card in the actor's own
+        // shape, the dispatcher's read from the view (§5 rule 2).
+        responseSchemaByRole: {
+          owner: JobCardOwnerSchema,
+          dispatcher: JobCardDispatcherSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const ifMatch = ifMatchVersion(request, ASSIGN_MISSING_IF_MATCH);
+      const body = jobAssignSchema.parse(request.body);
+      return service.assignJob(
+        { id: auth.sub, role: auth.role },
+        jobIdParam(request),
+        body.technicianId,
+        ifMatch,
+        request.context.source,
+      );
+    },
+  );
+
+  // §6.3: bulk assign — one transaction, partial results, per-job
+  // `If-Match` (the picker sends the version it showed for every selected
+  // card). Behind `dispatch.bulk`, the second flag: the risky half
+  // switches off without taking the working half down.
+  app.post(
+    '/v1/jobs/bulk-assign',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('job.assign', 'update', ASSIGN_ACTORS_MESSAGE),
+        dispatchBulkEnabled,
+      ],
+      config: {
+        responseSchemaByRole: {
+          owner: BulkAssignResponseSchema(JobCardOwnerSchema),
+          dispatcher: BulkAssignResponseSchema(JobCardDispatcherSchema),
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = jobBulkAssignSchema.parse(request.body);
+      return service.bulkAssign(
+        { id: auth.sub, role: auth.role },
+        body.jobIds,
+        body.technicianId,
+        request.context.source,
+      );
+    },
+  );
+
+  // §6.3: `v_technician_load` for the picker — and how a dispatcher gets
+  // technician NAMES, since `GET /v1/employees` is owner-only. Same flag
+  // as the console: the picker is part of the working half. The payload
+  // is identical for both allowed roles, but it is attached per role like
+  // every dispatcher-reachable endpoint, so the money-leak suite's
+  // discovery sees it and walks it.
+  app.get(
+    '/v1/technicians/load',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('job.assign', 'read', ASSIGN_ACTORS_MESSAGE),
+        dispatchConsoleEnabled,
+      ],
+      config: {
+        responseSchemaByRole: {
+          owner: z.array(TechnicianLoadSchema),
+          dispatcher: z.array(TechnicianLoadSchema),
+        },
+      },
+    },
+    async () => service.technicianLoad(),
   );
 };

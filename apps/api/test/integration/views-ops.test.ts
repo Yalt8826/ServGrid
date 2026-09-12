@@ -1,8 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { loadConfig } from '../../src/config.js';
-import { closePool } from '../../src/db/pool.js';
 import { runMigrations } from '../../src/db/migrate.js';
 
 /**
