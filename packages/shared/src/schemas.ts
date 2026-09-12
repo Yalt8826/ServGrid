@@ -464,6 +464,34 @@ export const authMeResponseSchema = z
   })
   .strict();
 
+// ── feature-flag administration (PLAN-EXECUTION.md §3) ─────────────────────
+
+/** One PUT: flip exactly one named flag for one employee. */
+export const flagOverrideRequestSchema = z
+  .object({
+    flag: z.enum(FEATURE_FLAGS),
+    enabled: z.boolean(),
+  })
+  .strict();
+
+export const employeeFlagsSchema = z.object({
+  employeeId: z.string(),
+  username: z.string(),
+  role: z.string(),
+  flags: featureFlagsSchema,
+});
+
+export const flagListResponseSchema = z.object({ employees: z.array(employeeFlagsSchema) });
+
+export const flagOverrideResponseSchema = z.object({
+  employeeId: z.string(),
+  flags: featureFlagsSchema,
+});
+
+export type FlagOverrideRequest = z.infer<typeof flagOverrideRequestSchema>;
+export type FlagListResponse = z.infer<typeof flagListResponseSchema>;
+export type FlagOverrideResponse = z.infer<typeof flagOverrideResponseSchema>;
+
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export type RefreshRequest = z.infer<typeof refreshRequestSchema>;

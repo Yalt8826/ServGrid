@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ulid } from 'ulid';
 import {
-  defaultFeatureFlags,
+  evaluateFeatureFlags,
   permissionsSnapshot,
   type AuthMeResponse,
   type ConsentState,
@@ -15,6 +15,7 @@ import { AppError } from '../../plugins/errors.js';
 import { getPool } from '../../db/pool.js';
 import { withTransaction } from '../../db/tx.js';
 import { hashPassword, verifyPassword } from '../../lib/password.js';
+import * as flagsRepo from '../flags/repo.js';
 import * as repo from './repo.js';
 
 /**
@@ -242,10 +243,14 @@ export function createAuthService(deps: AuthServiceDeps) {
     if (!employee || !employee.is_active) {
       throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
     }
+    // Flags are the T0 rollback instrument (PLAN-EXECUTION.md §3): the
+    // owner's per-employee overrides ride every /auth/me answer, so a
+    // flag turned off reaches the handset on its next foreground.
+    const overrides = await flagsRepo.listForEmployee(getPool(), employeeId);
     return {
       employee: toEmployeePublic(employee),
       permissions: permissionsSnapshot(employee.role),
-      featureFlags: defaultFeatureFlags(),
+      featureFlags: evaluateFeatureFlags(Object.fromEntries(overrides.map((o) => [o.flag, o.enabled]))),
       consent: await consentState(employee.id),
     };
   }

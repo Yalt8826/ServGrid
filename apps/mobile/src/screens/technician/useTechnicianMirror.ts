@@ -30,6 +30,7 @@ import { openMirror, type Mirror } from '../../db/mirror';
 import { api } from '../../lib/api';
 import { createDrainManager, type DrainManager, type DrainResult } from '../../sync/drain';
 import { enqueue } from '../../sync/outbox';
+import { setFeatureFlags } from '../../state/featureFlags';
 import type { StoredActor } from '../../lib/types';
 import { moveJobStatus, readJobData, revertJobStatus } from './jobData';
 import { primaryActionOf, statusChangeOp, type JobView } from './jobView';
@@ -78,6 +79,9 @@ async function loadFlags(): Promise<FeatureFlagState> {
     ...defaultFeatureFlags(),
     ...(res.ok && res.data !== null ? res.data.featureFlags : {}),
   };
+  // Publish process-wide: consumers outside this module's screens (the
+  // location task's tech.location gate) read the same answer.
+  setFeatureFlags(cachedFlags);
   return cachedFlags;
 }
 

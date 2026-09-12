@@ -24,6 +24,7 @@ export type ErrorCode =
   | 'DUPLICATE_ENTITY' // 409 — unique violation on an offline create
   | 'RECONCILIATION_CONFIRMED' // 409 — completion amendment refused; day signed off
   | 'EMPLOYEE_HAS_OPEN_WORK' // 409 — deactivation refused
+  | 'FLAG_DISABLED' // 409 — surface is flag-gated and this employee's flag is off (T0 rollback tier)
   | 'IDEMPOTENCY_IN_FLIGHT' // 409 — same key still processing
   | 'PAYLOAD_TOO_LARGE' // 413 — upload past the attachment size cap; no retry without shrinking can succeed
   | 'IDEMPOTENCY_KEY_REUSED' // 422 — same key, different body
@@ -43,6 +44,7 @@ export const ERROR_CODES = [
   'DUPLICATE_ENTITY',
   'RECONCILIATION_CONFIRMED',
   'EMPLOYEE_HAS_OPEN_WORK',
+  'FLAG_DISABLED',
   'IDEMPOTENCY_IN_FLIGHT',
   'PAYLOAD_TOO_LARGE',
   'IDEMPOTENCY_KEY_REUSED',
@@ -64,6 +66,7 @@ export const ERROR_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   DUPLICATE_ENTITY: 409,
   RECONCILIATION_CONFIRMED: 409,
   EMPLOYEE_HAS_OPEN_WORK: 409,
+  FLAG_DISABLED: 409,
   IDEMPOTENCY_IN_FLIGHT: 409,
   PAYLOAD_TOO_LARGE: 413,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -75,15 +78,19 @@ export const ERROR_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
 /**
  * Per-ping outcomes (§8) — a different union on purpose; see the header.
  * `DUPLICATE` here is a normal batch outcome (the ping already landed),
- * not the HTTP `DUPLICATE_ENTITY` conflict.
+ * not the HTTP `DUPLICATE_ENTITY` conflict. `DISABLED` is the T0 rollback
+ * answer for a handset whose `tech.location` flag is off: the batch still
+ * answers 200 so the client clears its buffer instead of retrying forever
+ * — "server stops accepting" (PLAN-EXECUTION.md Phase 1 rollback table).
  */
-export type PingRejectCode = 'OUT_OF_WINDOW' | 'TOO_OLD' | 'FUTURE' | 'DUPLICATE';
+export type PingRejectCode = 'OUT_OF_WINDOW' | 'TOO_OLD' | 'FUTURE' | 'DUPLICATE' | 'DISABLED';
 
 export const PING_REJECT_CODES = [
   'OUT_OF_WINDOW',
   'TOO_OLD',
   'FUTURE',
   'DUPLICATE',
+  'DISABLED',
 ] as const satisfies readonly PingRejectCode[];
 
 /** The one envelope shape, always (§3.1). */

@@ -198,7 +198,7 @@ type InjectResponse = Awaited<ReturnType<FastifyInstance['inject']>>;
 interface EndpointRow {
   /** `METHOD path` — also the route the shrink guard asserts exists. */
   name: string;
-  method: 'GET' | 'POST' | 'PATCH';
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT';
   url: string;
   probe(actor: Actor): Promise<InjectResponse>;
   expect: Record<Role, Expectation> & { anon: Expectation };
@@ -416,6 +416,28 @@ const ENDPOINTS: EndpointRow[] = [
         payload: { fullName: 'Matrix T10 Patch' },
       });
     },
+    expect: OWNER_ONLY,
+  },
+  {
+    name: 'PUT /v1/employees/:id/flags',
+    method: 'PUT',
+    url: '/v1/employees/:id/flags',
+    // Flag flips are employee administration (PLAN-EXECUTION.md §3): the
+    // owner's T0 instrument, same `employee` update cell as PATCH above.
+    probe: (actor) =>
+      app.inject({
+        method: 'PUT',
+        url: `/v1/employees/${subject.id}/flags`,
+        headers: bearer(actor),
+        payload: { flag: 'tech.jobs', enabled: false },
+      }),
+    expect: OWNER_ONLY,
+  },
+  {
+    name: 'GET /v1/flags',
+    method: 'GET',
+    url: '/v1/flags',
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/flags', headers: bearer(actor) }),
     expect: OWNER_ONLY,
   },
   {
@@ -842,6 +864,16 @@ beforeAll(async () => {
     selfIds[role] = session.employee.id;
   }
   subject = await seedEmployee('technician');
+
+  // The offline tier ships dark (PLAN-EXECUTION.md §3); the sync-door
+  // probes exercise ROLE authorization, so the matrix technician's sync
+  // flag is enabled directly — the flag's own behavior is
+  // integration/flags.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'tech.offline', true FROM employees WHERE username = $1`,
+    [usernames.technician],
+  );
 
   // The jobs-endpoint probes need a real job (migration 007) assigned to
   // the matrix technician.

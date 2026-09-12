@@ -26,6 +26,7 @@ import { COLORS } from '@servgrid/shared';
 import type { LocationPingPayload } from '@servgrid/shared';
 
 import { api } from '../lib/api';
+import { explicitFlagState } from '../state/featureFlags';
 import { createPingBuffer, type PingBuffer } from './buffer.native';
 import { createSqlitePingStore } from './bufferStore.native';
 import { inWorkWindow } from './window.native';
@@ -70,6 +71,11 @@ export function toPing(loc: Location.LocationObject, recordedAt: Date): Location
 
 TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: { data?: unknown; error?: unknown }) => {
   if (error) return; // a failed batch is jitter, not a task failure
+  // T0 rollback tier (PLAN-EXECUTION.md Phase 1 rollback table): the
+  // device "stops the task on next foreground" when tech.location is
+  // off. Unknown (no flag answer yet — offline cold start) keeps
+  // buffering; the server rejects authoritatively either way.
+  if (explicitFlagState('tech.location') === false) return;
   const locations = (data as { locations?: Location.LocationObject[] } | null)?.locations ?? [];
   for (const loc of locations) {
     try {

@@ -18,6 +18,7 @@ import { cashRoutes } from './modules/cash/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
 import { devicesRoutes } from './modules/devices/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
+import { flagsRoutes } from './modules/flags/routes.js';
 import { jobsRoutes } from './modules/jobs/routes.js';
 import { locationRoutes } from './modules/location/routes.js';
 import { syncRoutes } from './modules/sync/routes.js';
@@ -123,6 +124,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(authRoutes, { jwtSecret: config.jwtSecret });
   app.register(attachmentsRoutes, { s3: config.s3 });
   app.register(employeesRoutes);
+  app.register(flagsRoutes);
   app.register(consentRoutes);
   app.register(jobsRoutes);
   app.register(devicesRoutes);

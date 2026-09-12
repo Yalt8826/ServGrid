@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isoDateTime, syncBatchSchema, syncBootstrapResponseSchema, syncDeltaResponseSchema, syncBatchResponseSchema } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import { isFlagOn } from '../flags/service.js';
 import { createSyncService } from './service.js';
 
 /**
@@ -45,13 +46,30 @@ async function technicianOnly(request: FastifyRequest): Promise<void> {
   }
 }
 
+/**
+ * The T0 rollback for the offline tier (PLAN-EXECUTION.md §3, Phase 1
+ * rollback table): `tech.offline` off means the mirror's three doors
+ * close server-side — online-only from the server's side, queued items
+ * preserved on the handset and drained on re-enable. Defaulted off, so a
+ * technician the owner has not enabled sync for is refused here rather
+ * than silently mirrored.
+ */
+const SYNC_DISABLED_MESSAGE =
+  'Offline sync is switched off for your account. The app runs online-only; queued work is kept.';
+
+async function offlineEnabled(request: FastifyRequest): Promise<void> {
+  if (!(await isFlagOn(claimsOf(request).sub, 'tech.offline'))) {
+    throw new AppError('FLAG_DISABLED', SYNC_DISABLED_MESSAGE);
+  }
+}
+
 export const syncRoutes: FastifyPluginAsync = async (app) => {
   const service = createSyncService(app);
 
   app.get(
     '/v1/sync/bootstrap',
     {
-      preHandler: [app.requireAuth, technicianOnly],
+      preHandler: [app.requireAuth, technicianOnly, offlineEnabled],
       config: { responseSchema: syncBootstrapResponseSchema },
     },
     async (request) => {
@@ -63,7 +81,7 @@ export const syncRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/v1/sync/delta',
     {
-      preHandler: [app.requireAuth, technicianOnly],
+      preHandler: [app.requireAuth, technicianOnly, offlineEnabled],
       config: { responseSchema: syncDeltaResponseSchema },
     },
     async (request) => {
@@ -76,7 +94,7 @@ export const syncRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/v1/sync/batch',
     {
-      preHandler: [app.requireAuth, technicianOnly],
+      preHandler: [app.requireAuth, technicianOnly, offlineEnabled],
       config: { responseSchema: syncBatchResponseSchema },
     },
     async (request) => {
