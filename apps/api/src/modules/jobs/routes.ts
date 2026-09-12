@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z, type ZodTypeAny } from 'zod';
 import {
   BulkAssignResponseSchema,
+  DispatcherSummarySchema,
   JobCardDispatcherSchema,
   JobCardOwnerSchema,
   JobCardTechnicianSchema,
@@ -17,11 +18,12 @@ import {
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
-import { isFlagOn } from '../flags/service.js';
+import { dispatchBulkEnabled, dispatchConsoleEnabled } from '../flags/gates.js';
 import {
   ASSIGN_ACTORS_MESSAGE,
   CANCEL_ACTORS_MESSAGE,
   COMPLETION_ACTORS_MESSAGE,
+  SUMMARY_ACTORS_MESSAGE,
   createJobsService,
 } from './service.js';
 
@@ -140,27 +142,10 @@ const ASSIGN_MISSING_IF_MATCH = (): AppError =>
  * flag gates is gated HERE, not only in the app: a stale or tampered
  * client must not find the endpoint lit. `dispatch.bulk` is deliberately
  * a second flag — the risky half must switch off without taking the
- * working half down (PHASE-2-DISPATCHER.md T2.3).
+ * working half down (PHASE-2-DISPATCHER.md T2.3). Both gates live in
+ * modules/flags/gates.ts so the location module's roster read (T2.7)
+ * answers to the same tier without importing a route file.
  */
-const CONSOLE_DISABLED_MESSAGE = 'The dispatch console is switched off for your account.';
-const BULK_DISABLED_MESSAGE =
-  'Bulk reassign is switched off for your account — assign the jobs one at a time.';
-
-async function dispatchConsoleEnabled(request: FastifyRequest): Promise<void> {
-  const auth = request.auth;
-  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
-  if (!(await isFlagOn(auth.sub, 'dispatch.console'))) {
-    throw new AppError('FLAG_DISABLED', CONSOLE_DISABLED_MESSAGE);
-  }
-}
-
-async function dispatchBulkEnabled(request: FastifyRequest): Promise<void> {
-  const auth = request.auth;
-  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
-  if (!(await isFlagOn(auth.sub, 'dispatch.bulk'))) {
-    throw new AppError('FLAG_DISABLED', BULK_DISABLED_MESSAGE);
-  }
-}
 
 export const jobsRoutes: FastifyPluginAsync = async (app) => {
   const service = createJobsService();
@@ -191,6 +176,31 @@ export const jobsRoutes: FastifyPluginAsync = async (app) => {
       const query = jobListQuerySchema.parse(request.query ?? {});
       return service.listJobs({ id: auth.sub, role: auth.role }, scope, query);
     },
+  );
+
+  // T2.7 (§D1): the dashboard's four figures, counted from the same view
+  // the list reads — figure and row cannot disagree about what overdue
+  // means. Registered before /v1/jobs/:id for readability; find-my-way
+  // prefers the static segment regardless. `requireAll` (not
+  // requirePermission) because the figures are an all-rows read: the
+  // technician's `assigned` scope has no dashboard to count, and the
+  // console flag is the same T0 tier as the picker's.
+  app.get(
+    '/v1/jobs/summary',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('job', 'read', SUMMARY_ACTORS_MESSAGE),
+        dispatchConsoleEnabled,
+      ],
+      config: {
+        responseSchemaByRole: {
+          owner: DispatcherSummarySchema,
+          dispatcher: DispatcherSummarySchema,
+        },
+      },
+    },
+    async () => service.dispatcherSummary(),
   );
 
   app.get(

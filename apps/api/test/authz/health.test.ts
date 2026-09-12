@@ -27,12 +27,16 @@ import { ULID, validEnv } from '../helpers/env.js';
  *    call it (§8's Roles column: technician and sales rep), even though
  *    the view beneath it holds a row for every active employee;
  * 2. a technician cannot reach another employee's health by any path —
- *    the only path that exists is /me, keyed off the token;
+ *    his own row comes from /me, keyed off the token; the roster read
+ *    (`GET /v1/location/health`, registered in T2.7 for the office
+ *    roles whose cell is `all`) refuses him at the door, and every
+ *    id- or trail-shaped path is still the framework's generic 404;
  * 3. a dispatcher — whose `location.health` read cell is `all`, for the
- *    Phase 2 roster warning — gets 403 on /me, and 404 rather than 403 on
- *    any path that would enumerate: a route that does not exist answers
- *    the framework's generic NOT_FOUND to every role alike, so probing it
- *    leaks neither the route nor whether another employee's row exists.
+ *    Phase 2 roster warning — gets 403 on /me, and 404 rather than 403
+ *    on any id-shaped path that would enumerate one other employee: a
+ *    route that does not exist answers the framework's generic
+ *    NOT_FOUND to every role alike, so probing it leaks neither the
+ *    route nor whether another employee's row exists.
  *
  * Real Postgres, real view, no mocks (PLAN-BACKEND.md §14) — the fixture
  * devices and pings land in the same tables the handset writes, and the
@@ -255,12 +259,26 @@ describe('a technician cannot reach another employee’s health by any path', ()
     expect(envelopeOf(404, res.body).code).toBe('NOT_FOUND');
   });
 
-  it('neither does a trail, a collection, or any other shape that would enumerate', async () => {
-    for (const url of ['/v1/location/health', `/v1/location/health/${otherTech.id}/trail`]) {
-      const res = await app.inject({ method: 'GET', url, headers: bearer('technician') });
-      expect(res.statusCode, url).toBe(404);
-      expect(envelopeOf(res.statusCode, res.body).code, url).toBe('NOT_FOUND');
-    }
+  it('the office roster read refuses him at the door; id and trail shapes still do not exist', async () => {
+    // T2.7 registered `GET /v1/location/health` (§8's Phase 2 half) for
+    // the roles whose `location.health` read is `all` — the dispatcher
+    // and the owner. The technician's refusal moves with it: the route
+    // now exists, so the refusal is the matrix's own — 403 FORBIDDEN at
+    // the requireAll door — never a narrower answer and never a row of
+    // someone else's. The shapes that would enumerate ONE other
+    // employee (an id path, a trail) remain unregistered: still the
+    // generic 404 that leaks neither the route nor whether the row
+    // exists.
+    const roster = await app.inject({ method: 'GET', url: '/v1/location/health', headers: bearer('technician') });
+    expect(roster.statusCode).toBe(403);
+    expect(envelopeOf(403, roster.body).code).toBe('FORBIDDEN');
+    const trail = await app.inject({
+      method: 'GET',
+      url: `/v1/location/health/${otherTech.id}/trail`,
+      headers: bearer('technician'),
+    });
+    expect(trail.statusCode).toBe(404);
+    expect(envelopeOf(404, trail.body).code).toBe('NOT_FOUND');
   });
 
   it('the one path that exists answers with his own row only — and /me takes no id to misuse', async () => {

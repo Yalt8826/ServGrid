@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
 import {
   errorEnvelopeSchema,
+  DispatcherSummarySchema,
   JobCardDispatcherSchema,
   type ErrorEnvelope,
   type LoginResponse,
@@ -124,6 +125,8 @@ const ROUTE_TABLE: RouteEntry[] = [];
  */
 const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'GET', url: '/v1/jobs' },
+  // T2.7: the dashboard figures — same view, counted server-side.
+  { method: 'GET', url: '/v1/jobs/summary' },
   { method: 'GET', url: '/v1/jobs/:id' },
   { method: 'POST', url: '/v1/jobs/:id/cancel' },
   { method: 'PATCH', url: '/v1/jobs/:id' },
@@ -136,6 +139,9 @@ const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'GET', url: '/v1/customers/:id' },
   { method: 'PATCH', url: '/v1/customers/:id' },
   { method: 'GET', url: '/v1/customers/:id/stack' },
+  // T2.7: the roster health warning — registered after the customers
+  // module (server.ts), so discovery lists it last.
+  { method: 'GET', url: '/v1/location/health' },
 ];
 
 /** The IST noon `offsetDays` from today — an unambiguous instant inside a business day. */
@@ -473,6 +479,46 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     expect(hits, `money keys leaked on technician load: ${hits.join(', ')}`).toEqual([]);
     // The picker is where the dispatcher gets names — but never completions.
     expect(res.body).not.toContain('ompletion');
+  });
+
+  // ── T2.7: the dashboard's own reads — figures and the roster warning ───
+
+  it('GET /v1/jobs/summary — the four figures, recursed', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/jobs/summary', headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits);
+    expect(hits, `money keys leaked on the summary: ${hits.join(', ')}`).toEqual([]);
+    // The strict schema agrees: four figures and nothing else.
+    expect(() => DispatcherSummarySchema.parse(body)).not.toThrow();
+    // The fixture's one completion closed today — the figure must see it.
+    expect(body.doneToday).toBeGreaterThanOrEqual(1);
+  });
+
+  it('GET /v1/location/health — the roster warning carries health and age, never a coordinate', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/location/health', headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length, 'the fixture roster is non-empty').toBeGreaterThan(0);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits);
+    expect(hits, `money keys leaked on the roster read: ${hits.join(', ')}`).toEqual([]);
+
+    // T2.7's "if it fails": a dispatcher reads `location.health`, never
+    // `location.read`. The row is who, how healthy, how long quiet —
+    // and the walk holds the coordinate boundary by KEY, not by shape:
+    // the day the view grows a position column, this fails here first.
+    const text = JSON.stringify(body).toLowerCase();
+    expect(text).not.toContain('latitude');
+    expect(text).not.toContain('longitude');
+    for (const row of body) {
+      expect(row).toHaveProperty('health');
+      expect(row).toHaveProperty('minutesSince');
+    }
   });
 
   // ── T2.4: the customer surface (§6.4) — walked like the job surface ────

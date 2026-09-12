@@ -97,6 +97,49 @@ export async function listTechnicianLoad(db: Db): Promise<TechnicianLoadRow[]> {
   return r.rows;
 }
 
+// ── the dashboard figures (T2.7, §D1: GET /v1/jobs/summary) ─────────────────
+
+export interface DispatcherSummaryCounts {
+  overdue: number;
+  unassigned: number;
+  today: number;
+  doneToday: number;
+}
+
+/**
+ * The dashboard's four figures in one pass over the view. Each FILTER
+ * clause names its definition once, here, beside the view it reads:
+ *
+ * - `overdue` IS the view's `is_overdue` column, un-coalesced — the same
+ *   predicate the `?overdue=true` list filter runs, so the figure and
+ *   the rows under it cannot disagree (an open job with no date was
+ *   never promised, so it counts in neither).
+ * - `done_today` mirrors `v_technician_load`'s `done_today` word for
+ *   word (`completed` AND its `closed_at` is today's business date), so
+ *   the dashboard figure is exactly the sum of the load bars' days.
+ *
+ * Counts come back as Postgres `bigint` text and are numbered by the
+ * service, as in listTechnicianLoad.
+ */
+export async function summarizeDispatcherJobs(db: Db): Promise<DispatcherSummaryCounts> {
+  const r = await db.query<{ overdue: string; unassigned: string; today: string; done_today: string }>(
+    `SELECT
+       count(*) FILTER (WHERE v.is_overdue)                                            AS overdue,
+       count(*) FILTER (WHERE v.status = 'unassigned')                                 AS unassigned,
+       count(*) FILTER (WHERE v.scheduled_date = business_date(now()))                 AS today,
+       count(*) FILTER (WHERE v.status = 'completed'
+                          AND business_date(v.closed_at) = business_date(now()))       AS done_today
+     FROM v_job_cards_dispatcher v`,
+  );
+  const row = r.rows[0]!;
+  return {
+    overdue: Number(row.overdue),
+    unassigned: Number(row.unassigned),
+    today: Number(row.today),
+    doneToday: Number(row.done_today),
+  };
+}
+
 export interface DispatcherListFilter {
   statuses?: JobStatus[];
   technicianId?: string;
