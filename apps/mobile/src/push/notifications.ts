@@ -1,8 +1,10 @@
 /**
- * App side of the push contract (PLAN-BACKEND.md §12.1, T0.15): a
- * data-only FCM wake is handled by syncing — never by displaying remote
- * content. What the user sees is the LOCAL notification raised from the
- * rows the sync just received; the wake itself is invisible.
+ * App side of the push contract (PLAN-BACKEND.md §12.1): a data-only FCM
+ * wake is handled by syncing — never by displaying remote content. What
+ * the user sees is the LOCAL notification the T2.6 handler raises from
+ * the rows the sync just received (`../notifications/handler`); the wake
+ * itself is invisible, and a wake whose delta returned nothing raises
+ * nothing.
  *
  * Two delivery surfaces, one executor:
  * - foreground: `addNotificationReceivedListener`
@@ -13,49 +15,11 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
-import {
-  handleDataOnlyPush,
-  SYNC_ON_PUSH_TASK,
-} from './backgroundTask';
-
-/** Channel the sync confirmations post into (Android 8+). */
-const CHANNEL_ID = 'servgrid-sync';
-
-/** Marker in `content.data` for notifications this module raised itself. */
-const LOCAL_KIND = 'servgrid-local';
+import { handleDataOnlyPush, SYNC_ON_PUSH_TASK } from './backgroundTask';
+import { PUSH_LOCAL_KIND, SYNC_NOTIFICATION_CHANNEL } from '../notifications/handler';
 
 function isLocallyRaised(notification: Notifications.Notification): boolean {
-  return notification.request.content.data?.kind === LOCAL_KIND;
-}
-
-/** The visible end of a delivered push. Never carries job content —
- * per-row notifications are raised from received rows once the sync
- * engine exists (Phase 1); this bare confirmation is the Phase 0
- * delivery proof the T0.15 probe records. */
-export async function raiseSyncConfirmation(): Promise<void> {
-  // `channelId` belongs on the *trigger*, not the content — and an
-  // immediate notification (`trigger: null`) has no trigger to carry it,
-  // so Android routes it through the default channel. The dedicated
-  // channel is still created below for the per-row notifications T2.6
-  // raises, which schedule with a trigger and can name it.
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'ServGrid',
-      body: 'New work synced — open the app to review.',
-      data: { kind: LOCAL_KIND },
-    },
-    trigger: null,
-  });
-}
-
-/** One wake, whatever the surface delivered it. Never throws. */
-async function runWake(): Promise<void> {
-  try {
-    const raised = await handleDataOnlyPush();
-    if (raised) await raiseSyncConfirmation();
-  } catch {
-    // A wake failing must never crash the app or the headless task.
-  }
+  return notification.request.content.data?.kind === PUSH_LOCAL_KIND;
 }
 
 let installed = false;
@@ -92,7 +56,7 @@ export function initPush(): void {
   }
   try {
     // Foreground display gate: remote wakes show nothing; our own local
-    // confirmations do. (In the background the OS owns presentation: a
+    // notifications do. (In the background the OS owns presentation: a
     // data-only wake never reaches the tray, and a scheduled local
     // notification always does.) Idempotent — the SDK replaces the
     // global handler.
@@ -112,7 +76,10 @@ export function initPush(): void {
       },
     });
     if (Platform.OS === 'android') {
-      void Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      // Created at FIRST LAUNCH, not at first use — a channel created
+      // late is silently ignored for the app's lifetime, which presents
+      // as "push works in dev, not in the build" (§T2.6 "If it fails").
+      void Notifications.setNotificationChannelAsync(SYNC_NOTIFICATION_CHANNEL, {
         name: 'Job updates',
         importance: Notifications.AndroidImportance.HIGH,
       }).catch(() => {});
@@ -124,12 +91,24 @@ export function initPush(): void {
       if (isLocallyRaised(notification)) return;
       void runWake();
     });
-    // A tap on a confirmation is an explicit user action; the wake it
+    // A tap on a row notification is an explicit user action; the wake it
     // triggers is the sync the tap exists to cause.
     Notifications.addNotificationResponseReceivedListener(() => {
       void runWake();
     });
   } catch {
     installed = false; // allow a retry on next launch
+  }
+}
+
+/** One wake, whatever the surface delivered it. Never throws. The T2.6
+ * composition inside `handleDataOnlyPush` owns what is raised — per-row
+ * local notifications from synced rows, and nothing when the delta
+ * returned nothing. */
+async function runWake(): Promise<void> {
+  try {
+    await handleDataOnlyPush();
+  } catch {
+    // A wake failing must never crash the app or the headless task.
   }
 }

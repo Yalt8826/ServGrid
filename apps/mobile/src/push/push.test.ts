@@ -39,6 +39,7 @@ const notif = vi.hoisted(() => ({
   setNotificationHandler: vi.fn((_handler: Handlerish) => undefined),
   setNotificationChannelAsync: vi.fn(async () => undefined),
   scheduleNotificationAsync: vi.fn(async (_input: ScheduleInput) => 'sched-1'),
+  getPermissionsAsync: vi.fn(async () => ({ granted: true })),
   addNotificationReceivedListener: vi.fn((_listener: (notification: Notificationish) => void) => ({
     remove: () => {},
   })),
@@ -67,7 +68,13 @@ const fakeApi = vi.hoisted(() => ({
 vi.mock('../lib/api', () => fakeApi);
 
 import { handleDataOnlyPush, PUSH_INVALIDATED_QUERY_KEYS } from './backgroundTask';
-import { __resetPushForTests, initPush, raiseSyncConfirmation } from './notifications';
+import { __resetPushForTests, initPush } from './notifications';
+import {
+  __resetPushHandlerForTests,
+  setPushSyncExecutor,
+  SYNC_NOTIFICATION_CHANNEL,
+  type PushJobRow,
+} from '../notifications/handler';
 import { acquirePushToken, pushSupported, registerPendingPushToken } from './push';
 import { useSessionStore } from '../state/sessionStore';
 import { configureQueryClient, getQueryClient, __resetQueryClient } from '../state/runtimeQueryClient';
@@ -79,12 +86,26 @@ function apiResult(ok: boolean) {
   return { ok, status: ok ? 200 : 500, data: null, error: null };
 }
 
+/** A push-executor fake whose sync delivers one new job row — the
+ * "assignment arrived" the wake composes a notification from. */
+function executorDelivering(job: PushJobRow) {
+  const rows: PushJobRow[] = [];
+  return {
+    sync: vi.fn(async () => {
+      rows.push(job);
+    }),
+    readJobs: () => rows.slice(),
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetQueryClient();
   __resetPushForTests();
+  __resetPushHandlerForTests();
   fakeApi.api.request.mockResolvedValue(apiResult(true));
   notif.getDevicePushTokenAsync.mockResolvedValue({ type: 'android', data: TOKEN });
+  notif.getPermissionsAsync.mockResolvedValue({ granted: true });
   RN.Platform.OS = 'android';
 });
 
@@ -240,7 +261,44 @@ describe('notifications — surfaces and the loop guard', () => {
     expect(notif.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it('a remote foreground wake raises exactly one local confirmation', async () => {
+  it('a remote foreground wake with a mirror session raises the arrived row’s notification', async () => {
+    useSessionStore.getState().setAuthenticated(ACTOR);
+    configureQueryClient(ACTOR.role);
+    const job: PushJobRow = {
+      id: '0b000000-0000-4000-8000-000000000001',
+      jobNumber: 'JOB-0412',
+      title: 'Compressor PM — Site B',
+      status: 'assigned',
+      priority: 'normal',
+      scheduledFor: null,
+      contactName: null,
+      version: 1,
+    };
+    setPushSyncExecutor(executorDelivering(job));
+    await import('./notifications');
+    initPush();
+    const listener = notif.addNotificationReceivedListener.mock.calls[0]?.[0];
+    if (listener === undefined) throw new Error('received-listener was never registered');
+    listener({ request: { content: { title: null, body: null, data: { type: 'data-only-sync' } } } });
+    // The wake runs fire-and-forget, and its chain crosses a lazy
+    // dynamic import (the SDK is imported at raise time, mirror.ts's
+    // seam) — so settle it by observation, not by tick-counting.
+    await vi.waitFor(() => expect(notif.scheduleNotificationAsync).toHaveBeenCalledTimes(1));
+    // T2.6: the wake's visible end is ONE local notification, raised from
+    // the row the sync delivered — the bare Phase 0 confirmation is gone.
+    const call = notif.scheduleNotificationAsync.mock.calls[0]?.[0];
+    expect(call?.content).toMatchObject({ title: 'New job assigned', body: 'JOB-0412 · Compressor PM — Site B' });
+    expect(call?.content?.data).toEqual({ kind: 'servgrid-local', jobId: job.id });
+    expect(call?.trigger).toEqual({ channelId: SYNC_NOTIFICATION_CHANNEL });
+    // The channel is created at first launch, named for the row
+    // notifications that post into it.
+    expect(notif.setNotificationChannelAsync).toHaveBeenCalledWith(
+      SYNC_NOTIFICATION_CHANNEL,
+      expect.objectContaining({ name: 'Job updates' }),
+    );
+  });
+
+  it('a foreground wake with no mirror session raises nothing — the sync triggers cover it', async () => {
     useSessionStore.getState().setAuthenticated(ACTOR);
     configureQueryClient(ACTOR.role);
     await import('./notifications');
@@ -248,25 +306,11 @@ describe('notifications — surfaces and the loop guard', () => {
     const listener = notif.addNotificationReceivedListener.mock.calls[0]?.[0];
     if (listener === undefined) throw new Error('received-listener was never registered');
     listener({ request: { content: { title: null, body: null, data: { type: 'data-only-sync' } } } });
-    // The wake runs fire-and-forget; let the microtask queue drain.
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(notif.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
-    const content = notif.scheduleNotificationAsync.mock.calls[0]?.[0]?.content;
-    expect(content?.data).toEqual({ kind: 'servgrid-local' });
-    // No `channelId` on the content: it belongs on the trigger, and an
-    // immediate notification has none. The channel is still created for
-    // the per-row notifications T2.6 schedules with one.
-    expect(content?.channelId).toBeUndefined();
-    expect(notif.setNotificationChannelAsync).toHaveBeenCalledWith(
-      'servgrid-sync',
-      expect.objectContaining({ name: 'Job updates' }),
-    );
-  });
-
-  it('the confirmation carries no job content — only the local marker', async () => {
-    await raiseSyncConfirmation();
-    const call = notif.scheduleNotificationAsync.mock.calls[0]?.[0];
-    expect(call?.content?.data).toEqual({ kind: 'servgrid-local' });
-    expect(JSON.stringify(call?.content)).not.toMatch(/job|customer|amount/i);
+    // Give any in-flight wake from this or a neighbouring test time to
+    // settle — a real timer tick, since the chain crosses a dynamic
+    // import — then hold the line: every push is optional, and nothing
+    // to announce means NOTHING announced.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(notif.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 });

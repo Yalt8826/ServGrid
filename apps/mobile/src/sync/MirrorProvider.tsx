@@ -20,6 +20,12 @@
  *   COMPLETED refresh refusal logs anyone out (§5.1), and when that
  *   happens the API client has already cleared the credential store —
  *   flipping the store here is what moves the UI to the login screen.
+ * - For the session's lifetime it registers the push handler's sync
+ *   executor (T2.6, `notifications/handler`): a data-only FCM wake runs
+ *   this provider's own cycle and raises local notifications from the
+ *   job rows the delta delivered — never a second drain, never a second
+ *   SQLite writer. The registration is cleared the moment the session
+ *   ends or switches.
  * - On session end or user switch it clears the mirror: its lifetime is
  *   "until logout" (§4), not until app close. An app teardown leaves the
  *   working set on disk so the NEXT cold start — possibly with no radio —
@@ -39,6 +45,7 @@ import type { Mirror } from '../db/mirror';
 import { applyBootstrap, clearMirror, openMirror, readCursor, roleHasMirror } from '../db/mirror';
 import { pendingSyncCount } from './outbox';
 import { createDrainManager, type DrainManager, type DrainSend, type DrainTriggers } from './drain';
+import { setPushSyncExecutor, type PushJobRow } from '../notifications/handler';
 import { useSessionStore } from '../state/sessionStore';
 
 /** What a screen with a local working set consumes. Null for online
@@ -82,6 +89,26 @@ interface OpenSession {
   syncNow: () => void;
 }
 
+/** The mirror's job rows for the push handler's before/after diff (T2.6).
+ * SQL stays on this side of the seam — the handler composes
+ * notifications, it does not know the mirror's schema. */
+function readJobRows(mirror: Mirror): PushJobRow[] {
+  return mirror.database
+    .getAllSync<Record<string, unknown>>(
+      'SELECT id, job_number, title, status, priority, scheduled_for, contact_name, version FROM jobs',
+    )
+    .map((row) => ({
+      id: String(row.id),
+      jobNumber: String(row.job_number),
+      title: String(row.title),
+      status: String(row.status),
+      priority: String(row.priority),
+      scheduledFor: row.scheduled_for === null || row.scheduled_for === undefined ? null : String(row.scheduled_for),
+      contactName: row.contact_name === null || row.contact_name === undefined ? null : String(row.contact_name),
+      version: Number(row.version),
+    }));
+}
+
 export function MirrorProvider({ children, send, triggers }: MirrorProviderProps): ReactNode {
   const actor = useSessionStore((s) => s.actor);
   // The session key. Both values change together (they read the same store
@@ -107,6 +134,10 @@ export function MirrorProvider({ children, send, triggers }: MirrorProviderProps
     // stop the previous session's triggers either way.
     stopTriggersRef.current?.();
     stopTriggersRef.current = null;
+    // A push arriving between sessions must not drive a sync for a mirror
+    // that no longer exists (T2.6): the handler degrades to no
+    // notification and the next foreground recovers.
+    setPushSyncExecutor(null);
 
     // Session ended or switched employees: clear the previous working set
     // (mirror lifetime is "until logout", §4). The outbox survives —
@@ -181,6 +212,15 @@ export function MirrorProvider({ children, send, triggers }: MirrorProviderProps
       stopTriggersRef.current = stopTriggers;
 
       activeMirrorRef.current = mirror;
+      // The push handler's sync seam (T2.6): for the lifetime of this
+      // employee session, a data-only FCM wake runs THIS cycle — the
+      // same bootstrap-or-drain cycle every other trigger runs — through
+      // the drain's own single-flight, and diffs the mirror's job rows
+      // around it to raise local notifications from what arrived.
+      setPushSyncExecutor({
+        sync: () => syncCycle(mirror, drain),
+        readJobs: () => readJobRows(mirror),
+      });
       setSession({
         mirror,
         employeeId,

@@ -1,0 +1,76 @@
+# Assignment push → delta sync → local notification (T2.6, PLAN-FRONTEND.md §6).
+#
+# Two paths. The first proves the push shortens latency: the app
+# backgrounded, an assignment committed from another session, the local
+# notification (raised from the synced ROW, never the payload) in the tray
+# within 30 seconds. The second is the one that proves push is NOT the
+# transport: with the wake suppressed at the OS level, the job still
+# arrives on next foreground — a missed push costs latency, never work.
+#
+# Setup performed by the driver before path 1 runs:
+#   1. Install the app, log in as a technician, complete the permission
+#      ladder INCLUDING the notifications ask (granted), and stay online
+#      until the first sync lands (the mirror fills).
+#   2. Confirm `adb shell dumpsys notification | grep servgrid-sync` shows
+#      the channel — a channel created late is silently ignored for the
+#      app's lifetime and presents as "push works in dev, not in the
+#      build" (T2.6 "If it fails").
+#   3. Log in as a dispatcher (or hold a dispatch-capable token) in a
+#      SECOND session able to assign jobs.
+#   4. Background the app (HOME) — the process stays alive.
+# Path 2 needs, additionally:
+#   5. Suppress the wake at the OS level (revoke Google Play services'
+#      network, or block fcm.googleapis.com) — NOT the app's data.
+#
+# The tray itself is below Maestro's reach on Android, so the driver
+# captures it with:
+#   adb shell dumpsys notification --noredact | grep -A2 servgrid-sync
+# The yaml asserts what Maestro can see: the shade's post-sync state and
+# the in-app arrival.
+
+appId: com.servgrid.app
+name: push-assignment — wake syncs and raises a local notification from the row
+---
+# Path 1 — the push path: backgrounded app, assignment from another
+# session, local notification within 30s.
+- launchApp:
+    clearState: false
+- assertVisible:
+    id: '(app)/dashboard'
+    label: 'the technician session is live before the flow starts'
+# The driver now: backgrounds the app, assigns a job to this technician
+# from the second session, and waits for the tray within 30s (adb, above).
+# Tapping that notification foregrounds the app — the wake it carries is
+# the sync the tap exists to cause, and the mirror already holds the row.
+- launchApp:
+    clearState: false
+    label: 'foreground again — via the tap on the local notification in a driver run'
+- assertVisible:
+    id: 'mirror-job-row'
+    label: 'the assigned job is in the mirror — synced by the wake, not fetched on foreground'
+- assertNotVisible:
+    text: '.*Sign in.*'
+    label: 'the wake never disturbed the session'
+
+---
+# Path 2 — the suppressed-push path: the same assignment with the wake
+# eaten by the OS. The job still arrives on next foreground. This is the
+# test that proves push is not the transport.
+- launchApp:
+    clearState: false
+- assertVisible:
+    id: '(app)/dashboard'
+    label: 'the technician session is live; the OS is now eating the wake'
+# The driver now: (with pushes suppressed per setup step 5) backgrounds
+# the app, assigns ANOTHER job from the second session, waits out the
+# wake's 30s — no notification appears (adb shows nothing new) — and
+# returns the app to the foreground.
+- launchApp:
+    clearState: false
+    label: 'next foreground — the reconnect/foreground drain trigger runs'
+- assertVisible:
+    id: 'mirror-job-row'
+    label: 'the second job arrived anyway: the delta sync on foreground is the transport'
+- assertNotVisible:
+    text: '.*Sign in.*'
+    label: 'a missed push degraded nothing'
