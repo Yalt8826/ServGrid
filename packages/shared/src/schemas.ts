@@ -15,7 +15,7 @@
  * - `completedAt` is clamped server-side, not in the future and not more
  *   than 14 days old (§6.2 step 1 and the clamp paragraph).
  */
-import { z } from 'zod';
+import { z, type ZodTypeAny } from 'zod';
 
 import { ACTIONS, RESOURCES, ROLES, SCOPES } from './permissions.ts';
 import { JOB_STATUSES } from './status.ts';
@@ -122,6 +122,31 @@ export const jobAssignSchema = z
   .object({ technicianId: uuid })
   .strict();
 
+/**
+ * One entry of `POST /v1/jobs/bulk-assign` (§6.3). A multi-select spans
+ * cards the dispatcher last saw at DIFFERENT versions, so the bulk
+ * request carries the precondition per job — the body form of the
+ * `If-Match` header the single assign takes: the picker sends, for every
+ * selected card, the version it showed.
+ */
+export const jobBulkAssignEntrySchema = z
+  .object({
+    id: uuid,
+    /** The card version the picker showed — the per-job `If-Match` (§6.3). */
+    ifMatch: z.number().int().min(1),
+  })
+  .strict();
+
+export const jobBulkAssignSchema = z
+  .object({
+    jobIds: z.array(jobBulkAssignEntrySchema).min(1).max(50),
+    technicianId: uuid,
+  })
+  .strict()
+  .refine((v) => new Set(v.jobIds.map((j) => j.id)).size === v.jobIds.length, {
+    message: 'The same job appears twice in the selection.',
+  });
+
 export const jobCancelSchema = z
   .object({
     reasonCode: z.enum([
@@ -216,6 +241,68 @@ export type JobCardDispatcher = z.infer<typeof JobCardDispatcherSchema>;
 export type JobCardOwner = z.infer<typeof JobCardOwnerSchema>;
 export type JobStackChange = z.infer<typeof jobStackChangeSchema>;
 export type JobCompletionPart = z.infer<typeof jobCompletionPartSchema>;
+
+// ── assignment (§6.3): bulk results and the technician-load picker ──────────
+
+/**
+ * `POST /v1/jobs/bulk-assign` — partial results, one entry per requested
+ * job, honest about both outcomes (§6.3; UI/plan-2/05-DISPATCHER.md §D2:
+ * "5 reassigned, 1 failed — JC-…0044 was completed while you were
+ * choosing"). Applied entries carry the reassigned card; refused entries
+ * carry the machine code and the sentence the dispatcher reads.
+ */
+export const BulkAssignAppliedSchema = (card: ZodTypeAny) =>
+  z
+    .object({
+      jobId: uuid,
+      jobNumber: z.string(),
+      ok: z.literal(true),
+      job: card,
+    })
+    .strict();
+
+/** Codes a single job inside a bulk can refuse with (the whole-request refusals — 403, 428 — never appear per job). */
+export const BULK_ASSIGN_REFUSAL_CODES = ['NOT_FOUND', 'VERSION_CONFLICT', 'ILLEGAL_TRANSITION'] as const;
+
+export const BulkAssignRefusedSchema = z
+  .object({
+    jobId: uuid,
+    jobNumber: z.string(),
+    ok: z.literal(false),
+    code: z.enum(BULK_ASSIGN_REFUSAL_CODES),
+    message: z.string(),
+  })
+  .strict();
+
+export const BulkAssignResponseSchema = (card: ZodTypeAny): ZodTypeAny =>
+  z
+    .object({
+      results: z.array(
+        z.discriminatedUnion('ok', [BulkAssignAppliedSchema(card), BulkAssignRefusedSchema]),
+      ),
+    })
+    .strict();
+
+/**
+ * `GET /v1/technicians/load` — one row of `v_technician_load` (migration
+ * 013) for the assignment picker and the dashboard's load list. This is
+ * also how a dispatcher gets technician NAMES — `GET /v1/employees` is
+ * owner-only — so the response carries the name and the load and nothing
+ * else: no completion fields, no money, nothing per job.
+ */
+export const TechnicianLoadSchema = z
+  .object({
+    employeeId: uuid,
+    technicianName: z.string(),
+    openToday: z.number().int(),
+    doneToday: z.number().int(),
+    openTotal: z.number().int(),
+    /** The promised start of the job he is currently ON (in_progress); null when idle. */
+    activeSince: isoDateTime.nullable(),
+  })
+  .strict();
+
+export type TechnicianLoad = z.infer<typeof TechnicianLoadSchema>;
 
 // ── customers (§5 rule 3, §6.4) ─────────────────────────────────────────────
 

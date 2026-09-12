@@ -18,6 +18,7 @@ export type ErrorCode =
   | 'FORBIDDEN' // 403 — role lacks the permission
   | 'OUT_OF_SCOPE' // 403 — role has the permission but not for this row
   | 'NOT_FOUND' // 404
+  | 'PRECONDITION_REQUIRED' // 428 — an If-Match-carrying endpoint was called without one
   | 'VERSION_CONFLICT' // 409 — If-Match version stale
   | 'ILLEGAL_TRANSITION' // 409 — status machine refused
   | 'JOB_ALREADY_CLOSED' // 409 — completed/cancelled while client was offline
@@ -60,6 +61,7 @@ export const ERROR_HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
   FORBIDDEN: 403,
   OUT_OF_SCOPE: 403,
   NOT_FOUND: 404,
+  PRECONDITION_REQUIRED: 428,
   VERSION_CONFLICT: 409,
   ILLEGAL_TRANSITION: 409,
   JOB_ALREADY_CLOSED: 409,

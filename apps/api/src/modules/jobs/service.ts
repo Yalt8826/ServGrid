@@ -5,6 +5,7 @@ import {
   type JobCardTechnician,
   type JobStatus,
   type Role,
+  type TechnicianLoad,
 } from '@servgrid/shared';
 import { AppError } from '../../plugins/errors.js';
 import { getPool } from '../../db/pool.js';
@@ -73,6 +74,12 @@ export const CANCEL_ACTORS_MESSAGE = 'A job is cancelled by the office or the te
 /** §6.3: PATCH is "dispatcher, owner" — a technician on site cancels with a new date instead of patching the card. */
 export const RESCHEDULE_ACTORS_MESSAGE =
   'Rescheduling a job is done by the office — on site, cancel the job with the new date instead.';
+/** §6.3: assign and bulk-assign are "dispatcher, owner" — the matrix cell is `job.assign`, which a technician or rep does not hold. */
+export const ASSIGN_ACTORS_MESSAGE = 'A job is assigned by the office — the dispatcher or the owner.';
+/** §6.3: the picker names a technician; anything else on that cell is a form error, not a 404. */
+const NOT_A_TECHNICIAN_MESSAGE = 'Pick a technician from the roster — that account is not an active technician.';
+/** §6.3: a stale version on a job with nobody on it has no name to give — the sentence stays actionable anyway. */
+const STALE_VERSION_MESSAGE = 'This job changed after you opened it — reload it and try again.';
 /** §6.2: "The warranty rule is a prompt, not a constraint" — nothing here forces cost to zero; the client confirms on site. */
 
 /** §3.1: the message is shown verbatim — it says what to do, not what failed. */
@@ -114,6 +121,26 @@ export function clampOccurredAt(occurredAt: string, now: number = Date.now()): C
     return { occurredAt: new Date(sent > now ? now : floor).toISOString(), clamped: true };
   }
   return { occurredAt: new Date(sent).toISOString(), clamped: false };
+}
+
+/**
+ * "Ravi was assigned this 20 seconds ago" — the lost-race sentence is
+ * actionable because it carries the moment. This renders it: granular
+ * where it is fresh (the racing case), honest where it is old.
+ */
+export function sinceWhen(at: Date | null, now: number = Date.now()): string {
+  if (at === null) return 'just now';
+  const seconds = Math.max(0, Math.round((now - at.getTime()) / 1000));
+  if (seconds < 90) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return `${hours} h ago`;
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+  }).format(at);
 }
 
 /** §6.3: the bound on `rescheduleTo` — a successor cannot be raised for a day already gone. */
@@ -237,6 +264,14 @@ export interface JobListPage {
   items: Array<JobCardTechnician | JobCardDispatcher | JobCardOwner>;
   nextCursor: string | null;
 }
+
+/** The per-job refusals a bulk assign records (§6.3). The whole-request refusals — 403, 428, FLAG_DISABLED — never appear here. */
+export type BulkAssignRefusalCode = 'NOT_FOUND' | 'VERSION_CONFLICT' | 'ILLEGAL_TRANSITION';
+
+/** One entry of the bulk-assign partial result: the reassigned card, or the refusal the dispatcher reads. */
+export type BulkAssignOutcome =
+  | { jobId: string; jobNumber: string; ok: true; job: JobCardDispatcher | JobCardOwner }
+  | { jobId: string; jobNumber: string; ok: false; code: BulkAssignRefusalCode; message: string };
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -594,7 +629,208 @@ export function createJobsService() {
     });
   }
 
-  return { listJobs, getJobCard, changeStatus, completeJob, cancelJob, rescheduleJob };
+  /**
+   * The §6.3 assignment checks, shared by the single and the bulk door:
+   * the version precondition FIRST (it decides whether the caller is
+   * acting on the job he thinks he saw), then the status rule. Returns
+   * the refusal to raise — thrown by the single assign, recorded as a
+   * partial result by the bulk — or null when the assign may proceed.
+   *
+   * Both refusals NAME A PERSON (§6.3): a lost race names who won it —
+   * "Ravi was assigned this 20 seconds ago" is actionable — and an
+   * in_progress refusal names who is on site, because the dispatcher's
+   * real options are to ring him or cancel with a reason.
+   */
+  async function assignmentRefusal(
+    client: PoolClient,
+    job: repo.JobAssignLockRow,
+    ifMatch: number,
+  ): Promise<AppError | null> {
+    if (job.version !== ifMatch) {
+      const assigneeName = job.assigned_to === null ? null : await repo.findEmployeeName(client, job.assigned_to);
+      return new AppError(
+        'VERSION_CONFLICT',
+        assigneeName === null
+          ? STALE_VERSION_MESSAGE
+          : `${assigneeName} was assigned this ${sinceWhen(job.assigned_at)} — reload the job and try again.`,
+        {
+          currentVersion: job.version,
+          currentAssignee: assigneeName === null || job.assigned_to === null
+            ? null
+            : { id: job.assigned_to, name: assigneeName },
+        },
+      );
+    }
+    if (job.status === 'in_progress') {
+      const onSiteName = job.assigned_to === null ? null : await repo.findEmployeeName(client, job.assigned_to);
+      return new AppError(
+        'ILLEGAL_TRANSITION',
+        `${onSiteName ?? 'A technician'} is on site working this job — ring him, or cancel the job with a reason.`,
+        {
+          onSite: job.assigned_to === null ? null : { id: job.assigned_to, name: onSiteName },
+        },
+      );
+    }
+    if (job.status === 'completed' || job.status === 'cancelled') {
+      return new AppError('ILLEGAL_TRANSITION', `This job is already ${job.status} — that is final.`);
+    }
+    return null;
+  }
+
+  /**
+   * POST /v1/jobs/:id/assign (§6.3) — one locked row, one `If-Match`
+   * precondition, one event. `unassigned → assigned` emits `assigned`;
+   * a reassign emits `reassigned`, and from `en_route` the status RESETS
+   * to `assigned` — the new technician has not set off.
+   */
+  async function assignJob(
+    actor: Actor,
+    jobId: string,
+    technicianId: string,
+    ifMatch: number,
+    source: RequestSource,
+  ): Promise<JobCardDispatcher | JobCardOwner> {
+    if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+      throw new AppError('FORBIDDEN', ASSIGN_ACTORS_MESSAGE);
+    }
+
+    return withTransaction(async (client) => {
+      const technician = await repo.findActiveTechnician(client, technicianId);
+      if (technician === null) {
+        throw new AppError('VALIDATION_FAILED', NOT_A_TECHNICIAN_MESSAGE);
+      }
+      // The lock the whole decision rides (see "If it fails"): taken
+      // before the version comparison, so two simultaneous assigns
+      // serialise here and the loser loses honestly instead of racing.
+      const job = await repo.lockJobForAssign(client, jobId);
+      if (job === null) {
+        throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+      }
+      const refusal = await assignmentRefusal(client, job, ifMatch);
+      if (refusal !== null) throw refusal;
+
+      const from = job.status;
+      const assignedAt = new Date().toISOString();
+      await repo.assignJobCard(client, jobId, technicianId, actor.id, assignedAt);
+      await repo.insertJobEvent(client, {
+        jobCardId: jobId,
+        eventType: from === 'unassigned' ? 'assigned' : 'reassigned',
+        actorId: actor.id,
+        occurredAt: assignedAt,
+        fromStatus: from,
+        toStatus: 'assigned',
+        source,
+        payload: {
+          technicianId,
+          ...(from !== 'unassigned' && job.assigned_to !== null ? { previousTechnicianId: job.assigned_to } : {}),
+        },
+      });
+
+      return (await readBackCard(actor, client, jobId)) as JobCardDispatcher | JobCardOwner;
+    });
+  }
+
+  /**
+   * POST /v1/jobs/bulk-assign (§6.3) — one transaction, per-job
+   * `If-Match`, partial results: the same rule per job, so a multi-select
+   * spanning a started job answers with the valid ones applied and the
+   * invalid one NAMED (the honest outcome the dispatcher screen renders).
+   * Rows lock in id order, so two bulk operations sharing a job cannot
+   * deadlock; results come back in the order the picker sent.
+   */
+  async function bulkAssign(
+    actor: Actor,
+    entries: ReadonlyArray<{ id: string; ifMatch: number }>,
+    technicianId: string,
+    source: RequestSource,
+  ): Promise<{ results: BulkAssignOutcome[] }> {
+    if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+      throw new AppError('FORBIDDEN', ASSIGN_ACTORS_MESSAGE);
+    }
+
+    return withTransaction(async (client) => {
+      const technician = await repo.findActiveTechnician(client, technicianId);
+      if (technician === null) {
+        throw new AppError('VALIDATION_FAILED', NOT_A_TECHNICIAN_MESSAGE);
+      }
+
+      const assignedAt = new Date().toISOString();
+      const outcomes = new Map<string, BulkAssignOutcome>();
+      const lockOrder = [...entries].sort((a, b) => (a.id < b.id ? -1 : 1));
+      for (const entry of lockOrder) {
+        const job = await repo.lockJobForAssign(client, entry.id);
+        if (job === null) {
+          outcomes.set(entry.id, {
+            jobId: entry.id,
+            jobNumber: '',
+            ok: false,
+            code: 'NOT_FOUND',
+            message: NOT_FOUND_MESSAGE,
+          });
+          continue;
+        }
+        const refusal = await assignmentRefusal(client, job, entry.ifMatch);
+        if (refusal !== null) {
+          outcomes.set(entry.id, {
+            jobId: entry.id,
+            jobNumber: job.job_number,
+            ok: false,
+            // assignmentRefusal refuses with exactly these two codes.
+            code: refusal.code === 'ILLEGAL_TRANSITION' ? 'ILLEGAL_TRANSITION' : 'VERSION_CONFLICT',
+            message: refusal.message,
+          });
+          continue;
+        }
+        const from = job.status;
+        await repo.assignJobCard(client, entry.id, technicianId, actor.id, assignedAt);
+        await repo.insertJobEvent(client, {
+          jobCardId: entry.id,
+          eventType: from === 'unassigned' ? 'assigned' : 'reassigned',
+          actorId: actor.id,
+          occurredAt: assignedAt,
+          fromStatus: from,
+          toStatus: 'assigned',
+          source,
+          payload: {
+            technicianId,
+            ...(from !== 'unassigned' && job.assigned_to !== null ? { previousTechnicianId: job.assigned_to } : {}),
+          },
+        });
+        // Read back inside the same transaction — the card the picker
+        // re-renders, in the caller's own projection (§5 rule 2).
+        const card = await readBackCard(actor, client, entry.id);
+        outcomes.set(entry.id, {
+          jobId: entry.id,
+          jobNumber: job.job_number,
+          ok: true,
+          job: card as JobCardDispatcher | JobCardOwner,
+        });
+      }
+
+      return { results: entries.map((entry) => outcomes.get(entry.id)!) };
+    });
+  }
+
+  /**
+   * GET /v1/technicians/load (§6.3) — `v_technician_load` for the picker,
+   * and the dispatcher's source of technician NAMES (`GET /v1/employees`
+   * is owner-only). Busiest last is the view's call — busier first — so
+   * the picker renders the free hands at the top; the row is exactly
+   * TechnicianLoadSchema and nothing else.
+   */
+  async function technicianLoad(): Promise<TechnicianLoad[]> {
+    const rows = await dispatcherRepo.listTechnicianLoad(getPool());
+    return rows.map((row) => ({
+      employeeId: row.employee_id,
+      technicianName: row.technician_name,
+      openToday: Number(row.open_today),
+      doneToday: Number(row.done_today),
+      openTotal: Number(row.open_total),
+      activeSince: row.active_since === null ? null : new Date(row.active_since).toISOString(),
+    }));
+  }
+
+  return { listJobs, getJobCard, changeStatus, completeJob, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad };
 }
 
 // ── completion (§6.2) ───────────────────────────────────────────────────────

@@ -143,7 +143,14 @@ export async function updateJobStatus(db: Db, jobId: string, to: JobStatus): Pro
 export interface JobEventInsert {
   jobCardId: string;
   /** The event types the jobs module writes so far (§6.1–§6.3). */
-  eventType: 'status_changed' | 'completed' | 'cancelled' | 'rescheduled' | 'created';
+  eventType:
+    | 'status_changed'
+    | 'completed'
+    | 'cancelled'
+    | 'rescheduled'
+    | 'created'
+    | 'assigned'
+    | 'reassigned';
   actorId: string;
   /** The client's occurredAt, already clamped by the service (§6.3). */
   occurredAt: string;
@@ -542,6 +549,86 @@ export async function lockJobForReschedule(db: Db, jobId: string): Promise<JobRe
  */
 export async function rescheduleJobCard(db: Db, jobId: string, scheduledFor: string): Promise<void> {
   await db.query('UPDATE job_cards SET scheduled_for = $2 WHERE id = $1', [jobId, scheduledFor]);
+}
+
+// ── assignment and reassignment (§6.3) ──────────────────────────────────────
+
+export interface JobAssignLockRow {
+  id: string;
+  /** The number a bulk refusal names (the picker's "JC-…0044 failed"). */
+  job_number: string;
+  status: JobStatus;
+  assigned_to: string | null;
+  /** When the current assignment was made — the "20 seconds ago" of the lost-race message. */
+  assigned_at: Date | null;
+  /** The version the `If-Match` precondition is checked against. */
+  version: number;
+}
+
+/**
+ * §6.3 — the row lock the assignment holds, taken BEFORE the version is
+ * compared (the "If it fails" rule: a lock taken after the read is a race
+ * three dispatchers will find on their first Monday). Two concurrent
+ * assigns serialise here: the second waits on this lock, re-reads the
+ * version the first bumped, and loses with 409 instead of overwriting.
+ */
+export async function lockJobForAssign(db: Db, jobId: string): Promise<JobAssignLockRow | null> {
+  const r = await db.query<JobAssignLockRow>(
+    `SELECT id, job_number, status, assigned_to, assigned_at, version
+     FROM job_cards WHERE id = $1 FOR UPDATE`,
+    [jobId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface ActiveTechnicianRow {
+  id: string;
+  full_name: string;
+}
+
+/**
+ * The assignee the picker named — an ACTIVE technician. Checked inside
+ * the assign transaction so a technician deactivated between the picker
+ * and the tap is refused here, not discovered by the database's FK.
+ */
+export async function findActiveTechnician(db: Db, technicianId: string): Promise<ActiveTechnicianRow | null> {
+  const r = await db.query<ActiveTechnicianRow>(
+    `SELECT id, full_name FROM employees
+     WHERE id = $1 AND role = 'technician' AND is_active`,
+    [technicianId],
+  );
+  return r.rows[0] ?? null;
+}
+
+/**
+ * The assignment write (§6.1): the card lands on the technician at
+ * `assigned` — from `unassigned` (first assignment), from `assigned`
+ * (reassign), or from `en_route`, where the reset IS the point: the new
+ * technician has not set off. `assigned_by`/`assigned_at` name the
+ * dispatcher who made it; the touch trigger bumps `version`.
+ */
+export async function assignJobCard(
+  db: Db,
+  jobId: string,
+  technicianId: string,
+  assignedBy: string,
+  assignedAt: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE job_cards
+     SET status = 'assigned', assigned_to = $2, assigned_by = $3, assigned_at = $4
+     WHERE id = $1`,
+    [jobId, technicianId, assignedBy, assignedAt],
+  );
+}
+
+/** The name the refusal messages carry (§6.3: a 409 that names a person). */
+export async function findEmployeeName(db: Db, employeeId: string): Promise<string | null> {
+  const r = await db.query<{ full_name: string }>(
+    'SELECT full_name FROM employees WHERE id = $1',
+    [employeeId],
+  );
+  return r.rows[0]?.full_name ?? null;
 }
 
 // ── the list (§6.3 GET /v1/jobs) ────────────────────────────────────────────
