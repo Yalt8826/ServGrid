@@ -52,6 +52,13 @@ async function ensureMirror(employeeId: string): Promise<Mirror> {
   return mirrorFor.mirror;
 }
 
+/** The session's one mirror connection, shared by the technician's
+ * routes (T1.19's complete route reads the outbox row its enqueue
+ * returned through the same handle — never a second open). */
+export function technicianMirror(employeeId: string): Promise<Mirror> {
+  return ensureMirror(employeeId);
+}
+
 function ensureDrain(employeeId: string, mirror: Mirror): DrainManager {
   if (drainFor === null || drainFor.employeeId !== employeeId) {
     drainFor = {
@@ -103,6 +110,8 @@ export interface TechnicianMirrorState {
   pendingCount: number;
   /** Each job's local timeline (outbox-derived, §T3) — the detail reads it. */
   eventsByJobId: Record<string, JobTimelineEntry[]>;
+  /** The product catalogue (T1.19) — the complete sheet's parts picker. */
+  products: Array<{ id: string; name: string; category: string }>;
 }
 
 export interface TechnicianMirrorDeps extends TechnicianMirrorState {

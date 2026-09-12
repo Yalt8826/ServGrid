@@ -34,6 +34,14 @@ export interface TextFieldProps {
   stale?: boolean;
   secureTextEntry?: boolean;
   /**
+   * Multiline input (the complete sheet's Work done field, §T4: three
+   * rows). `minHeight` only — the field grows with the text, so 200%
+   * dynamic type wraps instead of clipping.
+   */
+  multiline?: boolean;
+  /** Row hint for a multiline field; still a floor, never a cap. */
+  rows?: number;
+  /**
    * Control rendered inside the field's row, after the input — a
    * password visibility toggle is the T0.14 use (§X1: visible by
    * default, the mask is one tap away). It is part of the field's own
@@ -54,6 +62,8 @@ export function TextField({
   loading = false,
   stale = false,
   secureTextEntry = false,
+  multiline = false,
+  rows,
   trailing,
   testID,
 }: TextFieldProps): React.ReactNode {
@@ -90,12 +100,15 @@ export function TextField({
           placeholder={placeholder}
           placeholderTextColor={SEMANTIC.text.placeholder}
           secureTextEntry={secureTextEntry}
+          multiline={multiline}
+          numberOfLines={multiline ? rows : undefined}
+          textAlignVertical={multiline ? 'top' : undefined}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           style={{
             flex: 1,
             height,
-            minHeight: height,
+            minHeight: multiline ? height * 1.6 : height,
             borderRadius: RADII.control,
             borderWidth: focused ? 2 : 1,
             borderColor,
