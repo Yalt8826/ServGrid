@@ -32,9 +32,19 @@ module.exports = {
       files: ['**/*.ts', '**/*.tsx'],
       extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended'],
       parser: '@typescript-eslint/parser',
-      plugins: ['servgrid-rules'],
+      plugins: ['servgrid-rules', 'react-hooks'],
       rules: {
         'no-undef': 'off',
+        // T1.21 shipped `eslint-disable-next-line react-hooks/exhaustive-deps`
+        // on its mount-once effects, but the plugin was never installed —
+        // ESLint then errors on the *unknown rule name*, which is how the
+        // whole lint gate went red on main. The disables are legitimate
+        // (effects that must run once, guarded by an `alive` flag), so the
+        // fix is to install the rule they name rather than delete them.
+        // It earns its place beyond that: this codebase is full of effects
+        // whose dependency list is a deliberate decision.
+        'react-hooks/rules-of-hooks': 'error',
+        'react-hooks/exhaustive-deps': 'warn',
         // The codebase marks intentionally-unused parameters with a
         // leading underscore (matching tsc's noUnusedParameters
         // behaviour); teach the lint rule the same convention.
