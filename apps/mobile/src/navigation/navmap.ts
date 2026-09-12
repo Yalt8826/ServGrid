@@ -121,6 +121,10 @@ export const ROUTE_GUARDS: Record<string, RouteGuard> = {
 
   '/jobs': { kind: 'matrix', resource: 'job', action: 'read', landing: ['all', 'own'] },
   '/jobs/new': { kind: 'matrix', resource: 'job', action: 'create', landing: ['all'] },
+  // T2.8 — the dispatcher's Job Logs (§D2). Same permission as the list
+  // it filters; a landing route only for `all`-scoped roles, reached
+  // through the jobs tab (and dark without `dispatch.console`).
+  '/jobs/logs': { kind: 'matrix', resource: 'job', action: 'read', landing: ['all'] },
 
   '/customers': { kind: 'matrix', resource: 'customer', action: 'read', landing: ['all'] },
   '/customers/new': { kind: 'matrix', resource: 'customer', action: 'create', landing: ['all'] },
@@ -227,6 +231,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/jobs': 'Jobs',
   '/jobs/new': 'New job',
+  '/jobs/logs': 'Job Logs',
   '/customers': 'Customers',
   '/customers/new': 'New customer',
   '/sales': 'Sales',

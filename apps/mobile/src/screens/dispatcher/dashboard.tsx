@@ -101,6 +101,8 @@ export interface DispatcherDashboardDeps {
   onRetry: (section: DashboardSection) => void;
   onOpenJob: (jobId: string) => void;
   onDispatch: () => void;
+  /** D2 Job Logs (T2.8) — the screen D1 hands to; rendered when wired. */
+  onOpenJobLogs?: () => void;
 }
 
 /**
@@ -230,6 +232,9 @@ export function DispatcherDashboardScreen(deps: DispatcherDashboardDeps): React.
       ) : null}
 
       <Button label="+ Dispatch a job" onPress={deps.onDispatch} testID="dispatch-new-job" />
+      {deps.onOpenJobLogs === undefined ? null : (
+        <Button label="Job Logs" variant="ghost" onPress={deps.onOpenJobLogs} testID="dispatch-job-logs" />
+      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel} testID="dispatch-load-heading">

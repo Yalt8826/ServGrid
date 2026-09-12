@@ -67,6 +67,7 @@ function DispatcherDashboardRoute(): React.ReactNode {
         onRetry={data.retry}
         onOpenJob={(jobId) => router.push(`/jobs/${jobId}`)}
         onDispatch={() => router.push('/jobs/new')}
+        onOpenJobLogs={() => router.push('/jobs/logs')}
       />
     </SafeAreaView>
   );
