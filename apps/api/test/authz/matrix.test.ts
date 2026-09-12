@@ -86,6 +86,11 @@ let subject: { id: string };
 let customerId = '';
 let serviceId = '';
 let matrixJobId = '';
+/** A unit at the matrix customer, for the §6.4 stack probes. */
+let stackItemId = '';
+/** Catalogue rows for the owner-only PATCH probes. */
+let matrixProductId = '';
+let matrixServiceRowId = '';
 /** An attachment on the matrix technician's job, for the GET probe. */
 let matrixAttachmentId = '';
 
@@ -208,7 +213,7 @@ type InjectResponse = Awaited<ReturnType<FastifyInstance['inject']>>;
 interface EndpointRow {
   /** `METHOD path` — also the route the shrink guard asserts exists. */
   name: string;
-  method: 'GET' | 'POST' | 'PATCH' | 'PUT';
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   url: string;
   probe(actor: Actor): Promise<InjectResponse>;
   expect: Record<Role, Expectation> & { anon: Expectation };
@@ -234,6 +239,16 @@ const ASSIGN_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_
 /** §7 (T1.8): the sync doors are the technician handset's — Phase 1 builds his working set, the
  * sales-rep mirror arrives with the sales module, and dispatcher/owner work online by design. */
 const SYNC_ACTORS = { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.4: the customer is read by the office and, through a job, by the technician on site — never by a sales rep. */
+const CUSTOMER_READERS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.4/PLAN.md §5: customers are created and edited by the office — and the dispatcher's payload
+ * is stripped of `company_id` server-side (a write his matrix cell cannot carry). */
+const CUSTOMER_WRITERS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.4/PLAN.md §5: the stack is written by the owner and, at a site he has or has had a job
+ * for, by the technician — a dispatcher holds none of the `customer.stack` cell at all. */
+const STACK_WRITERS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.4: the catalogue (products, services) is read by everyone — the completion form and the sales picker both need it. */
+const CATALOG_READERS = { ...ALL_ROLES_OK, anon: UNAUTHENTICATED } as const;
 
 const ENDPOINTS: EndpointRow[] = [
   {
@@ -920,6 +935,248 @@ const ENDPOINTS: EndpointRow[] = [
       expect(res.json<{ status: string }>().status).toBe('ok');
     },
   },
+  {
+    name: 'GET /v1/customers',
+    method: 'GET',
+    url: '/v1/customers',
+    // §6.4: dispatcher and owner read every site, a technician the sites
+    // his jobs touch, a sales rep nothing (matrix: customer read none).
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/customers', headers: bearer(actor) }),
+    expect: CUSTOMER_READERS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/customers',
+    method: 'POST',
+    url: '/v1/customers',
+    // §6.4: dispatcher and owner create; the dispatcher's payload has its
+    // `companyId` stripped server-side (PLAN.md §5) — the stripping itself
+    // is proven at the row in test/integration/customers.test.ts.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/customers',
+        headers: bearer(actor),
+        payload: { name: 'Matrix probe site', phone: `9847${randomBytes(4).toString('hex')}`.slice(0, 12) },
+      }),
+    expect: CUSTOMER_WRITERS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ id: string }>().id).toBeTruthy();
+    },
+  },
+  {
+    name: 'GET /v1/customers/:id',
+    method: 'GET',
+    url: '/v1/customers/:id',
+    // §6.4: the matrix technician's job sits at this customer, so his
+    // `assigned` read reaches it; the detail carries the site's stack.
+    probe: (actor) => app.inject({ method: 'GET', url: `/v1/customers/${customerId}`, headers: bearer(actor) }),
+    expect: CUSTOMER_READERS,
+    assertOk: (actor, res) => {
+      if (actor === 'technician') expect(res.json<{ id: string }>().id).toBe(customerId);
+    },
+  },
+  {
+    name: 'PATCH /v1/customers/:id',
+    method: 'PATCH',
+    url: '/v1/customers/:id',
+    // §6.4: the office's edit door, under `If-Match` — a fresh customer is
+    // at version 1; a technician's customer cell carries no update.
+    probe: async (actor) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/customers',
+        headers: bearer('owner'),
+        payload: { name: 'Matrix probe patch site', phone: `9847${randomBytes(4).toString('hex')}`.slice(0, 12) },
+      });
+      const id = JSON.parse(created.body).id as string;
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/customers/${id}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { notes: 'Matrix probe customer edit.' },
+      });
+    },
+    expect: CUSTOMER_WRITERS,
+  },
+  {
+    name: 'GET /v1/customers/:id/stack',
+    method: 'GET',
+    url: '/v1/customers/:id/stack',
+    // §6.4: the stack is read with the site — the dispatcher's read-only
+    // stack view and the technician's site read share this scope.
+    probe: (actor) => app.inject({ method: 'GET', url: `/v1/customers/${customerId}/stack`, headers: bearer(actor) }),
+    expect: CUSTOMER_READERS,
+    assertOk: (_actor, res) => {
+      // The seeded unit is what came back, not just some list.
+      expect(res.json<Array<{ id: string }>>().map((i) => i.id)).toContain(stackItemId);
+    },
+  },
+  {
+    name: 'POST /v1/customers/:id/stack',
+    method: 'POST',
+    url: '/v1/customers/:id/stack',
+    // §6.4: "add a unit" is the correction door — the owner, or the
+    // technician at a site his jobs touch (this one). A dispatcher holds
+    // none of `customer.stack` and is 403 before the payload is read.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/customers/${customerId}/stack`,
+        headers: bearer(actor),
+        payload: {
+          freeTextName: 'Matrix probe unit',
+          serialNumber: `SN-T10-${randomBytes(4).toString('hex')}`,
+          quantity: 1,
+        },
+      }),
+    expect: STACK_WRITERS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ id: string }>().id).toBeTruthy();
+    },
+  },
+  {
+    name: 'PATCH /v1/customers/:id/stack/:itemId',
+    method: 'PATCH',
+    url: '/v1/customers/:id/stack/:itemId',
+    // §6.4: the correction case, under `If-Match` — a fresh unit is at
+    // version 1. Same two writers as the add door.
+    probe: async (actor) => {
+      const seeded = await db.query<{ id: string }>(
+        `INSERT INTO customer_products (customer_id, free_text_name, serial_number, quantity)
+         VALUES ($1, 'Matrix probe patch unit', $2, 1) RETURNING id`,
+        [customerId, `SN-T10-${randomBytes(4).toString('hex')}`],
+      );
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/customers/${customerId}/stack/${seeded.rows[0]!.id}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { quantity: 2 },
+      });
+    },
+    expect: STACK_WRITERS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ quantity: number }>().quantity).toBe(2);
+    },
+  },
+  {
+    name: 'DELETE /v1/customers/:id/stack/:itemId',
+    method: 'DELETE',
+    url: '/v1/customers/:id/stack/:itemId',
+    // §6.4: soft delete — `is_active = false`, which releases the serial.
+    // A fresh unit per probe, so the second role's probe is not 404ing on
+    // a row the first one already deactivated.
+    probe: async (actor) => {
+      const seeded = await db.query<{ id: string }>(
+        `INSERT INTO customer_products (customer_id, free_text_name, serial_number, quantity)
+         VALUES ($1, 'Matrix probe delete unit', $2, 1) RETURNING id`,
+        [customerId, `SN-T10-${randomBytes(4).toString('hex')}`],
+      );
+      return app.inject({
+        method: 'DELETE',
+        url: `/v1/customers/${customerId}/stack/${seeded.rows[0]!.id}`,
+        headers: bearer(actor),
+      });
+    },
+    expect: STACK_WRITERS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ ok: boolean }>().ok).toBe(true);
+    },
+  },
+  {
+    name: 'GET /v1/products',
+    method: 'GET',
+    url: '/v1/products',
+    // §6.4: the catalogue is read by everyone.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/products', headers: bearer(actor) }),
+    expect: CATALOG_READERS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<unknown[]>())).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/products',
+    method: 'POST',
+    url: '/v1/products',
+    // §6.4: written only by the owner.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers: bearer(actor),
+        payload: {
+          sku: `T10-SKU-${randomBytes(4).toString('hex')}`,
+          name: 'Matrix probe product',
+          category: 'accessory',
+        },
+      }),
+    expect: OWNER_ONLY,
+  },
+  {
+    name: 'PATCH /v1/products/:id',
+    method: 'PATCH',
+    url: '/v1/products/:id',
+    // §6.4: owner-only, under `If-Match`; deactivation is
+    // `isActive: false`, never a delete. The fixture product is patched
+    // back and forth by name only.
+    probe: async (actor) => {
+      const version = (
+        await db.query<{ version: number }>('SELECT version FROM products WHERE id = $1', [matrixProductId])
+      ).rows[0]!.version;
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/products/${matrixProductId}`,
+        headers: { ...bearer(actor), 'if-match': String(version) },
+        payload: { capacityLabel: 'Matrix probe label' },
+      });
+    },
+    expect: OWNER_ONLY,
+  },
+  {
+    name: 'GET /v1/services',
+    method: 'GET',
+    url: '/v1/services',
+    // §6.4: the catalogue is read by everyone.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/services', headers: bearer(actor) }),
+    expect: CATALOG_READERS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<unknown[]>())).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/services',
+    method: 'POST',
+    url: '/v1/services',
+    // §6.4: written only by the owner.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/services',
+        headers: bearer(actor),
+        payload: { code: `T10-SVC-${randomBytes(4).toString('hex')}`, name: 'Matrix probe service' },
+      }),
+    expect: OWNER_ONLY,
+  },
+  {
+    name: 'PATCH /v1/services/:id',
+    method: 'PATCH',
+    url: '/v1/services/:id',
+    // §6.4: owner-only, under `If-Match`.
+    probe: async (actor) => {
+      const version = (
+        await db.query<{ version: number }>('SELECT version FROM services WHERE id = $1', [matrixServiceRowId])
+      ).rows[0]!.version;
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/services/${matrixServiceRowId}`,
+        headers: { ...bearer(actor), 'if-match': String(version) },
+        payload: { description: 'Matrix probe service edit.' },
+      });
+    },
+    expect: OWNER_ONLY,
+  },
 ];
 
 beforeAll(async () => {
@@ -982,6 +1239,27 @@ beforeAll(async () => {
     )
   ).rows[0]!.id;
   matrixJobId = await seedJobAssignedToTechnician();
+
+  // The §6.4 stack probes need a unit standing at the matrix customer.
+  stackItemId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO customer_products (customer_id, free_text_name, serial_number, quantity)
+       VALUES ($1, 'Matrix probe inverter', $2, 1) RETURNING id`,
+      [customerId, `SN-T10-${randomBytes(4).toString('hex')}`],
+    )
+  ).rows[0]!.id;
+  matrixProductId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO products (sku, name, category) VALUES ($1, 'Matrix probe product', 'accessory') RETURNING id`,
+      [`T10-SKU-${randomBytes(4).toString('hex')}`],
+    )
+  ).rows[0]!.id;
+  matrixServiceRowId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO services (code, name) VALUES ($1, 'Matrix probe catalogue service') RETURNING id`,
+      [`T10-SVC-${randomBytes(4).toString('hex')}`],
+    )
+  ).rows[0]!.id;
 
   // The GET /v1/attachments/:id probe needs an attachment on the matrix
   // technician's job — landed once, through the API itself, exactly the

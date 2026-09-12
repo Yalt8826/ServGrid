@@ -117,7 +117,10 @@ const ROUTE_TABLE: RouteEntry[] = [];
 
 /**
  * The dispatcher-reachable manifest. The discovery assertion compares this
- * against the live route table on every run.
+ * against the live route table on every run. T2.4 adds the customer
+ * surface (§6.4): the customer endpoints that answer a dispatcher at all
+ * are walked like the job endpoints — a customer row carries no money,
+ * and the walk is how that stays a fact instead of a hope.
  */
 const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'GET', url: '/v1/jobs' },
@@ -128,6 +131,11 @@ const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'POST', url: '/v1/jobs/:id/assign' },
   { method: 'POST', url: '/v1/jobs/bulk-assign' },
   { method: 'GET', url: '/v1/technicians/load' },
+  { method: 'GET', url: '/v1/customers' },
+  { method: 'POST', url: '/v1/customers' },
+  { method: 'GET', url: '/v1/customers/:id' },
+  { method: 'PATCH', url: '/v1/customers/:id' },
+  { method: 'GET', url: '/v1/customers/:id/stack' },
 ];
 
 /** The IST noon `offsetDays` from today — an unambiguous instant inside a business day. */
@@ -465,6 +473,82 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     expect(hits, `money keys leaked on technician load: ${hits.join(', ')}`).toEqual([]);
     // The picker is where the dispatcher gets names — but never completions.
     expect(res.body).not.toContain('ompletion');
+  });
+
+  // ── T2.4: the customer surface (§6.4) — walked like the job surface ────
+
+  it('GET /v1/customers — the list, recursed through items[]', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/customers', headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body.items) && body.items.length > 0, 'the fixture page is non-empty').toBe(true);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits);
+    expect(hits, `money keys leaked in the customer list: ${hits.join(', ')}`).toEqual([]);
+
+    // The dispatcher's customer row carries no companyId at all — company
+    // data is a field he cannot read (PLAN.md §5), not a null he could.
+    for (const item of body.items) {
+      expect(item).not.toHaveProperty('companyId');
+    }
+  });
+
+  it('POST /v1/customers — the created row, read back after the create', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(DISPATCHER),
+      payload: { name: 'Money-leak New Customer', phone: '9847000099' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on customer create: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('GET /v1/customers/:id — the site and its stack', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${customerId}`,
+      headers: bearer(DISPATCHER),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on the customer point read: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('PATCH /v1/customers/:id — the site read back after the edit', async () => {
+    const version = (
+      await db.query<{ version: number }>('SELECT version FROM customers WHERE id = $1', [customerId])
+    ).rows[0]!.version;
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/customers/${customerId}`,
+      headers: { ...bearer(DISPATCHER), 'if-match': String(version) },
+      payload: { notes: 'money-leak walk edit' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on customer patch: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('GET /v1/customers/:id/stack — the site equipment list', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${customerId}/stack`,
+      headers: bearer(DISPATCHER),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits);
+    expect(hits, `money keys leaked on the stack read: ${hits.join(', ')}`).toEqual([]);
   });
 
   it('the fixture is self-proving: the OWNER reads the money the dispatcher must not', async () => {
