@@ -67,6 +67,13 @@ export async function upsertDeviceWithDiagnostics(db: Db, d: DeviceRegistration)
        manufacturer = EXCLUDED.manufacturer,
        model = EXCLUDED.model,
        fcm_token = COALESCE(EXCLUDED.fcm_token, devices.fcm_token),
+       -- §12.1: a FRESH token invalidates any recorded push failure — the
+       -- handset re-registered, the tracking-health finding is resolved.
+       -- A call without a token leaves the record alone (the ladder
+       -- reports one mitigation at a time).
+       failure_reason = CASE
+         WHEN EXCLUDED.fcm_token IS NOT NULL THEN NULL
+         ELSE devices.failure_reason END,
        location_permission = COALESCE(EXCLUDED.location_permission, devices.location_permission),
        battery_opt_exempt = COALESCE(EXCLUDED.battery_opt_exempt, devices.battery_opt_exempt),
        autostart_confirmed = COALESCE(EXCLUDED.autostart_confirmed, devices.autostart_confirmed),
