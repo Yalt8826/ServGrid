@@ -14,6 +14,7 @@ import { allocateNumber } from '../../lib/sequences.js';
 import type { PoolClient } from 'pg';
 import type { RequestSource } from '../../plugins/request-context.js';
 import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
+import type { AssignmentPush } from '../notifications/service.js';
 import * as repo from './repo.js';
 import * as dispatcherRepo from './repo.dispatcher.js';
 
@@ -310,7 +311,17 @@ function listFilterOf(query: JobListQuery): repo.JobListFilter {
   };
 }
 
-export function createJobsService() {
+/**
+ * §12.1 — the assignment-notification hook, injected so the service stays
+ * testable without an FCM client. The implementation
+ * (notifications/service.ts) fires AFTER the caller's transaction has
+ * committed and never throws into it: push is a latency improvement over
+ * the sync triggers, never the transport, so a failed — or suppressed —
+ * wake must not fail, nor delay, the mutation that caused it.
+ */
+export type AssignmentNotifier = (push: AssignmentPush) => void;
+
+export function createJobsService(notifyAssignment?: AssignmentNotifier) {
   /**
    * The actor's own card, read back after a write inside the caller's
    * transaction (§6.3). The dispatcher's comes from the view — the write
@@ -484,7 +495,13 @@ export function createJobsService() {
     // completion there is no client `occurredAt` in the payload to clamp.
     const cancelledAt = new Date().toISOString();
 
-    return withTransaction(async (client) => {
+    // §12.1 — set inside the transaction (the lock row carries
+    // `assigned_to` and `priority`), fired only AFTER the commit below: a
+    // push announcing a cancellation that then rolled back would be a lie
+    // delivered instantly. Null when the job had nobody to wake.
+    const wake: { value: AssignmentPush | null } = { value: null };
+
+    const card = await withTransaction(async (client) => {
       try {
         const job = await repo.lockJobForCancellation(client, jobId);
         if (job === null) {
@@ -564,6 +581,18 @@ export function createJobsService() {
             ...(successorId !== null ? { replacementJobId: successorId } : {}),
           },
         });
+        // Cancellation of an ASSIGNED job wakes the technician who had it —
+        // the one §12.1's trigger exists for. An unassigned job has nobody
+        // to tell; a successor card is unassigned and wakes nobody here.
+        wake.value =
+          job.assigned_to === null
+            ? null
+            : {
+                kind: 'cancelled',
+                jobId,
+                priority: job.priority,
+                recipientIds: [job.assigned_to],
+              };
       } catch (error) {
         if (error instanceof AppError) throw error;
         throw mapDbRefusal(error);
@@ -571,6 +600,10 @@ export function createJobsService() {
 
       return readBackCard(actor, client, jobId);
     });
+
+    // Post-commit: the wake leaves only after the cancellation is real.
+    if (wake.value !== null) notifyAssignment?.(wake.value);
+    return card;
   }
 
   /**
@@ -694,7 +727,7 @@ export function createJobsService() {
       throw new AppError('FORBIDDEN', ASSIGN_ACTORS_MESSAGE);
     }
 
-    return withTransaction(async (client) => {
+    const { card, wake } = await withTransaction(async (client) => {
       const technician = await repo.findActiveTechnician(client, technicianId);
       if (technician === null) {
         throw new AppError('VALIDATION_FAILED', NOT_A_TECHNICIAN_MESSAGE);
@@ -726,8 +759,25 @@ export function createJobsService() {
         },
       });
 
-      return (await readBackCard(actor, client, jobId)) as JobCardDispatcher | JobCardOwner;
+      // §12.1 — who must be woken: the technician who gained the work, and
+      // on a reassign the one who lost it (PLAN-BACKEND.md §15 item 5). The
+      // service dedupes the set, so reassigning to the sitting technician
+      // is one recipient, not two. Fired after commit, below.
+      const wake: AssignmentPush = {
+        kind: from === 'unassigned' ? 'assigned' : 'reassigned',
+        jobId,
+        priority: 'normal', // replaced from the read-back card before firing
+        recipientIds:
+          from !== 'unassigned' && job.assigned_to !== null
+            ? [technicianId, job.assigned_to]
+            : [technicianId],
+      };
+
+      return { card: await readBackCard(actor, client, jobId), wake };
     });
+
+    notifyAssignment?.({ ...wake, priority: card.priority });
+    return card as JobCardDispatcher | JobCardOwner;
   }
 
   /**
@@ -748,7 +798,7 @@ export function createJobsService() {
       throw new AppError('FORBIDDEN', ASSIGN_ACTORS_MESSAGE);
     }
 
-    return withTransaction(async (client) => {
+    const { results, wakes } = await withTransaction(async (client) => {
       const technician = await repo.findActiveTechnician(client, technicianId);
       if (technician === null) {
         throw new AppError('VALIDATION_FAILED', NOT_A_TECHNICIAN_MESSAGE);
@@ -757,6 +807,7 @@ export function createJobsService() {
       const assignedAt = new Date().toISOString();
       const outcomes = new Map<string, BulkAssignOutcome>();
       const lockOrder = [...entries].sort((a, b) => (a.id < b.id ? -1 : 1));
+      const wakes: AssignmentPush[] = [];
       for (const entry of lockOrder) {
         const job = await repo.lockJobForAssign(client, entry.id);
         if (job === null) {
@@ -805,10 +856,26 @@ export function createJobsService() {
           ok: true,
           job: card as JobCardDispatcher | JobCardOwner,
         });
+        // §12.1, per applied entry: the gaining technician's wake — and the
+        // loser's, who must learn the work is gone (§15 item 5). Bulk
+        // collapses to one wake per technician at the send path; the local
+        // summary copy is T2.6's business, from the synced rows.
+        wakes.push({
+          kind: from === 'unassigned' ? 'assigned' : 'reassigned',
+          jobId: entry.id,
+          priority: card.priority,
+          recipientIds:
+            from !== 'unassigned' && job.assigned_to !== null
+              ? [technicianId, job.assigned_to]
+              : [technicianId],
+        });
       }
 
-      return { results: entries.map((entry) => outcomes.get(entry.id)!) };
+      return { results: entries.map((entry) => outcomes.get(entry.id)!), wakes };
     });
+
+    for (const wake of wakes) notifyAssignment?.(wake);
+    return { results };
   }
 
   /**

@@ -12,6 +12,7 @@ import { errorsPlugin } from './plugins/errors.js';
 import { idempotencyPlugin } from './plugins/idempotency.js';
 import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
+import { startWindowOpenReleaseScheduler } from './jobs/release-held-notifications.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { attachmentsRoutes } from './modules/attachments/routes.js';
 import { catalogRoutes } from './modules/catalog/routes.js';
@@ -128,7 +129,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(employeesRoutes);
   app.register(flagsRoutes);
   app.register(consentRoutes);
-  app.register(jobsRoutes);
+  app.register(jobsRoutes, { workWindow: config.workWindow });
   app.register(customersRoutes);
   app.register(catalogRoutes);
   app.register(devicesRoutes);
@@ -172,10 +173,21 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   return app;
 }
 
-/** Boot: FCM, listen, and a SIGTERM/SIGINT path that drains before exiting. */
+/** Boot: FCM, the window-open release scheduler, listen, and a SIGTERM/SIGINT path that drains before exiting. */
 export async function startServer(config: Config): Promise<FastifyInstance> {
   initFcm(config.fcmServiceAccount);
   const app = buildServer(config);
+
+  // §12.1 with §15 item 6 (decision B1): the send path is event-driven,
+  // but the morning batch needs something to fire when the window opens.
+  // Stopped with the app so a shutdown is never held open by a push.
+  const releaseScheduler = startWindowOpenReleaseScheduler({
+    workWindow: config.workWindow,
+    log: app.log,
+  });
+  app.addHook('onClose', async () => {
+    releaseScheduler.stop();
+  });
 
   const shutdown = (signal: NodeJS.Signals): void => {
     app.log.info({ signal }, 'shutting down');

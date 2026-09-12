@@ -17,6 +17,8 @@ import {
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import type { WorkWindow } from '../../lib/time.js';
+import { createNotificationsService } from '../notifications/service.js';
 import { isFlagOn } from '../flags/service.js';
 import {
   ASSIGN_ACTORS_MESSAGE,
@@ -162,8 +164,15 @@ async function dispatchBulkEnabled(request: FastifyRequest): Promise<void> {
   }
 }
 
-export const jobsRoutes: FastifyPluginAsync = async (app) => {
-  const service = createJobsService();
+/**
+ * The work window rides in as a plugin option (the same
+ * WORK_WINDOW_START/END the location module gets): the notification send
+ * path consults it per mutation, after commit, in its own module — the
+ * route layer only wires the pieces together.
+ */
+export const jobsRoutes: FastifyPluginAsync<{ workWindow: WorkWindow }> = async (app, opts) => {
+  const notifications = createNotificationsService({ workWindow: opts.workWindow, log: app.log });
+  const service = createJobsService(notifications.assignmentChanged);
 
   app.get(
     '/v1/jobs',
