@@ -43,6 +43,7 @@ export default function AppLayout() {
             <Stack.Screen name="dashboard" />
             <Stack.Screen name="jobs/index" />
             <Stack.Screen name="jobs/new" />
+            <Stack.Screen name="jobs/logs" />
             <Stack.Screen name="jobs/[id]/index" />
             <Stack.Screen name="jobs/[id]/complete" />
             <Stack.Screen name="jobs/[id]/cancel" />
