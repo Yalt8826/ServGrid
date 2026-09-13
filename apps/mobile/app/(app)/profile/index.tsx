@@ -1,7 +1,11 @@
 /**
- * Profile route (UI/plan-2/04-TECHNICIAN.md §T7). The seam where the
- * pure `ProfileScreen` meets the OS and the session, exactly as the
- * ladder route does:
+ * Profile route (UI/plan-2/04-TECHNICIAN.md §T7, UI/plan-2/05-DISPATCHER.md
+ * §D6, T2.10). The seam where the pure profile screens meet the OS and
+ * the session — and, since T2.10, a ROLE SPLIT, because the two roles'
+ * profiles are deliberately different shapes:
+ *
+ * **Technician (and rep/owner, until their own phases):** the §T7
+ * screen —
  *
  * - health comes from the self-scoped view read (`/v1/location/health/me`,
  *   T1.12) — real view data, never a stored state;
@@ -12,36 +16,45 @@
  * - the chip's red/amber taps navigate to the ladder, which opens at the
  *   failed step by its own probe — a stored hint can lie, the probe
  *   cannot;
- * - logout ends the session via the API client and the session store;
- *   the root index redirects to login.
+ * - logout is GATED (PLAN-FRONTEND.md §5): the gate's count is the
+ *   outbox's queued+inflight rows for this employee, `rejected`/`failed`
+ *   excluded by contract. T1.15's mirror session supplies the live count
+ *   and the *Retry now* drain.
  *
- * The logout gate's count is the outbox's queued+inflight rows for this
- * employee, `rejected`/`failed` excluded by contract (PLAN-FRONTEND.md
- * §5). T1.15's mirror session supplies the live count and the *Retry
- * now* drain; before it opens the count is zero — honest, since nothing
- * can be queued before the mirror exists. The screen stays driven by the
- * seam; no screen code changed.
+ * **Dispatcher:** the §D6 screen — self only, and NOTHING of the
+ * technician's device state: no pending badge, no sync state, no
+ * tracking chip (the dispatcher holds no device state and is not
+ * tracked), and logout is IMMEDIATE — there is nothing queued to lose.
+ * The dispatcher branch never calls `useMirrorSession`, never reads a
+ * tracking health endpoint, and is dark without `dispatch.console`.
  */
+import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AppState } from 'react-native';
+import { AppState, Text, View, StyleSheet } from 'react-native';
 
-import type { TrackingHealth } from '@servgrid/shared';
+import type { AuthMeResponse, TrackingHealth } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
 import { api } from '../../../src/lib/api';
 import { matchAutostartVendor } from '../../../src/location/autostart';
 import { useMirrorSession } from '../../../src/sync/MirrorProvider';
 import { ProfileScreen, type LadderRowState } from '../../../src/screens/technician/ProfileScreen';
+import { DispatcherProfileScreen } from '../../../src/screens/dispatcher/profile';
+import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 /** Same keys, same semantics, as the ladder route — one memory between
  * the two screens, or the rows would contradict the ladder. */
 const BATTERY_FLAG_KEY = 'servgrid.ladder.batteryExempt';
 const AUTOSTART_FLAG_KEY = 'servgrid.ladder.autostartConfirmed';
+
+const styles = StyleSheet.create({
+  root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+});
 
 async function readFlag(key: string): Promise<boolean> {
   try {
@@ -51,7 +64,7 @@ async function readFlag(key: string): Promise<boolean> {
   }
 }
 
-export default function Screen() {
+function TechnicianProfileRoute(): React.ReactNode {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
   // T1.15: the mirror session is live, so the gate's count is the real
@@ -153,4 +166,75 @@ export default function Screen() {
       />
     </SafeAreaView>
   );
+}
+
+function DispatcherProfileRoute(): React.ReactNode {
+  const router = useRouter();
+  const actor = useSessionStore((s) => s.actor);
+  const flags = useDispatchJobLogsFlags();
+
+  // §D6 names a NAME and a username; the session store carries only the
+  // username, so the name resolves from `/v1/auth/me` (the same read the
+  // flags just made) and degrades to the username until it lands — the
+  // same resolve-into-state rule the technician's screen uses. No
+  // tracking read, no outbox count: this role has neither.
+  const [fullName, setFullName] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async (): Promise<AuthMeResponse | null> => {
+      const res = await api.request<AuthMeResponse>('GET', '/v1/auth/me');
+      return res.ok && res.data !== null ? res.data : null;
+    })()
+      .then((me) => {
+        if (alive && me !== null) setFullName(me.employee.fullName);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (actor === null) return null;
+
+  if (!flags.consoleOn) {
+    // Dark without the flag — the honest placeholder, nothing spinning.
+    return (
+      <View style={styles.root}>
+        <Text>Profile</Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
+      edges={['top', 'left', 'right', 'bottom']}
+    >
+      <DispatcherProfileScreen
+        fullName={fullName ?? actor.username}
+        username={actor.username}
+        appVersion={Constants.expoConfig?.version ?? 'dev'}
+        changePassword={() => router.push('/change-password')}
+        logout={() => {
+          // §D6: IMMEDIATE — no gate (nothing is queued), no confirmation
+          // (nothing to lose). Same session end as every role.
+          void (async () => {
+            await api.logout();
+            useSessionStore.getState().setAnonymous();
+            router.replace('/login');
+          })();
+        }}
+      />
+    </SafeAreaView>
+  );
+}
+
+export default function Screen() {
+  const actor = useSessionStore((s) => s.actor);
+  if (actor === null) return null;
+  // The role split is the whole point of §D6: a dispatcher must never
+  // see the technician's tracking and sync UI, so the dispatcher branch
+  // renders a different screen from a different component — not the
+  // same screen with pieces hidden.
+  return actor.role === 'dispatcher' ? <DispatcherProfileRoute /> : <TechnicianProfileRoute />;
 }
