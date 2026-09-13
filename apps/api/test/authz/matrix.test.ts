@@ -1371,6 +1371,15 @@ beforeAll(async () => {
      WHERE employees.role IN ('owner', 'dispatcher')`,
   );
 
+  // Same for the rep's cash handover (T3.6): the cash-endpoint probes
+  // exercise ROLE authorization, so the matrix rep rides with `sales.cash`
+  // enabled — the flag's own switchable behaviour is
+  // integration/rep-cash.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'sales.cash', true FROM employees WHERE role = 'sales_rep'`,
+  );
+
   // The jobs-endpoint probes need a real job (migration 007) assigned to
   // the matrix technician.
   customerId = (

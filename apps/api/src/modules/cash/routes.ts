@@ -8,6 +8,7 @@ import {
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import { salesRepCashEnabled } from '../flags/gates.js';
 import { createCashService } from './service.js';
 
 /**
@@ -25,6 +26,12 @@ import { createCashService } from './service.js';
  * enforced on the row and off the token: POST stamps the actor's id, /me
  * reads the actor's id, and PATCH checks the row's `employee_id` in the
  * service — no request here ever names an employee.
+ *
+ * The rep's half rides `sales.cash` (PHASE-3-SALES-REP.md T3.6), appended
+ * after the matrix gate: the flag is the rep surface's T0 rollback and is
+ * asked only of a sales_rep, so the technician's T1.11 declaration stays
+ * exactly as lit. No new endpoint and no new screen — the rep declares on
+ * the technician's routes, and the flag decides whether his half answers.
  *
  * Responses are the narrow employee shape (`CashHandoverSchema`), asserted
  * per response by the errors plugin (§3.4): strict, and with no
@@ -76,7 +83,11 @@ export const cashRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/v1/cash/handovers',
     {
-      preHandler: [app.requireAuth, app.requirePermission('cash.declare', 'create', DECLARERS_MESSAGE)],
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('cash.declare', 'create', DECLARERS_MESSAGE),
+        salesRepCashEnabled,
+      ],
       config: { responseSchema: asResponseSchema(CashHandoverSchema) },
     },
     async (request) => {
@@ -93,7 +104,7 @@ export const cashRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/v1/cash/handovers/me',
     {
-      preHandler: [app.requireAuth, app.requirePermission('cash.declare', 'read')],
+      preHandler: [app.requireAuth, app.requirePermission('cash.declare', 'read'), salesRepCashEnabled],
       config: { responseSchema: asResponseSchema(cashHandoverListResponseSchema) },
     },
     async (request) => {
@@ -105,7 +116,11 @@ export const cashRoutes: FastifyPluginAsync = async (app) => {
   app.patch(
     '/v1/cash/handovers/:id',
     {
-      preHandler: [app.requireAuth, app.requirePermission('cash.declare', 'update', AMENDERS_MESSAGE)],
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('cash.declare', 'update', AMENDERS_MESSAGE),
+        salesRepCashEnabled,
+      ],
       config: { responseSchema: asResponseSchema(CashHandoverSchema) },
     },
     async (request) => {
