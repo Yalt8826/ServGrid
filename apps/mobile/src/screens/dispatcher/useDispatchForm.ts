@@ -80,7 +80,7 @@ function customerOptionOf(row: CustomerDispatcher): DispatchCustomerOption {
 
 export function useDispatchForm(): DispatchJobDeps {
   const router = useRouter();
-  const offline = useIsOnline();
+  const offline = !useIsOnline();
 
   // The one field that is both search and create (§D3).
   const [customerQuery, setCustomerQuery] = useState('');

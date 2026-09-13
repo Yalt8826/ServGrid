@@ -133,7 +133,7 @@ function jobLogsParamsKeyOf(params: JobLogsParams): string {
 export function useJobLogs(): JobLogsDeps {
   const router = useRouter();
   const params = useLocalSearchParams() as JobLogsParams;
-  const offline = useIsOnline();
+  const offline = !useIsOnline();
 
   // The URL is the filter state's home (§D2): re-derived only when the
   // params this screen owns actually change, so an unrelated navigation

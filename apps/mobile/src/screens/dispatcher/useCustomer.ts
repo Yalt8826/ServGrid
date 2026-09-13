@@ -92,7 +92,7 @@ function searchRowOf(row: CustomerDispatcher): CustomerSearchRow {
 
 export function useCustomerSearch(): CustomerSearchDeps {
   const router = useRouter();
-  const offline = useIsOnline();
+  const offline = !useIsOnline();
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -132,7 +132,7 @@ export function useCustomerSearch(): CustomerSearchDeps {
 
 export function useCustomerDetail(customerId: string): CustomerDetailDeps {
   const router = useRouter();
-  const offline = useIsOnline();
+  const offline = !useIsOnline();
 
   const detail = useQuery({
     queryKey: ['dispatch', 'customer-detail', customerId],
@@ -210,7 +210,7 @@ export function useCustomerDetail(customerId: string): CustomerDetailDeps {
 
 export function useCustomerForm(customerId?: string): CustomerFormDeps {
   const router = useRouter();
-  const offline = useIsOnline();
+  const offline = !useIsOnline();
   const editing = customerId !== undefined;
 
   const detail = useQuery({

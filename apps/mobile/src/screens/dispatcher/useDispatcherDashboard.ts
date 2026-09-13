@@ -253,7 +253,7 @@ export interface DispatcherDashboardData {
  * error the section shows is the server's message, and Retry re-runs
  * only that section's queries (§D1, States/error). */
 export function useDispatcherDashboard(now: Date): DispatcherDashboardData {
-  const offline = useIsOnline();
+  const offline = !useIsOnline();
   const today = istBusinessDate(now);
 
   const summary = useQuery({
