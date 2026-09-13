@@ -326,6 +326,103 @@ export const DispatcherSummarySchema = z
 
 export type DispatcherSummary = z.infer<typeof DispatcherSummarySchema>;
 
+// ── companies (§3.2 data model, §5 `own` on company, §11) ───────────────────
+
+/**
+ * A B2B account (PLAN-DATA-MODEL.md §3.2). `ownerRepId` is ownership: each
+ * rep sees his accounts plus the house accounts (`ownerRepId: null`), which
+ * is the rbac scope `own` on company as the SQL predicate
+ * `owner_rep_id = :actor OR owner_rep_id IS NULL` — never a filter over
+ * fetched rows. The field moves ONLY through PATCH /v1/companies/:id/owner,
+ * owner only; it is deliberately absent from the create and patch payloads
+ * below, so a rep can neither set it at birth (create stamps the creator)
+ * nor smuggle it in an edit.
+ */
+export const CompanySchema = z
+  .object({
+    id: uuid,
+    name: z.string(),
+    contactPerson: z.string().nullable(),
+    phone: z.string().nullable(),
+    email: z.string().nullable(),
+    addressLine1: z.string().nullable(),
+    addressLine2: z.string().nullable(),
+    city: z.string().nullable(),
+    state: z.string().nullable(),
+    pincode: z.string().nullable(),
+    gstin: z.string().nullable(),
+    notes: z.string().nullable(),
+    ownerRepId: uuid.nullable(),
+    version: z.number().int(),
+  })
+  .strict();
+
+export type CompanyRecord = z.infer<typeof CompanySchema>;
+
+/** POST /v1/companies (§11) — the actor who creates it becomes its owner; the server stamps that, the payload carries no `ownerRepId`. */
+export const CompanyCreateSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    contactPerson: z.string().max(200).optional(),
+    phone: z.string().min(1).max(32).optional(),
+    email: z.string().max(200).optional(),
+    addressLine1: z.string().max(200).optional(),
+    addressLine2: z.string().max(200).optional(),
+    city: z.string().max(100).optional(),
+    state: z.string().max(100).optional(),
+    pincode: z.string().max(10).optional(),
+    // The DB CHECK is the same shape (migration 005 companies_gstin_shape);
+    // mirrored here so a typo dies at the form, not as a mapped refusal.
+    gstin: z
+      .string()
+      .max(15)
+      .regex(/^[0-9A-Z]{15}$/, 'GSTIN is 15 characters, capitals and digits.')
+      .optional(),
+    notes: z.string().max(2000).optional(),
+  })
+  .strict();
+
+export type CompanyCreate = z.infer<typeof CompanyCreateSchema>;
+
+/** PATCH /v1/companies/:id (§11) — every field optional, at least one sent. `ownerRepId` is NOT a field: ownership moves through the owner endpoint alone. */
+export const companyPatchSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    contactPerson: z.string().max(200).nullish(),
+    phone: z.string().max(32).nullish(),
+    email: z.string().max(200).nullish(),
+    addressLine1: z.string().max(200).nullish(),
+    addressLine2: z.string().max(200).nullish(),
+    city: z.string().max(100).nullish(),
+    state: z.string().max(100).nullish(),
+    pincode: z.string().max(10).nullish(),
+    gstin: z
+      .string()
+      .max(15)
+      .regex(/^[0-9A-Z]{15}$/, 'GSTIN is 15 characters, capitals and digits.')
+      .nullish(),
+    notes: z.string().max(2000).nullish(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+
+export type CompanyPatch = z.infer<typeof companyPatchSchema>;
+
+/**
+ * PATCH /v1/companies/:id/owner (§11) — OWNER ONLY. `{ ownerRepId | null }`:
+ * reassignment and the leave cover. `null` makes the account a house
+ * account visible to every rep. A rep cannot claim another rep's account
+ * or hand one off — his own included — which the route enforces at the
+ * door, not in the handler.
+ */
+export const companyOwnerPatchSchema = z
+  .object({
+    ownerRepId: uuid.nullable(),
+  })
+  .strict();
+
+export type CompanyOwnerPatch = z.infer<typeof companyOwnerPatchSchema>;
+
 // ── customers (§5 rule 3, §6.4) ─────────────────────────────────────────────
 
 export const CustomerCreateSchema = z

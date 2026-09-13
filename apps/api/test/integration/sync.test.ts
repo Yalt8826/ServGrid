@@ -597,12 +597,21 @@ describe('batch — the outbox drain (§7)', () => {
     }
   });
 
-  it('is the technician handset’s door: dispatcher, sales rep and owner are 403, an anonymous caller 401', async () => {
-    for (const who of [DISPATCHER.token, SALES_REP.token, OWNER.token]) {
+  it('drains for the field roles (§7): dispatcher and owner are 403, a rep without the offline flag FLAG_DISABLED, an anonymous caller 401', async () => {
+    // T3.2 opened the batch (not the read doors) to the sales rep: the
+    // drain re-runs the caller's own queued ops through each route's own
+    // rbac, so the rep's offline company work has a server-side door. A
+    // rep the owner has not switched the offline tier on for is refused
+    // FLAG_DISABLED — this suite seeds `tech.offline` for its technicians
+    // only.
+    for (const who of [DISPATCHER.token, OWNER.token]) {
       const res = await postBatch(who, []);
       expect(res.statusCode, res.body).toBe(403);
       expect(envelopeOf(res.statusCode, res.body).code).toBe('FORBIDDEN');
     }
+    const repOfflineOff = await postBatch(SALES_REP.token, []);
+    expect(repOfflineOff.statusCode, repOfflineOff.body).toBe(409);
+    expect(envelopeOf(repOfflineOff.statusCode, repOfflineOff.body).code).toBe('FLAG_DISABLED');
     const anon = await app.inject({ method: 'POST', url: '/v1/sync/batch', payload: { operations: [] } });
     expect(envelopeOf(anon.statusCode, anon.body).code).toBe('UNAUTHENTICATED');
   });
