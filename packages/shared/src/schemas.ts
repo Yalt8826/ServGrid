@@ -1409,3 +1409,87 @@ export const PaymentSchema = z
   })
   .strict();
 export type PaymentRecord = z.infer<typeof PaymentSchema>;
+
+// ── ledger and balances (§3.5 data model, §11, UI/plan-2 06-SALES-REP.md §S4) ──
+
+/**
+ * Money that may be negative — the ledger and the balance views deal in
+ * signed figures. A sale is positive and a payment negative (§S4's
+ * `+ ₹16,800 / − ₹40,000`), and an overpayment leaves a company's balance
+ * negative on purpose: a credit is a real state and good news, rendered by
+ * the UI as "Credit", never as a minus in red. The plain `moneyString`
+ * above stays unsigned — it types document amounts as entered.
+ */
+export const signedMoneyString = z
+  .string()
+  .regex(/^-?\d+(\.\d{1,2})?$/, 'signed decimal amount as a string, e.g. "1234.50" or "-800.00"');
+
+/** What a ledger row is a document of — a sale or a payment (§S4's ledger). */
+export const ledgerEntryKindSchema = z.enum(['sale', 'payment']);
+export type LedgerEntryKind = z.infer<typeof ledgerEntryKindSchema>;
+
+/**
+ * One interleaved ledger row (GET /v1/companies/:id/ledger, §11). The
+ * ledger shows documents, not effects: a VOIDED sale or payment still
+ * appears — the document existed, the ledger says so — carrying its signed
+ * `amount` exactly as written, with `voided` explaining why the running
+ * balance stepped over it. The server computes `runningBalance` (§S4's
+ * right-hand column): the rep's phone and the owner's desktop cannot
+ * disagree about money. Newest first, so `runningBalance` counts this row
+ * and every older one — at the newest row it equals the account's
+ * `v_company_balances.balance` to the paisa, because both are the same sum
+ * over the same rows.
+ */
+export const LedgerEntrySchema = z
+  .object({
+    kind: ledgerEntryKindSchema,
+    id: uuid,
+    /** `SL-2627-00018` / `PM-2627-00042` — allocated at confirm (sales) or create (payments); a void keeps its number. */
+    number: z.string(),
+    /** The day the row shows as — `sale_date` for a sale, `business_date` (Asia/Kolkata) for a payment. */
+    date: z.string().date(),
+    /** When the money moved — `confirmed_at` for a sale, `received_at` for a payment. The ledger's order key. */
+    recordedAt: isoDateTime,
+    /** UPI, cash, cheque, … for a payment; null for a sale (§S4: "Payment UPI"). */
+    mode: paymentModeSchema.nullable(),
+    /** Signed document amount — a sale positive, a payment negative. A voided row keeps its amount; it does not move the balance. */
+    amount: signedMoneyString,
+    voided: z.boolean(),
+    voidReason: z.string().nullable(),
+    /** Balance after this row and everything older — voided rows contribute nothing. */
+    runningBalance: signedMoneyString,
+  })
+  .strict();
+export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
+
+/**
+ * GET /v1/companies/:id/ledger (§11) — the account's whole story. `balance`
+ * is the header figure, read from `v_company_balances` in the same
+ * statement that computes the entries, so the screen's largest number and
+ * the column beside each row cannot disagree.
+ */
+export const CompanyLedgerSchema = z
+  .object({
+    companyId: uuid,
+    balance: signedMoneyString,
+    entries: z.array(LedgerEntrySchema),
+  })
+  .strict();
+export type CompanyLedger = z.infer<typeof CompanyLedgerSchema>;
+
+/**
+ * One row of the Pending tab (GET /v1/companies/balances, §11). Read from
+ * `v_company_balances`, never from a payments table — pending is a view of
+ * dues, not a row. `balance` may be negative: the owner may scan for
+ * credit balances with a `minBalance` below zero.
+ */
+export const CompanyBalanceSchema = z
+  .object({
+    companyId: uuid,
+    name: z.string(),
+    balance: signedMoneyString,
+    lastSaleDate: z.string().date().nullable(),
+    lastPaymentAt: isoDateTime.nullable(),
+  })
+  .strict();
+export type CompanyBalance = z.infer<typeof CompanyBalanceSchema>;

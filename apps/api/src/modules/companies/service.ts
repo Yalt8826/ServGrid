@@ -1,4 +1,13 @@
-import { type CompanyCreate, type CompanyOwnerPatch, type CompanyPatch, type CompanyRecord, type Role } from '@servgrid/shared';
+import {
+  type CompanyBalance,
+  type CompanyCreate,
+  type CompanyLedger,
+  type CompanyOwnerPatch,
+  type CompanyPatch,
+  type CompanyRecord,
+  type LedgerEntry,
+  type Role,
+} from '@servgrid/shared';
 import { AppError } from '../../plugins/errors.js';
 import { scopePredicate, type ScopePredicate } from '../../plugins/rbac.js';
 import { getPool } from '../../db/pool.js';
@@ -268,12 +277,68 @@ export function createCompaniesService() {
     });
   }
 
+  /**
+   * GET /v1/companies/:id/ledger (§11) — the account's interleaved history.
+   * Scoping is the account's, not the documents': a rep reads the ledger of
+   * his accounts and the house accounts exactly as GET /v1/companies/:id
+   * draws the line (the same findCompany with the same in_scope verdict) —
+   * another rep's account's ledger is OUT_OF_SCOPE even though some
+   * payments ON it might carry his `received_by`, because the ledger is
+   * the account's story and the account is not his.
+   */
+  async function getCompanyLedger(actor: Actor, companyId: string): Promise<CompanyLedger> {
+    const company = await repo.findCompany(getPool(), companyId, actor.role === 'sales_rep' ? actor.id : undefined);
+    if (company === null) throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+    if (company.in_scope === false) throw new AppError('OUT_OF_SCOPE', OUT_OF_SCOPE_MESSAGE);
+    const result = await repo.findCompanyLedger(getPool(), companyId);
+    const entries: LedgerEntry[] = result.rows.map((row) => ({
+      kind: row.kind,
+      id: row.id,
+      number: row.number,
+      date: row.date,
+      recordedAt: row.recorded_at.toISOString(),
+      mode: row.mode as LedgerEntry['mode'],
+      amount: row.amount,
+      voided: row.voided,
+      voidReason: row.void_reason,
+      runningBalance: row.running_balance,
+    }));
+    return { companyId, balance: result.balance, entries };
+  }
+
+  /**
+   * GET /v1/companies/balances (§11) — the Pending tab. A view of dues
+   * (`v_company_balances`), never a payments table, so what a rep owes
+   * about an account is one derived truth shared with the ledger. The
+   * scope predicate comes from the route (the list's shape): a rep's own
+   * accounts plus the house accounts, the owner everything — `minBalance`
+   * defaults to one paisa, the floor that makes "pending" mean owes
+   * something; a lower floor is how the owner scans credit balances.
+   */
+  async function listCompanyBalances(
+    scope: ScopePredicate | null,
+    query: { minBalance?: string },
+  ): Promise<{ items: CompanyBalance[] }> {
+    const rows = await repo.listCompanyBalances(getPool(), scope, query.minBalance ?? '0.01');
+    return {
+      items: rows.map((row) => ({
+        companyId: row.company_id,
+        name: row.name,
+        balance: row.balance,
+        lastSaleDate: row.last_sale_date,
+        lastPaymentAt: row.last_payment_at?.toISOString() ?? null,
+      })),
+    };
+  }
+
   return {
     listCompanies,
     getCompany,
     createCompany,
     patchCompany,
     patchOwner,
+    getCompanyLedger,
+    listCompanyBalances,
   };
 }
 

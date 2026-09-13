@@ -1231,6 +1231,36 @@ const ENDPOINTS: EndpointRow[] = [
     expect: OWNER_ONLY,
   },
   {
+    name: 'GET /v1/companies/balances',
+    method: 'GET',
+    url: '/v1/companies/balances',
+    // §11 (T3.5): the Pending tab — v_company_balances, scoped like the
+    // company list (the rep's accounts plus the house accounts, the owner
+    // all, the dispatcher no cell). `sales.payments` gates every caller;
+    // the matrix owner and rep ride with it enabled (seeded above), the
+    // flag's own switchable behaviour being integration/ledger.test.ts's.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/companies/balances', headers: bearer(actor) }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'GET /v1/companies/:id/ledger',
+    method: 'GET',
+    url: '/v1/companies/:id/ledger',
+    // §11 (T3.5): the account's interleaved ledger. The probe reads the
+    // account the matrix rep OWNS, so his OK proves the ownership scope —
+    // another rep's account's ledger is OUT_OF_SCOPE (the point read's
+    // verdict, asserted in integration/ledger.test.ts).
+    probe: (actor) =>
+      app.inject({ method: 'GET', url: `/v1/companies/${matrixCompanyId}/ledger`, headers: bearer(actor) }),
+    expect: COMPANY_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor === 'sales_rep') expect(res.json<{ companyId: string }>().companyId).toBe(matrixCompanyId);
+    },
+  },
+  {
     name: 'GET /v1/sales',
     method: 'GET',
     url: '/v1/sales',
