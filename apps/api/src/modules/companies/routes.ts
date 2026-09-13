@@ -1,14 +1,18 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z, type ZodTypeAny } from 'zod';
 import {
+  CompanyBalanceSchema,
   CompanyCreateSchema,
+  CompanyLedgerSchema,
   CompanySchema,
   companyOwnerPatchSchema,
   companyPatchSchema,
+  signedMoneyString,
   uuid,
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import { salesPaymentsEnabled } from '../flags/gates.js';
 import { createCompaniesService } from './service.js';
 
 /**
@@ -27,6 +31,15 @@ import { createCompaniesService } from './service.js';
  * cell may not touch this one column": a rep holds `update: own` on
  * company, and the owner endpoint is exactly the surface his own-scope
  * must NOT reach. A rep cannot reassign an account — his own included.
+ *
+ * The money reads (T3.5) are `sales.payments`-gated (the surface's T0
+ * rollback, the payments module's order): GET /v1/companies/balances —
+ * the Pending tab, a view of dues, never a payments table — and
+ * GET /v1/companies/:id/ledger — the account's interleaved history with a
+ * server-computed running balance, so no two screens can disagree about
+ * money. Scoping is the account's, not the documents': the ledger of a
+ * house account is visible to every rep, another rep's account's ledger
+ * to nobody but the owner.
  */
 
 const OWNER_ONLY_MESSAGE = 'Only the owner can reassign an account.';
@@ -34,6 +47,18 @@ const OWNER_ONLY_MESSAGE = 'Only the owner can reassign an account.';
 /** The list envelope — one company schema; §11 has no per-role split on company rows. */
 const companyListEnvelope = z
   .object({ items: z.array(CompanySchema), nextCursor: z.string().nullable() })
+  .strict();
+
+/** The Pending tab's envelope (§11 GET /v1/companies/balances) — the same rows to every allowed role. */
+const companyBalancesEnvelope = z
+  .object({ items: z.array(CompanyBalanceSchema) })
+  .strict();
+
+/** Query string of GET /v1/companies/balances (§11): the dues floor, `?minBalance=0.01` in the spec. Signed — a floor below zero is how the owner scans credit balances. */
+const companyBalancesQuerySchema = z
+  .object({
+    minBalance: signedMoneyString.optional(),
+  })
   .strict();
 
 /** Query string of GET /v1/companies (§11): cursor paginated. */
@@ -121,6 +146,52 @@ export const companiesRoutes: FastifyPluginAsync = async (app) => {
       const auth = claimsOf(request);
       const body = CompanyCreateSchema.parse(request.body);
       return service.createCompany({ id: auth.sub, role: auth.role }, body);
+    },
+  );
+
+  // §11: rep, owner — the Pending tab. It reads `v_company_balances`, not
+  // a payments table, because pending is a view of dues, not a row (T3.5).
+  // `sales.payments` rides AFTER the matrix gate (the payments module's
+  // order): the matrix decides which roles are on the surface, the flag
+  // decides whether the surface answers — the tab's T0 rollback.
+  app.get(
+    '/v1/companies/balances',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('company', 'read'), salesPaymentsEnabled],
+      config: {
+        responseSchemaByRole: {
+          owner: companyBalancesEnvelope,
+          sales_rep: companyBalancesEnvelope,
+        },
+      },
+    },
+    async (request) => {
+      // The scope predicate against `companies c` — the same alias and the
+      // same house-account line as the list above.
+      const scope = request.scopePredicate('company', 'read', { qualifier: 'c' });
+      const query = companyBalancesQuerySchema.parse(request.query ?? {});
+      return service.listCompanyBalances(scope, query);
+    },
+  );
+
+  // §11: rep, owner — the account's interleaved history with the running
+  // balance computed server-side, so the rep's phone and the owner's
+  // desktop cannot disagree about money (T3.5). Scoping is the account's:
+  // decided in the service off the same findCompany the point read uses.
+  app.get(
+    '/v1/companies/:id/ledger',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('company', 'read'), salesPaymentsEnabled],
+      config: {
+        responseSchemaByRole: {
+          owner: CompanyLedgerSchema as ZodTypeAny,
+          sales_rep: CompanyLedgerSchema as ZodTypeAny,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      return service.getCompanyLedger({ id: auth.sub, role: auth.role }, uuidParam(request, 'id'));
     },
   );
 
