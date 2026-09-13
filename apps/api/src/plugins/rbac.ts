@@ -129,6 +129,24 @@ const PREDICATES: Partial<Record<Resource, ResourcePredicates>> = {
       params: [actorId],
     }),
   },
+  payment: {
+    table: 'payments',
+    // `own` on payment is RECEIPT (§3.5, §11: `received_by`) — deliberately
+    // stricter than `own` on company. Whoever ACTUALLY took the money owns
+    // the row, which is why a rep may record a payment on an account he
+    // does not own (a house account, another rep's) and may legitimately
+    // hold its cash; and no rep ever reads another rep's collections, even
+    // on an account they share — the house account's company visibility
+    // does not leak into the money's. Voiding is not a matrix scope at all
+    // but a door check (owner only, the sale-void precedent). Registered
+    // with the payments module (T3.4); the matrix grants sales_rep `own`,
+    // so the predicate had to exist before a scoped payments query could
+    // run.
+    own: ({ actorId, paramStart, qualifier }) => ({
+      sql: `${qualifier}.received_by = $${paramStart}`,
+      params: [actorId],
+    }),
+  },
   'customer.stack': {
     table: 'customer_products',
     // §6.4: a technician's scope on the stack is `assigned`, not `all` —

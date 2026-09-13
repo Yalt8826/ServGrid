@@ -1328,3 +1328,84 @@ export const SaleSchema = z
   })
   .strict();
 export type SaleRecord = z.infer<typeof SaleSchema>;
+
+// ── payments (§3.5 data model, §5 `own` on payment = received_by, §11) ──────
+
+/**
+ * `payments.mode` (migration 002 `payment_mode`). Cash is the one mode
+ * that passes through a person's hands — v_employee_expected_cash filters
+ * on it — while UPI, card, cheque and bank transfer land in the company's
+ * account and never create a handover expectation.
+ */
+export const paymentModeSchema = z.enum(['cash', 'upi', 'card', 'cheque', 'bank_transfer']);
+export type PaymentMode = z.infer<typeof paymentModeSchema>;
+
+/**
+ * `payments.status` (migration 002). There is no 'pending' — DELIBERATELY:
+ * pending is a view of dues (`v_company_balances WHERE balance > 0`), not a
+ * row, and an intention to collect is not money (§3.5).
+ */
+export const paymentStatusSchema = z.enum(['collected', 'void']);
+export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
+
+/**
+ * POST /v1/payments (§11). `salesCardId` is optional and its absence IS the
+ * feature: an ON-ACCOUNT payment lands on the company balance without
+ * pointing at a specific sale, which is how most collections actually work
+ * (§3.5). `receivedAt` is the client's clamped instant — the money changed
+ * hands at the customer's office, maybe offline — and the server generates
+ * `business_date` from it in Asia/Kolkata, so cash received Monday lands on
+ * Monday whenever the row syncs.
+ */
+export const paymentCreateSchema = z
+  .object({
+    companyId: uuid,
+    salesCardId: uuid.optional(),
+    /** numeric(12,2), CHECK (amount > 0) — refused here so the client sees why, not the DB. */
+    amount: moneyString.refine((s) => Number(s) > 0, { message: 'An amount of zero is not a payment.' }),
+    mode: paymentModeSchema,
+    /** UPI txn id / cheque number; cash carries none. */
+    referenceNo: z.string().min(1).max(200).optional(),
+    receivedAt: isoDateTime,
+    notes: z.string().max(2000).optional(),
+  })
+  .strict();
+export type PaymentCreate = z.infer<typeof paymentCreateSchema>;
+
+/** POST /v1/payments/:id/void (§11: OWNER ONLY) — a void without a reason is a balance that moved for nothing. */
+export const paymentVoidSchema = z
+  .object({
+    reason: z.string().min(1).max(2000),
+  })
+  .strict();
+export type PaymentVoid = z.infer<typeof paymentVoidSchema>;
+
+/**
+ * One payment, as every reader sees it. `paymentNumber` (`PM-2627-00042`)
+ * is allocated at CREATE — the opposite of `sale_number` on purpose
+ * (§3.5): payments are not drafted, so there is no pending state to
+ * allocate at. Money crosses the wire as decimal strings.
+ */
+export const PaymentSchema = z
+  .object({
+    id: uuid,
+    paymentNumber: z.string(),
+    companyId: uuid,
+    /** NULL = on-account. */
+    salesCardId: uuid.nullable(),
+    amount: moneyString,
+    mode: paymentModeSchema,
+    referenceNo: z.string().nullable(),
+    receivedBy: uuid,
+    receivedAt: isoDateTime,
+    /** Generated from received_at in Asia/Kolkata — the day the money moved. */
+    businessDate: z.string().date(),
+    status: paymentStatusSchema,
+    voidedAt: isoDateTime.nullable(),
+    voidedBy: uuid.nullable(),
+    voidReason: z.string().nullable(),
+    notes: z.string().nullable(),
+    version: z.number().int(),
+  })
+  .strict();
+export type PaymentRecord = z.infer<typeof PaymentSchema>;

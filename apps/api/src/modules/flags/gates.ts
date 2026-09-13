@@ -80,3 +80,22 @@ export async function salesCardsEnabled(request: FastifyRequest): Promise<void> 
     throw new AppError('FLAG_DISABLED', SALES_CARDS_DISABLED_MESSAGE);
   }
 }
+
+/**
+ * `sales.payments` — payment capture and the pending/collected tabs
+ * (PHASE-3-SALES-REP.md T3.4). The same shape as `sales.cards`: a
+ * sales-only surface — the rep captures, the owner reviews and voids, and
+ * nobody else holds a cell on payment — so the gate asks the flag of EVERY
+ * caller and flipping it off darkens the whole surface for everyone on it,
+ * which is the T0 rollback of T3.4.
+ */
+export const SALES_PAYMENTS_DISABLED_MESSAGE =
+  'Payments are switched off for your account.';
+
+export async function salesPaymentsEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'sales.payments'))) {
+    throw new AppError('FLAG_DISABLED', SALES_PAYMENTS_DISABLED_MESSAGE);
+  }
+}

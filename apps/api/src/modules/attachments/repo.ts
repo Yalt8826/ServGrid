@@ -89,13 +89,15 @@ export async function insertAttachment(db: Db, a: InsertAttachment): Promise<Att
 }
 
 /**
- * The one attachment row plus *who the owner's job is assigned to* — the
- * fact every scope check on the read path turns on. A `job_card`
- * attachment hangs off the card directly; a `job_completion` attachment
- * reaches its card through the completion; every other `owner_type` has
- * no job behind it yet, and `job_assigned_to` comes back NULL (its
- * matrix cells land with the phase that owns the row — until then the
- * service admits the owner alone).
+ * The one attachment row plus *the fact every scope check on the read path
+ * turns on*: whose job the owner's card is assigned to, or — for a payment
+ * proof (T3.4) — who received the payment. A `job_card` attachment hangs
+ * off the card directly; a `job_completion` attachment reaches its card
+ * through the completion; a `payment` attachment reaches `received_by`
+ * through its parent payment. Every other `owner_type` has no module behind
+ * it yet and both scope columns come back NULL (its matrix cells land with
+ * the phase that owns the row — until then the service admits the owner
+ * alone).
  *
  * LEFT JOINs on purpose: `owner_id` deliberately carries no FK
  * (§3.6), so a missing owner row must not hide an attachment that
@@ -106,6 +108,7 @@ export async function insertAttachment(db: Db, a: InsertAttachment): Promise<Att
  */
 export interface AttachmentWithOwnerRow extends AttachmentRow {
   job_assigned_to: string | null;
+  payment_received_by: string | null;
 }
 
 const WITH_OWNER_SELECT = `
@@ -115,11 +118,13 @@ const WITH_OWNER_SELECT = `
          CASE
            WHEN a.owner_type = 'job_card' THEN jc.assigned_to
            WHEN a.owner_type = 'job_completion' THEN jcj.assigned_to
-         END AS job_assigned_to
+         END AS job_assigned_to,
+         CASE WHEN a.owner_type = 'payment' THEN pay.received_by END AS payment_received_by
   FROM attachments a
   LEFT JOIN job_cards jc ON a.owner_type = 'job_card' AND jc.id = a.owner_id
   LEFT JOIN job_completions comp ON a.owner_type = 'job_completion' AND comp.job_card_id = a.owner_id
-  LEFT JOIN job_cards jcj ON jcj.id = comp.job_card_id`;
+  LEFT JOIN job_cards jcj ON jcj.id = comp.job_card_id
+  LEFT JOIN payments pay ON a.owner_type = 'payment' AND pay.id = a.owner_id`;
 
 export async function findAttachmentWithOwner(db: Db, id: string): Promise<AttachmentWithOwnerRow | null> {
   const r = await db.query<AttachmentWithOwnerRow>(`${WITH_OWNER_SELECT} WHERE a.id = $1`, [id]);
@@ -144,4 +149,13 @@ export async function findCompletionAssignedTo(db: Db, completionId: string): Pr
     [completionId],
   );
   return r.rows[0]?.assigned_to ?? null;
+}
+
+/** `payments.received_by` for an upload against a `payment` owner — the proof photo's scope fact (T3.4). */
+export async function findPaymentReceivedBy(db: Db, paymentId: string): Promise<string | null> {
+  const r = await db.query<{ received_by: string | null }>(
+    'SELECT received_by FROM payments WHERE id = $1',
+    [paymentId],
+  );
+  return r.rows[0]?.received_by ?? null;
 }
