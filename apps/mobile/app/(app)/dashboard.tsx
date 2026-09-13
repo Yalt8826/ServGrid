@@ -1,7 +1,8 @@
 /**
  * Dashboard route (UI/plan-2/04-TECHNICIAN.md §T1, 05-DISPATCHER.md
- * §D1). The seam where a pure dashboard screen meets its data — per
- * role, because the two roles read through different architectures:
+ * §D1, 06-SALES-REP.md §S1). The seam where a pure dashboard screen meets
+ * its data — per role, because the roles read through different
+ * architectures:
  *
  * - **technician** — `useTechnicianMirror` owns the plumbing; the
  *   mirror is the source, no fetch behind the figures (PLAN-FRONTEND.md
@@ -12,6 +13,12 @@
  *   screen the same way, and the offline banner lives in the screen.
  *   Its hooks live in their own component (not this one) so a
  *   technician's session never mounts a dispatcher query.
+ * - **sales rep** (T3.7) — online reads through `useRepDashboard` (the
+ *   sales/payments surface has no sync working set), with the mirror
+ *   session's pending count marking the figures stale, and the
+ *   per-flag darks the hook computes (`salesOff` / `paymentsOff`).
+ *   Renewing soon comes from the loader below — the contracts backend
+ *   is a later phase, so today it honestly returns [].
  *
  * An owner session keeps the placeholder until Phase 4 builds theirs.
  * Nothing here spins while flags load: the answer arrives when the
@@ -22,6 +29,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
+import { RepDashboardScreen } from '../../src/screens/rep/DashboardScreen';
+import { useRepDashboard } from '../../src/screens/rep/useRepData';
+import { useMirrorSession } from '../../src/sync/MirrorProvider';
 import { DispatcherDashboardScreen } from '../../src/screens/dispatcher/dashboard';
 import {
   todayLabelOf,
@@ -35,6 +45,43 @@ import { useSessionStore } from '../../src/state/sessionStore';
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
+
+/** The rep's half of the route (T3.7, §S1). The stale figure is the
+ * screen's whole point: the pending count comes from the rep's own
+ * outbox (the mirror session), never from a fetch. */
+function RepDashboardRoute(): React.ReactNode {
+  const router = useRouter();
+  const actor = useSessionStore((s) => s.actor);
+  const mirrorSession = useMirrorSession();
+  const dashboard = useRepDashboard();
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <RepDashboardScreen
+        name={actor?.username ?? ''}
+        pendingSyncCount={mirrorSession?.pendingCount ?? 0}
+        figures={
+          dashboard.data === null
+            ? null
+            : { soldThisMonth: dashboard.data.soldThisMonth, outstanding: dashboard.data.outstanding }
+        }
+        figuresError={dashboard.errors.figures}
+        salesOff={dashboard.salesOff}
+        paymentsOff={dashboard.paymentsOff}
+        owesTheMost={dashboard.data?.owesTheMost ?? []}
+        renewingSoon={dashboard.data?.renewingSoon ?? []}
+        renewalsError={dashboard.errors.renewals}
+        recentPayments={dashboard.data?.recentPayments ?? []}
+        paymentsError={dashboard.errors.payments}
+        companyNames={{}}
+        onNewSale={() => router.push('/sales/new')}
+        onOpenCompany={(companyId) => router.push(`/companies/${companyId}`)}
+        onOpenPayments={() => router.push('/payments')}
+        onRetry={dashboard.reload}
+      />
+    </SafeAreaView>
+  );
+}
 
 /** The dispatcher's half of the route (T2.7): online-only reads, gated
  * on `dispatch.console` — the same flag the api's summary and roster
@@ -87,6 +134,12 @@ export default function Screen() {
         <Text>Dashboard</Text>
       </View>
     );
+  }
+
+  if (actor.role === 'sales_rep') {
+    // T3.7 — the rep's dashboard. Its hook mounts only in the rep's
+    // component above, never under a technician's or dispatcher's session.
+    return <RepDashboardRoute />;
   }
 
   if (actor.role === 'dispatcher') {
