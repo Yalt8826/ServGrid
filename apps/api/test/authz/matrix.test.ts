@@ -1356,6 +1356,80 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/payments',
+    method: 'GET',
+    url: '/v1/payments',
+    // §11 (T3.4): the Collected tab — the rep's own receipts (`own` on
+    // payment is `received_by`, deliberately stricter than `own` on
+    // company: a house account is visible to every rep, the money on it is
+    // not), the owner's all. A dispatcher holds no payment cell at all.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/payments', headers: bearer(actor) }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/payments',
+    method: 'POST',
+    url: '/v1/payments',
+    // §11 (T3.4): capture. The server stamps `received_by` to the actor
+    // (whoever ACTUALLY took the money); the payload carries no rep field.
+    // The number is allocated at CREATE — payments are not drafted, there
+    // is no pending state to allocate at (§3.5).
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/payments',
+        headers: bearer(actor),
+        payload: {
+          companyId: matrixCompanyId,
+          amount: '10.00',
+          mode: 'cash',
+          receivedAt: new Date().toISOString(),
+        },
+      }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      const body = res.json<{ paymentNumber: string; status: string }>();
+      expect(body.status).toBe('collected');
+      expect(body.paymentNumber).toMatch(/^PM-\d{4}-\d{5,}$/);
+    },
+  },
+  {
+    name: 'POST /v1/payments/:id/void',
+    method: 'POST',
+    url: '/v1/payments/:id/void',
+    // §11 (T3.4): OWNER ONLY — the door check is the role, not the matrix
+    // cell: a rep holds `update: own` on payment and must not reach this
+    // surface even on his own collection. The probe voids a fresh rep-made
+    // capture, so the owner's OK is the only OK there is.
+    probe: async (actor) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/payments',
+        headers: bearer('sales_rep'),
+        payload: {
+          companyId: matrixCompanyId,
+          amount: '10.00',
+          mode: 'cash',
+          receivedAt: new Date().toISOString(),
+        },
+      });
+      const id = (JSON.parse(created.body) as { id: string }).id;
+      return app.inject({
+        method: 'POST',
+        url: `/v1/payments/${id}/void`,
+        headers: bearer(actor),
+        payload: { reason: 'Matrix probe payment void.' },
+      });
+    },
+    expect: OWNER_ONLY,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ status: string }>().status).toBe('void');
+    },
+  },
+  {
     name: 'GET /v1/products',
     method: 'GET',
     url: '/v1/products',
@@ -1512,6 +1586,15 @@ beforeAll(async () => {
   await db.query(
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
      SELECT id, 'sales.cards', true FROM employees WHERE role IN ('owner', 'sales_rep')`,
+  );
+
+  // Same for the payments surface (T3.4): the payment probes exercise ROLE
+  // authorization, and the flag gates EVERY caller of /v1/payments, so the
+  // matrix owner and rep ride with `sales.payments` enabled — the flag's
+  // own switchable behaviour is integration/payments.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'sales.payments', true FROM employees WHERE role IN ('owner', 'sales_rep')`,
   );
 
   // The jobs-endpoint probes need a real job (migration 007) assigned to

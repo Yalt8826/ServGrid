@@ -261,7 +261,7 @@ export function createAttachmentsService(s3: StorageConfig) {
     if (row === null) {
       throw new AppError('NOT_FOUND', "We couldn't find that attachment.");
     }
-    checkReadAccess(actor, row.owner_type, row.job_assigned_to);
+    checkReadAccess(actor, row);
     return { url: presignedGetUrl(s3, row.storage_key, PRESIGN_TTL_SECONDS), row };
   }
 
@@ -275,12 +275,34 @@ export type AttachmentsService = ReturnType<typeof createAttachmentsService>;
  * after-photos on the completion) are governed by the `job` matrix cells
  * — `update` for uploads, `read` for downloads — so the technician who
  * owns the work, the dispatcher assembling the card and the owner can all
- * attach, and a sales_rep (cell `none`) cannot. Owner types whose module
- * lands in a later phase (payment, sales_card, …) admit the owner alone
- * until that phase registers their cells; a rule nobody can exercise yet
- * is a rule that cannot be wrong yet either.
+ * attach, and a sales_rep (cell `none`) cannot. Payment proofs (T3.4) ride
+ * the `payment` cells the same way: the rep who RECEIVED the payment
+ * attaches and reads his proof (`own` = `received_by`, deliberately
+ * stricter than the company's house-account visibility), the owner always
+ * can. Owner types whose module lands in a later phase (sales_card, …)
+ * admit the owner alone until that phase registers their cells; a rule
+ * nobody can exercise yet is a rule that cannot be wrong yet either.
  */
 async function checkWriteAccess(actor: Actor, ownerType: AttachmentOwnerType, ownerId: string): Promise<void> {
+  if (ownerType === 'payment') {
+    const scope = permit(actor.role, 'payment', 'update');
+    if (scope === 'none') {
+      throw new AppError('FORBIDDEN', 'You do not have permission to do that.');
+    }
+    if (scope === 'all') return; // owner: whole surface
+    // sales_rep (`own` = received_by): the proof photo belongs to the
+    // collection he took. A missing owner row is a dangling reference (no
+    // FK on owner_id, §3.6), not a permission answer, so it reads as
+    // NOT_FOUND — the same rule the job branches run under.
+    const receivedBy = await repo.findPaymentReceivedBy(getPool(), ownerId);
+    if (receivedBy === null) {
+      throw new AppError('NOT_FOUND', "We couldn't find that payment.");
+    }
+    if (receivedBy !== actor.id) {
+      throw new AppError('OUT_OF_SCOPE', 'That payment was collected by someone else.');
+    }
+    return;
+  }
   if (!jobScoped(ownerType)) {
     if (actor.role !== 'owner') {
       throw new AppError('FORBIDDEN', 'Attachments on this record are attached by the owner.');
@@ -310,9 +332,23 @@ async function checkWriteAccess(actor: Actor, ownerType: AttachmentOwnerType, ow
   }
 }
 
-/** The read-side twin — `job` × `read`, resolved against the owner's job (repo.findAttachmentWithOwner). */
-function checkReadAccess(actor: Actor, ownerType: AttachmentOwnerType, jobAssignedTo: string | null): void {
-  if (!jobScoped(ownerType)) {
+/** The read-side twin — `job` × `read` for job attachments, `payment` × `read` for proofs (T3.4), resolved from the row the repo joined. */
+function checkReadAccess(actor: Actor, row: repo.AttachmentWithOwnerRow): void {
+  if (row.owner_type === 'payment') {
+    const scope = permit(actor.role, 'payment', 'read');
+    if (scope === 'none') {
+      throw new AppError('FORBIDDEN', 'You do not have permission to do that.');
+    }
+    if (scope === 'all') return;
+    if (row.payment_received_by === null) {
+      throw new AppError('NOT_FOUND', "We couldn't find that payment.");
+    }
+    if (row.payment_received_by !== actor.id) {
+      throw new AppError('OUT_OF_SCOPE', 'That payment was collected by someone else.');
+    }
+    return;
+  }
+  if (!jobScoped(row.owner_type)) {
     if (actor.role !== 'owner') {
       throw new AppError('FORBIDDEN', 'Attachments on this record are read by the owner.');
     }
@@ -323,12 +359,12 @@ function checkReadAccess(actor: Actor, ownerType: AttachmentOwnerType, jobAssign
     throw new AppError('FORBIDDEN', 'You do not have permission to do that.');
   }
   if (scope === 'all') return;
-  if (jobAssignedTo !== actor.id) {
+  if (row.job_assigned_to !== actor.id) {
     // A job that has vanished since upload, or another technician's:
     // either way the row is not his to open.
     throw new AppError(
-      jobAssignedTo === null ? 'NOT_FOUND' : 'OUT_OF_SCOPE',
-      jobAssignedTo === null ? "We couldn't find that job." : 'That job belongs to another technician.',
+      row.job_assigned_to === null ? 'NOT_FOUND' : 'OUT_OF_SCOPE',
+      row.job_assigned_to === null ? "We couldn't find that job." : 'That job belongs to another technician.',
     );
   }
 }

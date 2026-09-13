@@ -216,15 +216,16 @@ describe('none — the refusal happens before any query exists', () => {
   });
 
   it('a scope the matrix grants but whose predicate is not registered yet fails loudly, never runs unscoped', () => {
-    // `payment` for a sales_rep is `own` in the matrix, and the table
-    // exists (migration 017), but no predicate is registered until the
-    // payments module lands (T3.4) — building the predicate is a
-    // query-time programmer error until then. (`sale` held this pin until
-    // T3.3 registered its authorship predicate; the guard moves to the
-    // next unregistered cell, which is the guard working as designed.)
+    // `contract` for a sales_rep is `own` in the matrix ("contracts he
+    // sold"), but no predicate is registered until the contracts module
+    // lands (Phase 2B/3) — building the predicate is a query-time
+    // programmer error until then. (`sale` held this pin until T3.3
+    // registered its authorship predicate, `payment` until T3.4 registered
+    // receipt; the guard moves to the next unregistered cell, which is the
+    // guard working as designed.)
     expect(() =>
-      scopePredicate({ role: 'sales_rep', actorId: repA.id, resource: 'payment', action: 'read' }),
-    ).toThrowError(/no own predicate registered for payment/);
+      scopePredicate({ role: 'sales_rep', actorId: repA.id, resource: 'contract', action: 'read' }),
+    ).toThrowError(/no own predicate registered for contract/);
   });
 });
 
