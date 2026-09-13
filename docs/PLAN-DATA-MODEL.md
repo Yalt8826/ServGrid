@@ -30,11 +30,14 @@ Migrations are numbered and forward-only. This ordering respects FK dependencies
 | 008 | `attachments` | Polymorphic attachment table | 1 |
 | 009 | `location` | `location_pings`, `location_requests`, **`v_employee_tracking_health`** | 1 |
 | 010 | `cash` | `cash_reconciliations` | 1 |
-| 011 | `sales` | `sales_cards`, `sales_card_items`, `payments` | 3 |
-| 012 | `views_money` | `v_sales_card_totals`, `v_company_balances`, `v_employee_expected_cash`, `v_cash_reconciliation_queue` | 3 |
+| 011 | `assignment_notifications` | `devices.failure_reason`, `held_notifications` (§3.1) | 2 |
+| 012 | — | unused; numbers are never reused (see below) | — |
 | 013 | `views_ops` | `v_job_cards_dispatcher`, `v_technician_load` | 2 |
 | 014 | `grants_hardening` | Optional `servgrid_dispatcher` role (§7) | 5 |
 | 015 | `contracts` | `service_contracts`, `contract_visits`, `v_contracts_expiring`, `v_contract_visits_dispatcher` | 2B |
+| 016 | `flag_overrides` | `employee_flag_overrides` (§3.1) | 1 |
+| 017 | `sales` | `sales_cards`, `sales_card_items`, `payments` | 3 |
+| 018 | `views_money` | `v_sales_card_totals`, `v_company_balances`, `v_employee_expected_cash`, `v_cash_reconciliation_queue` | 3 |
 
 Migrations 006–010 land in Phase 1 even though only the technician app consumes them, because the technician app is the thing that exercises offline sync and location while scope is still small.
 
@@ -43,6 +46,10 @@ Migrations 006–010 land in Phase 1 even though only the technician app consume
 013 is correspondingly a clean Phase 2 migration — the two dispatcher views — rather than one spanning three phases.
 
 Migration 015 is out of numeric order relative to its phase — it lands after 011–014 were numbered, but ships in Phase 2B, before them. That is correct and worth leaving alone: **numbers record the order migrations were written, phases record when they run.** Renumbering to make the two agree would mean editing a file whose number some environment has already recorded.
+
+**Renumbered during Phase 2 (13 Sep 2026).** Two migrations were written outside this table: `016_flag_overrides` in Phase 1, for the per-employee flag overrides the parallel run needed, and `011_assignment_notifications` in Phase 2 (T2.5), which took the number this table had reserved for `sales`. Both were already applied in the dev database, so under the rule above they keep their numbers. Phase 3's `sales` and `views_money` move to **017 and 018**. 012 is left empty rather than reused.
+
+**The runner has to allow out-of-order runs.** node-pg-migrate refuses by default to run a migration numbered below one already applied. That broke the dev database once Phase 2 merged: 016 had already run, so 011 and 013 were refused (`Not run migration 011_… is preceding already run migration 016_…`). Phase 2B's 015 would have hit the same error. `apps/api/src/db/migrate.ts` sets `checkOrder: false`, and `test/integration/migrations.test.ts` checks that a lower number still applies after a higher one. The rule that replaces the order check: **a migration may depend only on migrations that shipped before it**, not merely on lower numbers.
 
 **Amendments made before anything shipped.** A number of corrections below are edits to migrations 001–014 *in place*, not new migrations:
 
@@ -113,7 +120,7 @@ Owner-created only. No self-registration, no email, no password reset flow — 1
 
 Rotation on every use: the old row gets `revoked_at` and `replaced_by`. Reuse of a revoked token revokes the whole chain — cheap detection of a stolen token on a shared handset.
 
-**`devices`** — one row per install, `UNIQUE (employee_id, install_id)`. Carries `fcm_token` for *Locate now*, and the diagnostics that make OEM background-kill debuggable: `manufacturer`, `model`, `os_version`, `app_version`, `location_permission`, `battery_opt_exempt`, `autostart_confirmed`, `notifications_enabled`, `last_seen_at`.
+**`devices`** — one row per install, `UNIQUE (employee_id, install_id)`. Carries `fcm_token` for *Locate now*, and the diagnostics that make OEM background-kill debuggable: `manufacturer`, `model`, `os_version`, `app_version`, `location_permission`, `battery_opt_exempt`, `autostart_confirmed`, `notifications_enabled`, `last_seen_at`, and `failure_reason` (migration 011). `failure_reason` is the last FCM failure (`UNREGISTERED`, `SENDER_ID_MISMATCH`); the stale `fcm_token` is cleared at the same time, and the next successful push sets it back to NULL (`PLAN-BACKEND.md` §12.1).
 
 Those four boolean/enum diagnostics are not decoration. `PLAN.md` §11 names OEM task-killing as the dominant risk; without a per-handset record of which mitigations were actually completed, a "tracking stopped" report is unfalsifiable.
 
@@ -126,6 +133,12 @@ Versioned so a reworded consent screen requires re-acceptance. This is the DPDP 
 This is the **generic** trail; `job_events` (migration 007) is the *job* trail and neither substitutes for the other. Nothing updates a row, so it carries no `version`, no `touch_updated_at` trigger and no soft delete — the same append-only rule as `consents`. `PLAN-BACKEND.md` §2 anticipates a `plugins/audit.ts` writing here; today the break-glass password reset (§4) is the only writer, recording the token-revocation count in `details`.
 
 **It ships as migration `005z`, and the letter is deliberate.** Numbers 006–010 are pinned to Phase 1 tables by this document and read off it by later tasks, so a Phase 0 append cannot take 006 without moving everything readers expect. `005z` and not `005a`: node-pg-migrate orders filenames with a punctuation-ignoring compare, under which `005a` sorts *before* `005_reference_data` and would refuse to run against a database that had already applied it.
+
+**`held_notifications`** (migration 011, Phase 2): `employee_id → employees` (cascade), `job_card_id → job_cards` (nullable, set null), `trigger_kind` (`assigned | reassigned | cancelled | priority_escalated`, a `text` + `CHECK` rather than an enum), `priority` as it was at hold time, `held_at`, `released_at`. Partial index on `held_at WHERE released_at IS NULL`.
+
+This implements decision B1 in `docs/decisions/2026-09-12-phase-2-entry-decisions.md`: **hold, don't drop.** A wake triggered outside the 09:00–19:00 IST work window for a job that is not `urgent` gets a row here, and the window-open release sends one collapsed wake per technician and stamps `released_at`. Urgent jobs and in-window changes push straight away and write no row. The row holds no job content, because the push carries none: the push only wakes the app, and delta sync fetches the job.
+
+**`employee_flag_overrides`** (migration 016, Phase 1): `(employee_id, flag)` primary key, `enabled`, `updated_by → employees`, `updated_at`. The table holds **only per-person overrides**. Role defaults live in code (`packages/shared` flags, all off), and `GET /v1/auth/me` returns the evaluated result. This is what makes the T0 rollback tier a data change ("turn `tech.jobs` off for that person") rather than a rebuild. `flag` has no `CHECK`: the service validates names against the shared registry, and evaluation ignores unknown names, so adding a flag needs no migration. Written through `PUT /v1/employees/:id/flags` (`PLAN-BACKEND.md` §4.1).
 
 ### 3.2 Reference data
 

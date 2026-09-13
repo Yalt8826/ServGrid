@@ -396,7 +396,7 @@ This is cheap to undo precisely because a visit becomes an ordinary job card. Th
 
 | Layer | Deliverable |
 |---|---|
-| Data | Migrations 011–012: `sales_cards`, `sales_card_items`, `payments`, money views including the payments side of `v_employee_expected_cash` |
+| Data | Migrations 017–018 (renumbered from 011–012; see `PLAN-DATA-MODEL.md` §1): `sales_cards`, `sales_card_items`, `payments`, money views including the payments side of `v_employee_expected_cash` |
 | API | Companies **with rep ownership**, owner-only ownership reassignment, sales cards + items, payments, `v_company_balances`, company ledger |
 | App | Sales dashboard, sales cards with line items, Pending/Collected payment tabs, proof photo, company list + ledger, **rep cash handover** |
 
@@ -449,7 +449,7 @@ Sales tables are additive; a rollback to Phase 2 leaves them unwritten.
 
 | Layer | Deliverable |
 |---|---|
-| Data | No new migration. `v_cash_reconciliation_queue` shipped with 012 in Phase 3 and `v_employee_tracking_health` with 009 in Phase 1 — this phase builds the **screens and endpoints** over views that already exist |
+| Data | No new migration. `v_cash_reconciliation_queue` shipped with 018 in Phase 3 and `v_employee_tracking_health` with 009 in Phase 1 — this phase builds the **screens and endpoints** over views that already exist |
 | API | Cash queue + confirm/dispute/**reopen**, **completion amendment**, location console queries, on-demand FCM requests, employee admin **with deactivation preconditions**, dashboards |
 | App | Android five-group nav; **desktop left rail**; `DataTable`; location console with map; cash reconciliation queue (expected / declared / variance / flag, **no expenses column**); amend-completion flow |
 

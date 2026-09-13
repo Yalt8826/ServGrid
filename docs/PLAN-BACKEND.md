@@ -185,6 +185,10 @@ Owner only, except `GET /v1/employees/me`. There is no self-registration and no 
 | PATCH | `/v1/employees/:id` | `If-Match`; name, phone, role, `isActive` |
 | POST | `/v1/employees/:id/password` | owner resets someone; revokes every token |
 | GET | `/v1/employees/me` | any role, self only |
+| GET | `/v1/flags` | the roster with each employee's feature flags (`employee:read`) |
+| PUT | `/v1/employees/:id/flags` | `{ flag, enabled }`: sets one per-person override, idempotent (`employee:update`) |
+
+**Flag overrides sit with employee administration because a flag belongs to an account.** The two flag routes reuse the `employee:read` and `employee:update` matrix cells instead of adding new ones, so "who may change a technician's access" has a single answer. Only the exceptions are stored (`employee_flag_overrides`, `PLAN-DATA-MODEL.md` §3.1); role defaults stay in `packages/shared`. The dark launch ("one named person for a week before the role", `PLAN-EXECUTION.md` Part I §3) is one `PUT` per person.
 
 `POST /v1/employees` is needed from **Phase 0**, not Phase 4: the fourteen accounts have to exist before anyone can log in, and seeding them by hand into production is how a password ends up in a shell history. The owner-facing *screen* is Phase 4; the endpoint is Phase 0.
 

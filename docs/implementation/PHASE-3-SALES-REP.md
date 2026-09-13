@@ -29,7 +29,7 @@ T3.8 makes that a test rather than a hope: the Phase 1 outbox suite must pass **
 ## Task graph
 
 ```
-T3.1 migrations 011-012 ── T3.2 companies + ownership ── T3.3 sales cards
+T3.1 migrations 017-018 ── T3.2 companies + ownership ── T3.3 sales cards
                                     │                          │
                                     ├── T3.4 payments ─────────┤
                                     ├── T3.5 ledger + balances │
@@ -40,17 +40,19 @@ T3.7 screens S1-S7 ── T3.8 outbox regression gate ── T3.9 month-end run
 
 ---
 
-### T3.1 — Migrations 011–012: sales and the money views
+### T3.1 — Migrations 017–018: sales and the money views
 
 **Reads:** `PLAN-DATA-MODEL.md` §3.5, §4 (`v_sales_card_totals`, `v_company_balances`, `v_employee_expected_cash`, `v_cash_reconciliation_queue`), §5
 **Depends on:** Phase 2
 **Tier:** free until deploy
 
 > **Serial task.** One agent owns the migration sequence.
+>
+> **The numbers are 017 and 018, not 011 and 012.** Phase 2 used 011 (`assignment_notifications`) and Phase 1 used 016 (`flag_overrides`), and both are already applied, so they keep their numbers. 012 stays empty. See `PLAN-DATA-MODEL.md` §1. `sales` must not depend on anything numbered above 018 that has not shipped.
 
 **Build**
 
-**Migration 011 `sales`** — `sales_cards`, `sales_card_items`, `payments`.
+**Migration 017 `sales`** — `sales_cards`, `sales_card_items`, `payments`.
 
 ```sql
 -- sales_cards
@@ -71,7 +73,7 @@ The snapshot columns are why a product rename or repricing next quarter does not
 
 **There is no `pending` payment status, deliberately.** *Pending is a view of dues, not a row.* Modelling an intention to collect ₹40,000 as a row would create exactly the stored-counter drift the plan rejects.
 
-**Migration 012 `views_money`** — four views:
+**Migration 018 `views_money`** — four views:
 
 **`v_sales_card_totals`** — per card, `SUM(line_total)` with `status` carried through. **Every other total in the system reads this**, so "what is a sale worth" is defined once.
 
@@ -124,7 +126,7 @@ then summed per `(employee_id, business_date)`.
 If `missing_submission` never appears, the join is a `LEFT JOIN`. That is the single most likely defect in this migration and it is invisible: every other flag still works, and the one row the feature exists to catch is silently absent. **Check the join type before checking the flag logic.**
 
 **Commits**
-`chore(start): T3.1 sales schema and money views` → `feat(db): migrations 011-012 — sales, payments, derived balances, reconciliation queue`
+`chore(start): T3.1 sales schema and money views` → `feat(db): migrations 017-018 — sales, payments, derived balances, reconciliation queue`
 
 ---
 
