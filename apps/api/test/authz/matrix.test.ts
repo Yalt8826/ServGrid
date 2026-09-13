@@ -91,6 +91,8 @@ let stackItemId = '';
 /** Catalogue rows for the owner-only PATCH probes. */
 let matrixProductId = '';
 let matrixServiceRowId = '';
+/** A company the matrix sales_rep OWNS — the row-scoped company probes' target (T3.2). */
+let matrixCompanyId = '';
 /** An attachment on the matrix technician's job, for the GET probe. */
 let matrixAttachmentId = '';
 
@@ -236,9 +238,23 @@ const CANCEL_ACTORS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FO
 const RESCHEDULE_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3 (T2.3): assignment and bulk reassign are "dispatcher, owner" — the `job.assign` cell, which a technician and a rep do not hold. */
 const ASSIGN_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
-/** §7 (T1.8): the sync doors are the technician handset's — Phase 1 builds his working set, the
+/** §7 (T1.8): the sync read doors are the technician handset's — Phase 1 builds his working set, the
  * sales-rep mirror arrives with the sales module, and dispatcher/owner work online by design. */
 const SYNC_ACTORS = { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §7 (T3.2): the BATCH is the field handsets' drain — it re-runs the caller's own queued ops
+ * through each route's own rbac, so the rep drains offline company work here. A rep the owner has
+ * not switched the offline tier on for is refused by the FLAG (the T0 rollback, 409), not by the
+ * role gate; dispatcher/owner have no offline door at all. */
+const SYNC_BATCH_ACTORS = {
+  owner: FORBIDDEN,
+  dispatcher: FORBIDDEN,
+  technician: OK,
+  sales_rep: { status: 409, code: 'FLAG_DISABLED' } as Expectation,
+  anon: UNAUTHENTICATED,
+} as const;
+/** §11/PLAN.md §5: the rep works his accounts plus the house accounts (`own` on company), the
+ * owner sees all — a dispatcher holds no company cell at all, a technician neither. */
+const COMPANY_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: OK, anon: UNAUTHENTICATED } as const;
 /** §6.4: the customer is read by the office and, through a job, by the technician on site — never by a sales rep. */
 const CUSTOMER_READERS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.4/PLAN.md §5: customers are created and edited by the office — and the dispatcher's payload
@@ -889,13 +905,14 @@ const ENDPOINTS: EndpointRow[] = [
     name: 'POST /v1/sync/batch',
     method: 'POST',
     url: '/v1/sync/batch',
-    // §7 (T1.8): the outbox drain. An empty queue is a well-formed
-    // envelope and always HTTP 200 with a cursor, whatever the actor could
-    // have queued — the role gate is what refuses everyone but the
-    // technician here.
+    // §7 (T1.8, rep door T3.2): the outbox drain. An empty queue is a
+    // well-formed envelope and always HTTP 200 with a cursor, whatever the
+    // actor could have queued — the role gate refuses dispatcher/owner,
+    // and a rep without the offline flag meets the T0 rollback (409), not
+    // the role gate.
     probe: (actor) =>
       app.inject({ method: 'POST', url: '/v1/sync/batch', headers: bearer(actor), payload: { operations: [] } }),
-    expect: SYNC_ACTORS,
+    expect: SYNC_BATCH_ACTORS,
     assertOk: (_actor, res) => {
       const body = res.json<{ results: unknown[]; cursor: string }>();
       expect(Array.isArray(body.results)).toBe(true);
@@ -1128,6 +1145,92 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/companies',
+    method: 'GET',
+    url: '/v1/companies',
+    // §11: the rep's accounts plus the house accounts (`own` on company as
+    // the list's WHERE fragment), the owner's all — a dispatcher holds no
+    // company cell at all.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/companies', headers: bearer(actor) }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/companies',
+    method: 'POST',
+    url: '/v1/companies',
+    // §11: create stamps `owner_rep_id` to the creator — a rep owns what
+    // he creates; the owner's create lands a house account. The payload
+    // carries no `ownerRepId`: the server decides, never the caller.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/companies',
+        headers: bearer(actor),
+        payload: { name: `Matrix probe account ${randomBytes(4).toString('hex')}` },
+      }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ id: string }>().id).toBeTruthy();
+    },
+  },
+  {
+    name: 'GET /v1/companies/:id',
+    method: 'GET',
+    url: '/v1/companies/:id',
+    // §11: the matrix rep OWNS this account, so his OK proves the
+    // ownership read, not a house account's visibility.
+    probe: (actor) => app.inject({ method: 'GET', url: `/v1/companies/${matrixCompanyId}`, headers: bearer(actor) }),
+    expect: COMPANY_ACTORS,
+    assertOk: (actor, res) => {
+      if (actor === 'sales_rep') expect(res.json<{ id: string; ownerRepId: string | null }>().ownerRepId).toBe(selfIds.sales_rep);
+    },
+  },
+  {
+    name: 'PATCH /v1/companies/:id',
+    method: 'PATCH',
+    url: '/v1/companies/:id',
+    // §11: rep (own + house), owner — the probe edits a fresh HOUSE
+    // account (the owner's own create lands NULL), the one shape both
+    // allowed actors may edit without owning. `ownerRepId` is not a field
+    // of the patch payload: ownership moves through the owner door alone.
+    probe: async (actor) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/companies',
+        headers: bearer('owner'),
+        payload: { name: `Matrix probe house account ${randomBytes(4).toString('hex')}` },
+      });
+      const id = JSON.parse(created.body).id as string;
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/companies/${id}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { notes: 'Matrix probe company edit.' },
+      });
+    },
+    expect: COMPANY_ACTORS,
+  },
+  {
+    name: 'PATCH /v1/companies/:id/owner',
+    method: 'PATCH',
+    url: '/v1/companies/:id/owner',
+    // §11: OWNER ONLY — a rep cannot reassign an account, his own
+    // included, which is the door check the matrix cannot express (the rep
+    // holds `update: own` on company and must not reach this surface).
+    // Nulling is repeatable, so the probe may run for every actor.
+    probe: (actor) =>
+      app.inject({
+        method: 'PATCH',
+        url: `/v1/companies/${matrixCompanyId}/owner`,
+        headers: bearer(actor),
+        payload: { ownerRepId: null },
+      }),
+    expect: OWNER_ONLY,
+  },
+  {
     name: 'GET /v1/products',
     method: 'GET',
     url: '/v1/products',
@@ -1281,6 +1384,16 @@ beforeAll(async () => {
     )
   ).rows[0]!.id;
   matrixJobId = await seedJobAssignedToTechnician();
+
+  // The company probes (T3.2) need an account the matrix sales_rep OWNS:
+  // his OK on the row-scoped doors must prove the ownership scope, not a
+  // house account's visibility.
+  matrixCompanyId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO companies (name, owner_rep_id) VALUES ($1, $2) RETURNING id`,
+      [`Matrix T10 Account ${randomBytes(3).toString('hex')}`, selfIds.sales_rep],
+    )
+  ).rows[0]!.id;
 
   // The §6.4 stack probes need a unit standing at the matrix customer.
   stackItemId = (

@@ -13,12 +13,15 @@ import { createSyncService } from './service.js';
  * (`tech.offline` gates the client surface; these endpoints are its API).
  *
  * §7: "Technician and sales rep only; dispatcher and owner use the normal
- * REST surface online." Phase 1 builds the technician's working set; the
- * rep's (companies + house accounts with balances) arrives with the sales
- * module in Phase 2 and is refused until then — so the gate is the
- * technician role itself, not a matrix cell: a whole-table sync answer for
- * an `all`-scoped role would be the whole database, and §7 bounds the
- * response by design to one actor's tens of rows.
+ * REST surface online." The READ doors keep the Phase-1 technician gate
+ * until the rep's working set (companies + house accounts with balances)
+ * lands with the sales module's mirror — a whole-table sync answer for an
+ * `all`-scoped role would be the whole database, and §7 bounds the
+ * response by design to one actor's tens of rows. The BATCH is
+ * actor-agnostic: it re-runs the caller's own queued operations through
+ * the real stack, and every inner op is scoped by its own route's rbac —
+ * so the rep drains his offline company work here (T3.2's offline-create
+ * verdict is a batch outcome), while dispatcher and owner stay 403.
  *
  * The batch is a mutation like any other, so the idempotency plugin
  * (§3.2) wraps it: a batch sent with its own `Idempotency-Key` replays its
@@ -28,9 +31,13 @@ import { createSyncService } from './service.js';
  * inner claim would block on the outer's uncommitted claim row.
  */
 
-/** §7 actors, Phase 1 shape. */
+/** §7 actors on the read doors, Phase-1 shape: the rep's mirror is not built yet. */
 const SYNC_ACTORS_MESSAGE =
   'Offline sync belongs to the technician handset — use the online API instead.';
+
+/** §7 actors on the batch — the field roles who queue work offline. */
+const SYNC_BATCH_ACTORS_MESSAGE =
+  'Offline sync belongs to the field handsets — use the online API instead.';
 
 const syncDeltaQuerySchema = z.object({ cursor: isoDateTime }).strict();
 
@@ -43,6 +50,13 @@ function claimsOf(request: FastifyRequest): { sub: string; role: string } {
 async function technicianOnly(request: FastifyRequest): Promise<void> {
   if (claimsOf(request).role !== 'technician') {
     throw new AppError('FORBIDDEN', SYNC_ACTORS_MESSAGE);
+  }
+}
+
+async function fieldActorOnly(request: FastifyRequest): Promise<void> {
+  const role = claimsOf(request).role;
+  if (role !== 'technician' && role !== 'sales_rep') {
+    throw new AppError('FORBIDDEN', SYNC_BATCH_ACTORS_MESSAGE);
   }
 }
 
@@ -94,7 +108,7 @@ export const syncRoutes: FastifyPluginAsync = async (app) => {
   app.post(
     '/v1/sync/batch',
     {
-      preHandler: [app.requireAuth, technicianOnly, offlineEnabled],
+      preHandler: [app.requireAuth, fieldActorOnly, offlineEnabled],
       config: { responseSchema: syncBatchResponseSchema },
     },
     async (request) => {
