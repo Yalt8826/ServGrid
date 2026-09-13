@@ -1217,3 +1217,114 @@ export const servicePatchRequestSchema = z
   .strict()
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
 export type ServicePatchRequest = z.infer<typeof servicePatchRequestSchema>;
+
+// ── sales cards (§3.5 data model, §5 `own` on sale, §11) ────────────────────
+
+/**
+ * `sales_cards.status` (migration 002 `sales_card_status`). Draft means no
+ * number and no money; confirm allocates the number and moves the balance;
+ * void is the reversal — owner only, reason required.
+ */
+export const saleStatusSchema = z.enum(['draft', 'confirmed', 'void']);
+export type SaleStatus = z.infer<typeof saleStatusSchema>;
+
+/**
+ * One line of a sale as the CREATE/PATCH payload carries it (§11: items are
+ * nested in the create payload). THE SNAPSHOT IS THE PAYLOAD'S JOB: the
+ * picker on the device copies `productName`/`productSku`/`unitPrice` off the
+ * product at add time, and the server stores what it received — a repricing
+ * next quarter must not rewrite this sale (§3.5), so the server never
+ * re-derives a line's name or price from `products`. `unitPrice` is editable
+ * per line because a negotiated price is normal; `productId` is optional
+ * (third-party kit) and kept for reporting joins only — it is never read for
+ * display.
+ */
+export const saleItemInputSchema = z
+  .object({
+    productId: uuid.optional(),
+    productName: z.string().min(1).max(200),
+    productSku: z.string().max(100).optional(),
+    /** numeric(10,2) with CHECK (quantity > 0) — the DB is the backstop. */
+    quantity: z.number().min(0.01).max(99_999_999.99),
+    /** numeric(12,2) with CHECK (unit_price >= 0) — a discount is a smaller positive price. */
+    unitPrice: moneyString,
+    serialNumbers: z.array(z.string().min(1).max(200)).max(50).optional(),
+  })
+  .strict();
+export type SaleItemInput = z.infer<typeof saleItemInputSchema>;
+
+/** POST /v1/sales (§11) — a draft; the number comes at confirm, so the payload carries none. */
+export const saleCreateSchema = z
+  .object({
+    companyId: uuid,
+    /** The IST business day the sale was MADE, chosen by the rep — never derived from the server clock (migration 017). */
+    saleDate: z.string().date(),
+    notes: z.string().max(2000).optional(),
+    items: z.array(saleItemInputSchema).min(1).max(200),
+  })
+  .strict();
+export type SaleCreate = z.infer<typeof saleCreateSchema>;
+
+/**
+ * PATCH /v1/sales/:id (§11: rep own, draft only — a confirmed card is
+ * corrected by void, never edited). `items` rewrites the draft's lines in
+ * full when sent; absent leaves them alone.
+ */
+export const salePatchSchema = z
+  .object({
+    saleDate: z.string().date().optional(),
+    notes: z.string().max(2000).nullish(),
+    items: z.array(saleItemInputSchema).min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+export type SalePatch = z.infer<typeof salePatchSchema>;
+
+/** POST /v1/sales/:id/void (§11: OWNER ONLY) — a void without a reason is a balance that moved for nothing. */
+export const saleVoidSchema = z
+  .object({
+    reason: z.string().min(1).max(2000),
+  })
+  .strict();
+export type SaleVoid = z.infer<typeof saleVoidSchema>;
+
+/** One stored line, as every reader sees it: the snapshots, never a live product lookup. */
+export const SaleItemSchema = z
+  .object({
+    lineNo: z.number().int().min(1),
+    productId: uuid.nullable(),
+    productName: z.string(),
+    productSku: z.string().nullable(),
+    /** Money and quantities cross the wire as decimal strings (numeric columns). */
+    quantity: moneyString,
+    unitPrice: moneyString,
+    lineTotal: moneyString,
+    serialNumbers: z.array(z.string()),
+  })
+  .strict();
+export type SaleItem = z.infer<typeof SaleItemSchema>;
+
+/**
+ * One sales card. `saleNumber` is null while draft — the device shows
+ * "Draft", never a fake local number (§3.5). `total` is the card's worth as
+ * `v_sales_card_totals` defines it — the one definition, read from the view,
+ * never recomputed here.
+ */
+export const SaleSchema = z
+  .object({
+    id: uuid,
+    saleNumber: z.string().nullable(),
+    companyId: uuid,
+    salesRepId: uuid,
+    saleDate: z.string().date(),
+    status: saleStatusSchema,
+    notes: z.string().nullable(),
+    confirmedAt: isoDateTime.nullable(),
+    voidedAt: isoDateTime.nullable(),
+    voidReason: z.string().nullable(),
+    total: moneyString,
+    items: z.array(SaleItemSchema),
+    version: z.number().int(),
+  })
+  .strict();
+export type SaleRecord = z.infer<typeof SaleSchema>;

@@ -25,6 +25,7 @@ import { employeesRoutes } from './modules/employees/routes.js';
 import { flagsRoutes } from './modules/flags/routes.js';
 import { jobsRoutes } from './modules/jobs/routes.js';
 import { locationRoutes } from './modules/location/routes.js';
+import { salesRoutes } from './modules/sales/routes.js';
 import { syncRoutes } from './modules/sync/routes.js';
 
 /**
@@ -138,6 +139,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(locationRoutes, { workWindow: config.workWindow });
   app.register(syncRoutes);
   app.register(cashRoutes);
+  app.register(salesRoutes);
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });

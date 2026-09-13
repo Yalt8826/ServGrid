@@ -1231,6 +1231,131 @@ const ENDPOINTS: EndpointRow[] = [
     expect: OWNER_ONLY,
   },
   {
+    name: 'GET /v1/sales',
+    method: 'GET',
+    url: '/v1/sales',
+    // §11 (T3.3): the rep's own cards (`own` on sale as the list's WHERE
+    // fragment), the owner's all — a dispatcher holds no sale cell at all.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/sales', headers: bearer(actor) }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/sales',
+    method: 'POST',
+    url: '/v1/sales',
+    // §11 (T3.3): items nested in the create payload; create mints a DRAFT
+    // — no number, no balance, the confirm's to mint. The server stamps
+    // `sales_rep_id` to the actor; the payload carries no rep field.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/sales',
+        headers: bearer(actor),
+        payload: {
+          companyId: matrixCompanyId,
+          saleDate: '2026-09-13',
+          items: [{ productName: 'Matrix probe line', quantity: 1, unitPrice: '10.00' }],
+        },
+      }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      const body = res.json<{ saleNumber: string | null; status: string }>();
+      expect(body.status).toBe('draft');
+      expect(body.saleNumber).toBeNull();
+    },
+  },
+  {
+    name: 'PATCH /v1/sales/:id',
+    method: 'PATCH',
+    url: '/v1/sales/:id',
+    // §11 (T3.3): rep (own, DRAFT only), owner. The probe edits a fresh
+    // draft the rep created — the one shape both allowed actors may edit
+    // (owner `all`, rep `own`). A confirmed card is refused even for the
+    // owner: void is the correction door.
+    probe: async (actor) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/sales',
+        headers: bearer('sales_rep'),
+        payload: {
+          companyId: matrixCompanyId,
+          saleDate: '2026-09-13',
+          items: [{ productName: 'Matrix probe draft', quantity: 1, unitPrice: '10.00' }],
+        },
+      });
+      const id = (JSON.parse(created.body) as { id: string }).id;
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/sales/${id}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { notes: 'Matrix probe sale edit.' },
+      });
+    },
+    expect: COMPANY_ACTORS,
+  },
+  {
+    name: 'POST /v1/sales/:id/confirm',
+    method: 'POST',
+    url: '/v1/sales/:id/confirm',
+    // §11 (T3.3): the move that mints the number and lifts the balance.
+    // Each probe confirms a FRESH draft (confirm is one-way), created by
+    // the rep, so his OK proves the own scope and not borrowed rows.
+    probe: async (actor) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/sales',
+        headers: bearer('sales_rep'),
+        payload: {
+          companyId: matrixCompanyId,
+          saleDate: '2026-09-13',
+          items: [{ productName: 'Matrix probe confirm', quantity: 1, unitPrice: '10.00' }],
+        },
+      });
+      const id = (JSON.parse(created.body) as { id: string }).id;
+      return app.inject({ method: 'POST', url: `/v1/sales/${id}/confirm`, headers: bearer(actor) });
+    },
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ saleNumber: string | null }>().saleNumber).toMatch(/^SL-\d{4}-\d{5,}$/);
+    },
+  },
+  {
+    name: 'POST /v1/sales/:id/void',
+    method: 'POST',
+    url: '/v1/sales/:id/void',
+    // §11 (T3.3): OWNER ONLY — the door check is the role, not the matrix
+    // cell: a rep holds `update: own` on sale and must not reach this
+    // surface even on his own card. The probe voids a fresh rep-made
+    // confirm, so the owner's OK is the only OK there is.
+    probe: async (actor) => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/sales',
+        headers: bearer('sales_rep'),
+        payload: {
+          companyId: matrixCompanyId,
+          saleDate: '2026-09-13',
+          items: [{ productName: 'Matrix probe void', quantity: 1, unitPrice: '10.00' }],
+        },
+      });
+      const id = (JSON.parse(created.body) as { id: string }).id;
+      await app.inject({ method: 'POST', url: `/v1/sales/${id}/confirm`, headers: bearer('sales_rep') });
+      return app.inject({
+        method: 'POST',
+        url: `/v1/sales/${id}/void`,
+        headers: bearer(actor),
+        payload: { reason: 'Matrix probe void.' },
+      });
+    },
+    expect: OWNER_ONLY,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ status: string }>().status).toBe('void');
+    },
+  },
+  {
     name: 'GET /v1/products',
     method: 'GET',
     url: '/v1/products',
@@ -1378,6 +1503,15 @@ beforeAll(async () => {
   await db.query(
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
      SELECT id, 'sales.cash', true FROM employees WHERE role = 'sales_rep'`,
+  );
+
+  // Same for the sales cards surface (T3.3): the sale probes exercise ROLE
+  // authorization, and the flag gates EVERY caller of /v1/sales, so the
+  // matrix owner and rep ride with `sales.cards` enabled — the flag's own
+  // switchable behaviour is integration/sales.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'sales.cards', true FROM employees WHERE role IN ('owner', 'sales_rep')`,
   );
 
   // The jobs-endpoint probes need a real job (migration 007) assigned to

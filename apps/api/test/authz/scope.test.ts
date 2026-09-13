@@ -216,12 +216,43 @@ describe('none — the refusal happens before any query exists', () => {
   });
 
   it('a scope the matrix grants but whose predicate is not registered yet fails loudly, never runs unscoped', () => {
-    // `sale` for a sales_rep is `own` in the matrix, but no sales table
-    // exists until migration 011 — building the predicate is a query-time
-    // programmer error until the sales module registers it.
+    // `payment` for a sales_rep is `own` in the matrix, and the table
+    // exists (migration 017), but no predicate is registered until the
+    // payments module lands (T3.4) — building the predicate is a
+    // query-time programmer error until then. (`sale` held this pin until
+    // T3.3 registered its authorship predicate; the guard moves to the
+    // next unregistered cell, which is the guard working as designed.)
     expect(() =>
-      scopePredicate({ role: 'sales_rep', actorId: repA.id, resource: 'sale', action: 'read' }),
-    ).toThrowError(/no own predicate registered for sale/);
+      scopePredicate({ role: 'sales_rep', actorId: repA.id, resource: 'payment', action: 'read' }),
+    ).toThrowError(/no own predicate registered for payment/);
+  });
+});
+
+describe('own on sale — the author who made the card (T3.3)', () => {
+  it('generates that exact predicate over sales_cards, actor bound as a parameter, never interpolated', () => {
+    const pred = scopePredicate({ role: 'sales_rep', actorId: repA.id, resource: 'sale', action: 'read' });
+    expect(pred).toEqual({
+      sql: 'sales_cards.sales_rep_id = $1',
+      params: [repA.id],
+    });
+  });
+
+  it('the qualifier follows the query’s alias, so the list’s WHERE can spell it `sc`', () => {
+    const pred = scopePredicate({
+      role: 'sales_rep',
+      actorId: repA.id,
+      resource: 'sale',
+      action: 'read',
+      qualifier: 'sc',
+    });
+    expect(pred).toEqual({
+      sql: 'sc.sales_rep_id = $1',
+      params: [repA.id],
+    });
+  });
+
+  it('the owner’s cell is all — no predicate, the whole book', () => {
+    expect(scopePredicate({ role: 'owner', actorId: owner.id, resource: 'sale', action: 'read' })).toBeNull();
   });
 });
 

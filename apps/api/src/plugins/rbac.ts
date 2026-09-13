@@ -114,6 +114,21 @@ const PREDICATES: Partial<Record<Resource, ResourcePredicates>> = {
       params: [actorId],
     }),
   },
+  sale: {
+    table: 'sales_cards',
+    // `own` on sale is authorship (§5: `sales_rep_id`): the rep who made
+    // the sale reads and edits HIS cards — another rep's sale is OUT_OF_SCOPE
+    // at the row, and voiding is not a matrix scope at all but a door check
+    // (owner only, the companies /owner precedent), because the matrix
+    // cannot express "the same cell that lets him confirm must not let him
+    // void". Registered with the sales module (T3.3); the matrix grants
+    // sales_rep `own`, so the predicate had to exist before a scoped sales
+    // query could run.
+    own: ({ actorId, paramStart, qualifier }) => ({
+      sql: `${qualifier}.sales_rep_id = $${paramStart}`,
+      params: [actorId],
+    }),
+  },
   'customer.stack': {
     table: 'customer_products',
     // §6.4: a technician's scope on the stack is `assigned`, not `all` —
