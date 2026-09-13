@@ -130,13 +130,23 @@ function recentWorkingDay(now: Date = new Date()): IstDate {
   throw new Error('no recent working day found — the suite cannot run');
 }
 
-/** The most recent IST Sunday whose 12:00 is comfortably in the past. */
-function recentSunday(now: Date = new Date()): IstDate {
+/** The latest IST Sunday `hh:mm` no later than two minutes from now.
+ *
+ * Resolved per hour, not per date. A Sunday test wants 06:00, 12:00 and
+ * 21:00 — and on a Sunday afternoon no single Sunday has all three inside
+ * the accepted range: today's 21:00 is still ahead (FUTURE), last week's
+ * 06:00 is more than 7 days back (TOO_OLD). Picking each hour's latest
+ * occurrence keeps every ping inside the range on any day at any hour.
+ *
+ * The +2 minutes sits inside the server's 5-minute FUTURE skew, and it is
+ * what keeps TOO_OLD out of reach: the next weekly occurrence lies beyond
+ * now+2min, so this one is less than 7 days minus 2 minutes old. */
+function recentSundayAt(hh: number, mm: number, now: Date = new Date()): string {
+  const latest = now.getTime() + 2 * 60_000;
   for (let back = 0; back < 8; back++) {
-    const date = istDateParts(new Date(now.getTime() - back * 24 * 60 * 60_000));
-    if (istWeekday(date) === 0 && Date.parse(istIso(date, 12, 0)) <= now.getTime() - 6 * 60_000) {
-      return date;
-    }
+    const date = istDateParts(new Date(latest - back * 24 * 60 * 60_000));
+    const iso = istIso(date, hh, mm);
+    if (istWeekday(date) === 0 && Date.parse(iso) <= latest) return iso;
   }
   throw new Error('no recent Sunday found — the suite cannot run');
 }
@@ -295,12 +305,11 @@ describe('the work window — evaluated server-side against recorded_at, in IST'
   });
 
   it('a Sunday ping is rejected regardless of hour — before, inside and after the window', async () => {
-    const sunday = recentSunday();
     const before = await pingRowCount();
     const res = await postPings(TECH.token, [
-      pingAt(istIso(sunday, 6, 0)),
-      pingAt(istIso(sunday, 12, 0)),
-      pingAt(istIso(sunday, 21, 0)),
+      pingAt(recentSundayAt(6, 0)),
+      pingAt(recentSundayAt(12, 0)),
+      pingAt(recentSundayAt(21, 0)),
     ]);
     expect(res.statusCode, res.body).toBe(200);
 
