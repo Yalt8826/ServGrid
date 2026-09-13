@@ -189,6 +189,17 @@ beforeAll(async () => {
   await seedEmployee('technician', TECH_A);
   await seedEmployee('technician', TECH_B);
   await seedEmployee('sales_rep', SALES_REP);
+
+  // The rep's half of this surface rides `sales.cash` (T3.6, defaulted
+  // off like every flag); these suites exercise the declaration and
+  // amendment rules themselves, so the rep's flag rides enabled — the
+  // flag's own switchable behaviour is integration/rep-cash.test.ts's
+  // subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     VALUES ($1, 'sales.cash', true)`,
+    [SALES_REP.id],
+  );
 });
 
 afterAll(async () => {

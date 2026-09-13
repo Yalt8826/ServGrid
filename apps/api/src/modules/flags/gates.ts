@@ -38,3 +38,26 @@ export async function dispatchBulkEnabled(request: FastifyRequest): Promise<void
     throw new AppError('FLAG_DISABLED', BULK_DISABLED_MESSAGE);
   }
 }
+
+/**
+ * `sales.cash` — the sales rep's cash handover (PHASE-3-SALES-REP.md
+ * T3.6). The declaration endpoints are shared with the technician, whose
+ * handover has been lit since T1.11 on the technician phase's surface —
+ * so the gate reads the token's role and asks the flag only of a
+ * sales_rep: flipping it off darkens the rep's half (the T0 rollback of
+ * T3.6) without touching the technician's declaration. The sync door
+ * carries the same two concerns as two handlers (`technicianOnly`, then
+ * `offlineEnabled`); here one handler holds both because the surface is
+ * one and the refusal is the same 409 whichever condition fails.
+ */
+export const REP_CASH_DISABLED_MESSAGE =
+  'The cash handover is switched off for your account.';
+
+export async function salesRepCashEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (auth.role !== 'sales_rep') return;
+  if (!(await isFlagOn(auth.sub, 'sales.cash'))) {
+    throw new AppError('FLAG_DISABLED', REP_CASH_DISABLED_MESSAGE);
+  }
+}
