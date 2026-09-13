@@ -61,3 +61,22 @@ export async function salesRepCashEnabled(request: FastifyRequest): Promise<void
     throw new AppError('FLAG_DISABLED', REP_CASH_DISABLED_MESSAGE);
   }
 }
+
+/**
+ * `sales.cards` — the sales cards surface (PHASE-3-SALES-REP.md T3.3): the
+ * rep's sale documents, confirm (the move that changes a company's
+ * balance) and the owner's void. Unlike `sales.cash` this surface is
+ * sales-only — the rep and the owner, no shared technician half — so the
+ * gate asks the flag of EVERY caller: flipping it off darkens the whole
+ * surface for everyone on it, which is the T0 rollback of T3.3.
+ */
+export const SALES_CARDS_DISABLED_MESSAGE =
+  'Sales cards are switched off for your account.';
+
+export async function salesCardsEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'sales.cards'))) {
+    throw new AppError('FLAG_DISABLED', SALES_CARDS_DISABLED_MESSAGE);
+  }
+}
