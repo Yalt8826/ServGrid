@@ -74,6 +74,15 @@ export async function runMigrations(options: RunMigrationsOptions = {}): Promise
       // migration with no down side, which would fail the
       // up → down → up gate.
       migrationLoaderStrategies: [{ extensions: ['.sql'], loader: 'sql' }],
+      // PLAN-DATA-MODEL.md §1: "numbers record the order migrations were
+      // written, phases record when they run". 015 ships in Phase 2B,
+      // before 012 and 014; 016 shipped in Phase 1, before 011 and 013.
+      // node-pg-migrate's default order check refuses every one of those
+      // ("Not run migration 011_… is preceding already run migration
+      // 016_…") — it stopped the dev database at 010 + 016 the day Phase 2
+      // merged. Each migration depends only on lower-numbered ones that
+      // already shipped, which is the property the check was standing in for.
+      checkOrder: false,
     };
     await runner(runnerOptions);
   } finally {

@@ -1,3 +1,7 @@
+import { cpSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { runMigrations } from '../../src/db/migrate.js';
@@ -219,5 +223,64 @@ describe('touch_updated_at — optimistic-concurrency trigger', () => {
       'SELECT updated_at::text AS updated_at FROM trigger_scratch_noversion WHERE id = 1',
     );
     expect(new Date(row.rows[0]?.updated_at ?? '').getTime()).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Out-of-order history (PLAN-DATA-MODEL.md §1): "numbers record the order
+ * migrations were written, phases record when they run". The up → down →
+ * up rehearsal above applies files in numeric order, so it can never see
+ * the case production actually meets. This one rebuilds the dev database
+ * as it stood on 12 Sep 2026: 016 applied in Phase 1, 011 and 013 still
+ * pending. node-pg-migrate's default order check refused to go on from
+ * there ("Not run migration 011_… is preceding already run migration
+ * 016_…"), and Phase 2B's 015 would have hit the same refusal.
+ */
+describe('out-of-order history — a lower number still applies after a higher one', () => {
+  const ORDER_DB = 'servgrid_migrate_order_test';
+  const MIGRATIONS_DIR = fileURLToPath(new URL('../../src/db/migrations', import.meta.url));
+  const HELD_BACK = ['011_assignment_notifications', '013_views_ops'];
+
+  let orderDb: Pool;
+  let subsetDir: string;
+
+  beforeAll(async () => {
+    await admin.query(`DROP DATABASE IF EXISTS ${ORDER_DB} WITH (FORCE)`);
+    await admin.query(`CREATE DATABASE ${ORDER_DB}`);
+    const url = new URL(databaseUrl());
+    url.pathname = `/${ORDER_DB}`;
+    orderDb = new Pool({ connectionString: url.toString(), max: 5 });
+    subsetDir = mkdtempSync(join(tmpdir(), 'servgrid-migrations-'));
+  });
+
+  afterAll(async () => {
+    await orderDb?.end();
+    await admin?.query(`DROP DATABASE IF EXISTS ${ORDER_DB} WITH (FORCE)`);
+    if (subsetDir) rmSync(subsetDir, { recursive: true, force: true });
+  });
+
+  it('016 applied before 011 and 013 migrates forward, then down and up again', async () => {
+    const files = readdirSync(MIGRATIONS_DIR);
+    for (const file of files) {
+      if (!HELD_BACK.some((name) => file.startsWith(`${name}.`))) {
+        cpSync(join(MIGRATIONS_DIR, file), join(subsetDir, file));
+      }
+    }
+    await runMigrations({ pool: orderDb, migrationsDir: subsetDir });
+
+    // The whole set, the way `pnpm -F api dev` and the release step run it.
+    await runMigrations({ pool: orderDb });
+    const names = async (): Promise<string[]> =>
+      (await orderDb.query<{ name: string }>('SELECT name FROM pgmigrations ORDER BY id')).rows.map((r) => r.name);
+    const everyMigration = files.filter((f) => f.endsWith('.up.sql')).map((f) => f.replace(/\.up\.sql$/, ''));
+
+    const applied = await names();
+    expect(applied.slice(-HELD_BACK.length), 'the held-back migrations ran last').toEqual(HELD_BACK);
+    expect([...applied].sort()).toEqual([...everyMigration].sort());
+
+    await runMigrations({ pool: orderDb, direction: 'down' });
+    expect(await names()).toEqual([]);
+    await runMigrations({ pool: orderDb });
+    expect(await names()).toHaveLength(everyMigration.length);
   });
 });

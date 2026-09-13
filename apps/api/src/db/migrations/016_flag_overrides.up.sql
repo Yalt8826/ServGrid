@@ -21,7 +21,9 @@
 --
 -- Numbered 016, out of phase order, on purpose (PLAN-DATA-MODEL.md §1:
 -- "numbers record the order migrations were written, phases record when
--- they run") — 011–015 are reserved for Phases 2–2B; this ships first.
+-- they run"). It shipped in Phase 1, before 011 and 013 were written,
+-- which is why migrate.ts sets checkOrder: false. Phase 3's sales
+-- migrations were renumbered 017–018 around it and T2.5's 011.
 
 CREATE TABLE employee_flag_overrides (
   employee_id uuid        NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
