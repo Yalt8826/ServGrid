@@ -233,11 +233,14 @@ export function densityForRole(role: Role, desk: boolean): Density {
   return role === 'dispatcher' ? 'console' : 'field';
 }
 
-/** Display labels for rail routes (the desk presentation expands groups). */
+/** Display labels for rail routes (the desk presentation expands groups).
+ * The owner's Operations section names the dispatch form "Dispatch"
+ * (07-OWNER.md "The desktop rail"); these labels feed only the rail —
+ * the phone tab bar renders group labels, never route labels. */
 export const ROUTE_LABELS: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/jobs': 'Jobs',
-  '/jobs/new': 'New job',
+  '/jobs/new': 'Dispatch',
   '/jobs/logs': 'Job Logs',
   '/customers': 'Customers',
   '/customers/new': 'New customer',
