@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import type { FastifyInstance } from 'fastify';
 import {
   CashHandoverSchema,
+  cashQueueRowSchema,
   deviceDiagnosticSchema,
   employeeListResponseSchema,
   errorEnvelopeSchema,
@@ -147,6 +148,32 @@ async function seedSubmittedHandover(employeeId: string): Promise<{ id: string; 
     [employeeId, todayIst],
   );
   return r.rows[0]!;
+}
+
+/**
+ * A submitted declaration on a DISTINCT day per owner-action probe
+ * (T4.2): confirm, dispute and reopen each need their own row, and the
+ * (employee, business_date) constraint makes a second seed for one day a
+ * no-op that would hand the next probe an already-signed-off row.
+ */
+async function seedHandoverOnDay(employeeId: string, offsetDays: number): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO cash_reconciliations (employee_id, business_date, declared_amount, declared_at)
+     VALUES ($1, business_date(now()) + $2::int, '2500.00', now()) RETURNING id`,
+    [employeeId, offsetDays],
+  );
+  return r.rows[0]!.id;
+}
+
+/** Signed off exactly as the confirm endpoint would leave it — the reopen probe's target. */
+async function confirmHandoverInDb(id: string): Promise<void> {
+  await db.query(
+    `UPDATE cash_reconciliations
+     SET status = 'confirmed', confirmed_amount = declared_amount,
+         confirmed_by = $2, confirmed_at = now()
+     WHERE id = $1`,
+    [id, selfIds.owner],
+  );
 }
 
 async function seedJobAssignedToTechnician(): Promise<string> {
@@ -984,6 +1011,107 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/cash/queue',
+    method: 'GET',
+    url: '/v1/cash/queue',
+    // §10 (T4.2): the owner reads the reconciliation queue over
+    // v_cash_reconciliation_queue; no other role holds a cash.confirm
+    // cell. The matrix owner rides with `owner.cash` lit (beforeAll) —
+    // the flag's dark side is integration/cash-queue.test.ts's subject.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/cash/queue', headers: bearer(actor) }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const body = res.json<{ today: string; from: string; to: string; rows: unknown[] }>();
+      expect(typeof body.today).toBe('string');
+      expect(Array.isArray(body.rows)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/cash/handovers/:id/confirm',
+    method: 'POST',
+    url: '/v1/cash/handovers/:id/confirm',
+    // §10 (T4.2): the owner confirms a submitted day. The row is seeded on
+    // its own day so the three owner-action probes never share one.
+    probe: async (actor) => {
+      if (actor === 'owner') {
+        const id = await seedHandoverOnDay(subject.id, 0);
+        return app.inject({
+          method: 'POST',
+          url: `/v1/cash/handovers/${id}/confirm`,
+          headers: bearer(actor),
+          payload: { confirmedAmount: '2500' },
+        });
+      }
+      return app.inject({
+        method: 'POST',
+        url: `/v1/cash/handovers/${randomUUID()}/confirm`,
+        headers: bearer(actor),
+        payload: { confirmedAmount: '2500' },
+      });
+    },
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      expect(cashQueueRowSchema.parse(res.json()).status).toBe('confirmed');
+    },
+  },
+  {
+    name: 'POST /v1/cash/handovers/:id/dispute',
+    method: 'POST',
+    url: '/v1/cash/handovers/:id/dispute',
+    // §10 (T4.2): the owner disputes with the note the DB CHECK demands.
+    probe: async (actor) => {
+      if (actor === 'owner') {
+        const id = await seedHandoverOnDay(subject.id, -1);
+        return app.inject({
+          method: 'POST',
+          url: `/v1/cash/handovers/${id}/dispute`,
+          headers: bearer(actor),
+          payload: { ownerNote: 'matrix probe: figures do not match' },
+        });
+      }
+      return app.inject({
+        method: 'POST',
+        url: `/v1/cash/handovers/${randomUUID()}/dispute`,
+        headers: bearer(actor),
+        payload: { ownerNote: 'matrix probe: figures do not match' },
+      });
+    },
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      expect(cashQueueRowSchema.parse(res.json()).status).toBe('disputed');
+    },
+  },
+  {
+    name: 'POST /v1/cash/handovers/:id/reopen',
+    method: 'POST',
+    url: '/v1/cash/handovers/:id/reopen',
+    // §10 (T4.2): owner only, reason required — returns a signed-off day
+    // to submitted. The probe's target is confirmed in place first, since
+    // reopen refuses a day that is still open.
+    probe: async (actor) => {
+      if (actor === 'owner') {
+        const id = await seedHandoverOnDay(subject.id, -2);
+        await confirmHandoverInDb(id);
+        return app.inject({
+          method: 'POST',
+          url: `/v1/cash/handovers/${id}/reopen`,
+          headers: bearer(actor),
+          payload: { reason: 'matrix probe: reopening' },
+        });
+      }
+      return app.inject({
+        method: 'POST',
+        url: `/v1/cash/handovers/${randomUUID()}/reopen`,
+        headers: bearer(actor),
+        payload: { reason: 'matrix probe: reopening' },
+      });
+    },
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      expect(cashQueueRowSchema.parse(res.json()).status).toBe('submitted');
+    },
+  },
+  {
     name: 'GET /healthz',
     method: 'GET',
     url: '/healthz',
@@ -1625,6 +1753,16 @@ beforeAll(async () => {
   await db.query(
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
      SELECT id, 'sales.payments', true FROM employees WHERE role IN ('owner', 'sales_rep')`,
+  );
+
+  // Same for the owner's cash queue (T4.2): the queue probes exercise ROLE
+  // authorization, and the flag gates EVERY caller of the reconciliation
+  // surface, so the matrix owner rides with `owner.cash` enabled — the
+  // flag's own switchable behaviour is integration/cash-queue.test.ts's
+  // subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'owner.cash', true FROM employees WHERE role = 'owner'`,
   );
 
   // The jobs-endpoint probes need a real job (migration 007) assigned to

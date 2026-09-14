@@ -29,6 +29,18 @@ export const moneyString = z
   .string()
   .regex(/^\d+(\.\d{1,2})?$/, 'decimal amount as a string, e.g. "1234.50"');
 
+/**
+ * Money that may be negative — the ledger and the balance views deal in
+ * signed figures. A sale is positive and a payment negative (§S4's
+ * `+ ₹16,800 / − ₹40,000`), and an overpayment leaves a company's balance
+ * negative on purpose: a credit is a real state and good news, rendered by
+ * the UI as "Credit", never as a minus in red. The plain `moneyString`
+ * above stays unsigned — it types document amounts as entered.
+ */
+export const signedMoneyString = z
+  .string()
+  .regex(/^-?\d+(\.\d{1,2})?$/, 'signed decimal amount as a string, e.g. "1234.50" or "-800.00"');
+
 export const uuid = z.string().uuid();
 export const isoDateTime = z.string().datetime({ offset: true });
 
@@ -541,6 +553,108 @@ export const cashHandoverListResponseSchema = z.array(CashHandoverSchema);
 export type CashHandover = z.infer<typeof CashHandoverSchema>;
 export type CashDeclareRequest = z.infer<typeof cashDeclareRequestSchema>;
 export type CashAmendRequest = z.infer<typeof cashAmendRequestSchema>;
+
+// ── cash reconciliation queue (§10, PLAN-DATA-MODEL.md §4) ─────────────────
+
+/**
+ * The flag `v_cash_reconciliation_queue` emits, in the view's precedence
+ * order. `missing_submission` is the row the feature exists to catch —
+ * collected cash, no declaration — so the queue sorts it first regardless
+ * of date.
+ */
+export const CASH_QUEUE_FLAGS = ['missing_submission', 'no_expected_cash', 'variance', 'match'] as const;
+export const cashQueueFlagSchema = z.enum(CASH_QUEUE_FLAGS);
+export type CashQueueFlag = (typeof CASH_QUEUE_FLAGS)[number];
+
+/** The roles that declare cash (§10 POST /v1/cash/handovers) — the queue's `role` filter. */
+export const DECLARING_ROLES = ['technician', 'sales_rep'] as const;
+export const declaringRoleSchema = z.enum(DECLARING_ROLES);
+export type DeclaringRole = (typeof DECLARING_ROLES)[number];
+
+/**
+ * One row of the owner's queue, exactly as the view carries it. The
+ * declaration-side figures are null together (`declarationId`, too) —
+ * a `missing_submission` day has no declaration row at all, which is
+ * what makes it the only flag a LEFT JOIN would drop.
+ * `declarationId` is the `cash_reconciliations.id` confirm/dispute/reopen
+ * act on; the view itself does not carry it, so the repo LEFT JOINs the
+ * table on the unique (employee, date) pair to surface it.
+ */
+export const cashQueueRowSchema = z
+  .object({
+    declarationId: uuid.nullable(),
+    employeeId: uuid,
+    employeeName: z.string(),
+    role: roleSchema,
+    businessDate: businessDateSchema,
+    expectedCash: moneyString.nullable(),
+    declaredAmount: moneyString.nullable(),
+    declaredAt: isoDateTime.nullable(),
+    status: reconciliationStatusSchema.nullable(),
+    note: z.string().nullable(),
+    variance: signedMoneyString.nullable(),
+    flag: cashQueueFlagSchema,
+  })
+  .strict();
+
+/**
+ * `from`/`to` are inclusive; when both are absent the service applies the
+ * default — the last 14 days ending *yesterday*, because today's figures
+ * are not final (a synced-late completion shows `no_expected_cash` until
+ * its day drains). Today is reachable only by passing `to` explicitly,
+ * and the response carries `today` so the client can caption those rows
+ * "still syncing" instead of letting the flags lie.
+ */
+export const cashQueueQuerySchema = z
+  .object({
+    from: businessDateSchema.optional(),
+    to: businessDateSchema.optional(),
+    /** Repeated keys (`flag=a&flag=b`) arrive as an array; one as a string. */
+    flag: z.union([cashQueueFlagSchema, z.array(cashQueueFlagSchema)]).optional(),
+    role: declaringRoleSchema.optional(),
+  })
+  .transform((q) => ({
+    from: q.from,
+    to: q.to,
+    flags: q.flag === undefined ? undefined : Array.isArray(q.flag) ? q.flag : [q.flag],
+    role: q.role,
+  }));
+
+export const cashQueueResponseSchema = z
+  .object({
+    today: businessDateSchema,
+    from: businessDateSchema,
+    to: businessDateSchema,
+    rows: z.array(cashQueueRowSchema),
+  })
+  .strict();
+
+export const cashConfirmRequestSchema = z
+  .object({
+    /** May differ from the declaration on purpose (§10 test line): both figures are stored. */
+    confirmedAmount: moneyString,
+  })
+  .strict();
+
+export const cashDisputeRequestSchema = z
+  .object({
+    /** Trimmed before the length check: whitespace-only is without a note. */
+    ownerNote: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+
+export const cashReopenRequestSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+
+export type CashQueueRow = z.infer<typeof cashQueueRowSchema>;
+export type CashQueueQuery = z.output<typeof cashQueueQuerySchema>;
+export type CashQueueResponse = z.infer<typeof cashQueueResponseSchema>;
+export type CashConfirmRequest = z.infer<typeof cashConfirmRequestSchema>;
+export type CashDisputeRequest = z.infer<typeof cashDisputeRequestSchema>;
+export type CashReopenRequest = z.infer<typeof cashReopenRequestSchema>;
 
 // ── devices (§8) ────────────────────────────────────────────────────────────
 
@@ -1411,18 +1525,6 @@ export const PaymentSchema = z
 export type PaymentRecord = z.infer<typeof PaymentSchema>;
 
 // ── ledger and balances (§3.5 data model, §11, UI/plan-2 06-SALES-REP.md §S4) ──
-
-/**
- * Money that may be negative — the ledger and the balance views deal in
- * signed figures. A sale is positive and a payment negative (§S4's
- * `+ ₹16,800 / − ₹40,000`), and an overpayment leaves a company's balance
- * negative on purpose: a credit is a real state and good news, rendered by
- * the UI as "Credit", never as a minus in red. The plain `moneyString`
- * above stays unsigned — it types document amounts as entered.
- */
-export const signedMoneyString = z
-  .string()
-  .regex(/^-?\d+(\.\d{1,2})?$/, 'signed decimal amount as a string, e.g. "1234.50" or "-800.00"');
 
 /** What a ledger row is a document of — a sale or a payment (§S4's ledger). */
 export const ledgerEntryKindSchema = z.enum(['sale', 'payment']);

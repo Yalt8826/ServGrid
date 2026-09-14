@@ -3,24 +3,32 @@ import type { ZodTypeAny } from 'zod';
 import {
   CashHandoverSchema,
   cashAmendRequestSchema,
+  cashConfirmRequestSchema,
   cashDeclareRequestSchema,
+  cashDisputeRequestSchema,
   cashHandoverListResponseSchema,
+  cashQueueQuerySchema,
+  cashQueueResponseSchema,
+  cashQueueRowSchema,
+  cashReopenRequestSchema,
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
-import { salesRepCashEnabled } from '../flags/gates.js';
+import { ownerCashEnabled, salesRepCashEnabled } from '../flags/gates.js';
 import { createCashService } from './service.js';
 
 /**
- * Cash handover routes (PLAN-BACKEND.md §10, PHASE-1-TECHNICIAN.md T1.11):
- * `POST /v1/cash/handovers`, `PATCH /v1/cash/handovers/:id`,
- * `GET /v1/cash/handovers/me`. The owner's half of the module — the queue,
- * confirm, dispute, reopen — is Phase 4; until then these rows are written
- * and read by their declarer alone, because the old process remains the
- * record of truth during parallel run.
+ * Cash handover routes (PLAN-BACKEND.md §10): the employee's half
+ * (PHASE-1-TECHNICIAN.md T1.11) — `POST /v1/cash/handovers`,
+ * `PATCH /v1/cash/handovers/:id`, `GET /v1/cash/handovers/me` — and the
+ * owner's half (PHASE-4-OWNER.md T4.2) — `GET /v1/cash/queue` over
+ * `v_cash_reconciliation_queue` plus `POST /v1/cash/handovers/:id/
+ * confirm|dispute|reopen`. Until the owner's half lit in Phase 4 these
+ * rows were written and read by their declarer alone, because the old
+ * process remained the record of truth during parallel run.
  *
- * Gates come from the shared matrix (`cash.declare`, T0.10): a technician
- * or sales rep declares and amends `own`; the owner reads all yet his
+ * Gates come from the shared matrix (T0.10): a technician or sales rep
+ * declares and amends `own` (`cash.declare`); the owner reads all yet his
  * create/update cells are `none` — he confirms and reopens, he does not
  * declare (§5); a dispatcher has no cash cell at all. `own` itself is
  * enforced on the row and off the token: POST stamps the actor's id, /me
@@ -33,9 +41,15 @@ import { createCashService } from './service.js';
  * exactly as lit. No new endpoint and no new screen — the rep declares on
  * the technician's routes, and the flag decides whether his half answers.
  *
- * Responses are the narrow employee shape (`CashHandoverSchema`), asserted
- * per response by the errors plugin (§3.4): strict, and with no
- * `expected_cash` key — the "If it fails" clause of T1.11.
+ * The owner's half rides `owner.cash` (T4.2) the same way, asked of every
+ * caller: flipping it off darkens the queue and its three actions for
+ * everyone, which is that surface's T0 rollback.
+ *
+ * Responses are the narrow employee shape (`CashHandoverSchema`) on the
+ * employee's endpoints — strict, and with no `expected_cash` key, the
+ * "If it fails" clause of T1.11 — and the queue row (`cashQueueRowSchema`)
+ * on the owner's, where the derived figure beside the declared one is the
+ * entire feature.
  */
 
 /** Strict zod objects do not fit Fastify's config intersection without
@@ -128,6 +142,81 @@ export const cashRoutes: FastifyPluginAsync = async (app) => {
       const ifMatch = ifMatchVersion(request);
       const body = cashAmendRequestSchema.parse(request.body);
       return service.amend({ id: auth.sub }, handoverIdParam(request), ifMatch, body);
+    },
+  );
+
+  // ── the owner's half (Phase 4, T4.2, §10) ─────────────────────────────────
+  //
+  // The gate order is matrix-first, the `/v1/sales/:id/void` shape: the
+  // matrix cell (`cash.confirm` — owner all, everyone else none) says who
+  // may ever reconcile, and the `owner.cash` flag says whether the surface
+  // is lit at all. Flipping the flag off is T4.2's T0 rollback; it darkens
+  // the queue and all three actions for everyone, which is the point.
+
+  /**
+   * `flag` may arrive as repeated keys or `flag[]`-style (`flag[]=a`);
+   * both normalize to one array before the schema sees it, the same
+   * liberal-reading `employeeListQuerySchema` gives `role`.
+   */
+  function queueQueryOf(request: FastifyRequest): unknown {
+    const raw = { ...((request.query as Record<string, unknown> | undefined) ?? {}) };
+    const bracketed = raw['flag[]'];
+    if (bracketed !== undefined) {
+      const asArray = (v: unknown): string[] => (Array.isArray(v) ? v : v === undefined ? [] : [v]);
+      raw.flag = [...asArray(raw.flag), ...asArray(bracketed)];
+      delete raw['flag[]'];
+    }
+    return raw;
+  }
+
+  app.get(
+    '/v1/cash/queue',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('cash.confirm', 'read'), ownerCashEnabled],
+      config: { responseSchema: asResponseSchema(cashQueueResponseSchema) },
+    },
+    async (request) => {
+      const filters = cashQueueQuerySchema.parse(queueQueryOf(request));
+      return service.queue(filters);
+    },
+  );
+
+  app.post(
+    '/v1/cash/handovers/:id/confirm',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('cash.confirm', 'update'), ownerCashEnabled],
+      config: { responseSchema: asResponseSchema(cashQueueRowSchema) },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = cashConfirmRequestSchema.parse(request.body);
+      return service.confirm({ id: auth.sub }, handoverIdParam(request), body);
+    },
+  );
+
+  app.post(
+    '/v1/cash/handovers/:id/dispute',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('cash.confirm', 'update'), ownerCashEnabled],
+      config: { responseSchema: asResponseSchema(cashQueueRowSchema) },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = cashDisputeRequestSchema.parse(request.body);
+      return service.dispute({ id: auth.sub }, handoverIdParam(request), body);
+    },
+  );
+
+  app.post(
+    '/v1/cash/handovers/:id/reopen',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('cash.confirm', 'update'), ownerCashEnabled],
+      config: { responseSchema: asResponseSchema(cashQueueRowSchema) },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = cashReopenRequestSchema.parse(request.body);
+      return service.reopen({ id: auth.sub }, handoverIdParam(request), body);
     },
   );
 };
