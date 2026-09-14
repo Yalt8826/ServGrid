@@ -6,13 +6,14 @@ import type { Db } from '../auth/repo.js';
  * or the transaction client of a caller's `withTransaction`, the same rule
  * the other repos run under.
  *
- * The queries read the `cash_reconciliations` TABLE and only the
- * declaration-side columns (§3.7: only the declaration is stored; what he
- * *should* have handed over is derived — the queue view is the owner's,
- * Phase 4). No join to `v_cash_reconciliation_queue` exists here, so the
- * employee-facing response cannot leak `expected_cash` by construction —
- * T1.11's test asserts the key's absence on the serialised body, and this
- * column list is why it never appears in the first place.
+ * The EMPLOYEE-facing queries read the `cash_reconciliations` TABLE and
+ * only the declaration-side columns (§3.7: only the declaration is
+ * stored; what he *should* have handed over is derived). That split is
+ * what keeps `expected_cash` out of his responses by construction —
+ * T1.11's test asserts the key's absence on the serialised body. The
+ * owner's half (Phase 4, T4.2, below) is where the split ends: the queue
+ * reads `v_cash_reconciliation_queue`, whose whole point is the derived
+ * figure beside the declared one.
  */
 
 /** `reconciliation_status` (migration 002), as pg returns it. */
@@ -82,6 +83,24 @@ export async function insertDeclaration(db: Db, input: DeclarationInsert): Promi
 export async function lockById(db: Db, id: string): Promise<HandoverRow | null> {
   const r = await db.query<HandoverRow>(
     `SELECT ${HANDOVER_COLUMNS} FROM cash_reconciliations WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** The row as a reopen finds it, carrying the sign-off figures the audit
+ * row must preserve. Same `FOR UPDATE` lock — a concurrent confirm and
+ * reopen serialise here, so `previousStatus` cannot go stale between the
+ * check and the reversal. */
+export interface ReopenLock extends HandoverRow {
+  confirmed_amount: string | null;
+  owner_note: string | null;
+}
+
+export async function lockForReopen(db: Db, id: string): Promise<ReopenLock | null> {
+  const r = await db.query<ReopenLock>(
+    `SELECT ${HANDOVER_COLUMNS}, confirmed_amount::text AS confirmed_amount, owner_note
+     FROM cash_reconciliations WHERE id = $1 FOR UPDATE`,
     [id],
   );
   return r.rows[0] ?? null;
@@ -165,6 +184,224 @@ export async function insertAmendmentAudit(
         businessDate: e.businessDate,
         previousAmount: e.previousAmount,
         declaredAmount: e.declaredAmount,
+      }),
+    ],
+  );
+}
+
+// ── the owner's half (Phase 4, T4.2) ────────────────────────────────────────
+
+/** The flag `v_cash_reconciliation_queue` emits (PLAN-DATA-MODEL.md §4). */
+export type QueueFlag = 'missing_submission' | 'no_expected_cash' | 'variance' | 'match';
+
+/**
+ * One row of the owner's queue as SQL returns it. Money and the date are
+ * cast to text in SQL for the same reasons `HandoverRow` is — and
+ * `variance` is signed (negative = short), which `moneyString` on the
+ * wire would refuse.
+ *
+ * `declaration_id` is the `cash_reconciliations.id` the confirm/dispute/
+ * reopen actions name. The view does not carry it, so the query LEFT
+ * JOINs the table on the unique (employee, business_date) pair — LEFT,
+ * because a `missing_submission` day has no declaration row, and dropping
+ * that join's null side is exactly the defect the FULL OUTER JOIN exists
+ * to prevent.
+ */
+export interface QueueRow {
+  declaration_id: string | null;
+  employee_id: string;
+  employee_name: string;
+  role: 'owner' | 'dispatcher' | 'technician' | 'sales_rep';
+  business_date: string;
+  expected_cash: string | null;
+  declared_amount: string | null;
+  declared_at: Date | null;
+  declaration_status: ReconciliationStatus | null;
+  employee_note: string | null;
+  variance: string | null;
+  flag: QueueFlag;
+}
+
+export interface QueueFilters {
+  from: string;
+  to: string;
+  flags?: QueueFlag[];
+  role?: 'technician' | 'sales_rep';
+}
+
+/** The queue's column list, shared by the range scan and the single-row read-back. */
+const QUEUE_COLUMNS = `cr.id AS declaration_id,
+  q.employee_id, q.employee_name, e.role,
+  q.business_date::text AS business_date,
+  q.expected_cash::text AS expected_cash,
+  q.declared_amount::text AS declared_amount,
+  q.declared_at, q.declaration_status, q.employee_note,
+  q.variance::text AS variance, q.flag`;
+
+/** The view LEFT JOINed back to the declaration table (see `QueueRow`). */
+const QUEUE_FROM = `FROM v_cash_reconciliation_queue q
+  JOIN employees e ON e.id = q.employee_id
+  LEFT JOIN cash_reconciliations cr
+    ON cr.employee_id = q.employee_id
+   AND cr.business_date = q.business_date`;
+
+/**
+ * The queue read (§10 GET /v1/cash/queue). The date range drives the WHERE
+ * clause and the FULL OUTER JOIN inside the view supplies the rows —
+ * including `missing_submission` days that exist on the expected-cash side
+ * alone. Filtering on anything declaration-shaped here (status, declared_at)
+ * is the "If it fails" clause of the brief: it would silently hide the one
+ * row the feature exists to catch.
+ *
+ * Order: `missing_submission` first regardless of date, then newest day,
+ * then name — the scan order the owner's morning is.
+ */
+export async function queueRows(db: Db, f: QueueFilters): Promise<QueueRow[]> {
+  const conditions = ['q.business_date BETWEEN $1 AND $2'];
+  const values: unknown[] = [f.from, f.to];
+  if (f.flags !== undefined) {
+    values.push(f.flags);
+    conditions.push(`q.flag = ANY($${values.length}::text[])`);
+  }
+  if (f.role !== undefined) {
+    values.push(f.role);
+    conditions.push(`e.role = $${values.length}`);
+  }
+  const r = await db.query<QueueRow>(
+    `SELECT ${QUEUE_COLUMNS}
+     ${QUEUE_FROM}
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY (q.flag = 'missing_submission') DESC, q.business_date DESC, q.employee_name ASC`,
+    values,
+  );
+  return r.rows;
+}
+
+/**
+ * The queue row for one declaration's (employee, business_date), read back
+ * after confirm/dispute/reopen so the owner's screen gets the refreshed
+ * figures — the flag and variance recompute in the view, not here.
+ */
+export async function queueRowFor(
+  db: Db,
+  employeeId: string,
+  businessDate: string,
+): Promise<QueueRow | null> {
+  const r = await db.query<QueueRow>(
+    `SELECT ${QUEUE_COLUMNS}
+     ${QUEUE_FROM}
+     WHERE q.employee_id = $1 AND q.business_date = $2::date`,
+    [employeeId, businessDate],
+  );
+  return r.rows[0] ?? null;
+}
+
+/**
+ * The default range (T4.2): today, yesterday (the default `to`), and 14
+ * days before yesterday (the default `from`) — computed from
+ * `business_date(now())`, the same IST definition everything else in the
+ * module leans on, never the server's local clock.
+ */
+export async function queueDateDefaults(db: Db): Promise<{ today: string; to: string; from: string }> {
+  const r = await db.query<{ today: string; to: string; from: string }>(
+    `SELECT business_date(now())::text AS today,
+            (business_date(now()) - 1)::text AS "to",
+            (business_date(now()) - 14)::text AS "from"`,
+  );
+  return r.rows[0]!;
+}
+
+/** Confirm (§10): status → confirmed, the owner's figure, who and when. */
+export async function confirmDeclaration(
+  db: Db,
+  id: string,
+  confirmedAmount: string,
+  actorId: string,
+): Promise<HandoverRow> {
+  const r = await db.query<HandoverRow>(
+    `UPDATE cash_reconciliations
+     SET status = 'confirmed', confirmed_amount = $2::numeric,
+         confirmed_by = $3, confirmed_at = now()
+     WHERE id = $1
+     RETURNING ${HANDOVER_COLUMNS}`,
+    [id, confirmedAmount, actorId],
+  );
+  return r.rows[0]!;
+}
+
+/** Dispute (§10): status → disputed, the note the DB CHECK demands, who and when. */
+export async function disputeDeclaration(
+  db: Db,
+  id: string,
+  ownerNote: string,
+  actorId: string,
+): Promise<HandoverRow> {
+  const r = await db.query<HandoverRow>(
+    `UPDATE cash_reconciliations
+     SET status = 'disputed', owner_note = $2, confirmed_by = $3, confirmed_at = now()
+     WHERE id = $1
+     RETURNING ${HANDOVER_COLUMNS}`,
+    [id, ownerNote, actorId],
+  );
+  return r.rows[0]!;
+}
+
+/**
+ * Reopen (§10): returns the row to submitted — the CHECK
+ * `cash_submitted_means_unanswered` forces the confirmation timestamp out
+ * with the status, and the sign-off's figures go with it. The reversal
+ * itself is kept on the row (reopened_at/by/reason) and in the audit
+ * trail, so undoing a sign-off never means losing what it said.
+ */
+export async function reopenDeclaration(
+  db: Db,
+  id: string,
+  actorId: string,
+  reason: string,
+): Promise<HandoverRow> {
+  const r = await db.query<HandoverRow>(
+    `UPDATE cash_reconciliations
+     SET status = 'submitted', confirmed_amount = NULL, confirmed_at = NULL,
+         owner_note = NULL, reopened_at = now(), reopened_by = $2, reopen_reason = $3
+     WHERE id = $1
+     RETURNING ${HANDOVER_COLUMNS}`,
+    [id, actorId, reason],
+  );
+  return r.rows[0]!;
+}
+
+/**
+ * The audit row the reopen is required to carry (§10: owner only, reason
+ * required, audited). Same transaction as the reversal — a rolled-back
+ * reopen leaves no trace, a committed one leaves both the decision and
+ * what it reversed.
+ */
+export async function insertReopenAudit(
+  db: Db,
+  e: {
+    handoverId: string;
+    employeeId: string;
+    actorId: string;
+    businessDate: string;
+    previousStatus: ReconciliationStatus;
+    confirmedAmount: string | null;
+    ownerNote: string | null;
+    reason: string;
+  },
+): Promise<void> {
+  await db.query(
+    `INSERT INTO audit_log (action, employee_id, actor, details)
+     VALUES ('cash.reconciliation.reopened', $1, $2, $3::jsonb)`,
+    [
+      e.employeeId,
+      e.actorId,
+      JSON.stringify({
+        handoverId: e.handoverId,
+        businessDate: e.businessDate,
+        previousStatus: e.previousStatus,
+        confirmedAmount: e.confirmedAmount,
+        ownerNote: e.ownerNote,
+        reason: e.reason,
       }),
     ],
   );

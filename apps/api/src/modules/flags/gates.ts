@@ -99,3 +99,24 @@ export async function salesPaymentsEnabled(request: FastifyRequest): Promise<voi
     throw new AppError('FLAG_DISABLED', SALES_PAYMENTS_DISABLED_MESSAGE);
   }
 }
+
+/**
+ * `owner.cash` — the reconciliation queue and its three actions (PHASE-4-OWNER.md
+ * T4.2): the owner's read of `v_cash_reconciliation_queue`, confirm, dispute,
+ * reopen. The same shape as `sales.cards`: an owner-only surface — nobody else
+ * holds a `cash.confirm` cell — so the gate asks the flag of EVERY caller and
+ * flipping it off darkens the whole surface for everyone on it, which is the
+ * T0 rollback of T4.2. The role door itself stays the matrix gate that runs
+ * BEFORE this one (matrix-first, the `/v1/sales/:id/void` order): the matrix
+ * says who may ever reconcile, the flag says whether the surface is lit at all.
+ */
+export const OWNER_CASH_DISABLED_MESSAGE =
+  'The cash reconciliation queue is switched off for your account.';
+
+export async function ownerCashEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'owner.cash'))) {
+    throw new AppError('FLAG_DISABLED', OWNER_CASH_DISABLED_MESSAGE);
+  }
+}
