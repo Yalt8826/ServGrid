@@ -1174,6 +1174,28 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/cash/queue/day',
+    method: 'GET',
+    url: '/v1/cash/queue/day',
+    // §O2 (T4.9): "View the day" — the completions and payments behind one
+    // row's expected figure. A READ, so the queue read's cell and flag
+    // gate it: the same owner-only answer, and the money it carries (job
+    // amounts) never reaches a dispatcher through it.
+    probe: (actor) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/cash/queue/day?employeeId=${subject.id}&businessDate=2026-01-01`,
+        headers: bearer(actor),
+      }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const body = res.json<{ employeeId: string; completions: unknown[]; cashPayments: unknown[] }>();
+      expect(body.employeeId).toBe(subject.id);
+      expect(Array.isArray(body.completions)).toBe(true);
+      expect(Array.isArray(body.cashPayments)).toBe(true);
+    },
+  },
+  {
     name: 'POST /v1/cash/handovers/:id/confirm',
     method: 'POST',
     url: '/v1/cash/handovers/:id/confirm',

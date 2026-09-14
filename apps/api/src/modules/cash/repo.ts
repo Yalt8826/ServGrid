@@ -370,6 +370,112 @@ export async function reopenDeclaration(
   return r.rows[0]!;
 }
 
+// ── the day behind the expected figure (Phase 4, T4.9, §O2) ─────────────────
+
+/**
+ * "View the day" (UI/plan-2/07-OWNER.md §O2): the completions and cash
+ * payments behind one queue row's expected figure. Both queries restate
+ * exactly one side of `v_employee_expected_cash` (migration 018) for a
+ * single (employee, business_date) — the filters must keep matching the
+ * view's, or the day sheet's totals would not add up to the figure the
+ * queue row shows and the owner would be reading two truths.
+ *
+ * CASH ONLY on both sides, for the reason the view gives: UPI, card,
+ * cheque and transfer land in the company account and never pass through
+ * anyone's hands, so they are not part of what the day's handover should
+ * have contained.
+ */
+
+/** One cash completion, with the job that produced it. */
+export interface DayCompletionRow {
+  job_card_id: string;
+  job_number: string;
+  customer_name: string | null;
+  work_summary: string;
+  amount_collected: string;
+  completed_at: Date;
+}
+
+/** One collected cash payment, with the account it came from. */
+export interface DayPaymentRow {
+  id: string;
+  payment_number: string;
+  company_name: string;
+  amount: string;
+  received_at: Date;
+}
+
+export async function dayCompletions(
+  db: Db,
+  employeeId: string,
+  businessDate: string,
+): Promise<DayCompletionRow[]> {
+  const r = await db.query<DayCompletionRow>(
+    `SELECT jc.job_card_id, j.job_number, c.name AS customer_name, jc.work_summary,
+            jc.amount_collected::text AS amount_collected, jc.completed_at
+     FROM job_completions jc
+     JOIN job_cards j ON j.id = jc.job_card_id
+     JOIN customers c ON c.id = j.customer_id
+     WHERE jc.completed_by = $1 AND jc.business_date = $2::date AND jc.collection_mode = 'cash'
+     ORDER BY jc.completed_at ASC, j.job_number ASC`,
+    [employeeId, businessDate],
+  );
+  return r.rows;
+}
+
+export async function dayCashPayments(
+  db: Db,
+  employeeId: string,
+  businessDate: string,
+): Promise<DayPaymentRow[]> {
+  const r = await db.query<DayPaymentRow>(
+    `SELECT p.id, p.payment_number, co.name AS company_name,
+            p.amount::text AS amount, p.received_at
+     FROM payments p
+     JOIN companies co ON co.id = p.company_id
+     WHERE p.received_by = $1 AND p.business_date = $2::date
+       AND p.mode = 'cash' AND p.status = 'collected'
+     ORDER BY p.received_at ASC, p.payment_number ASC`,
+    [employeeId, businessDate],
+  );
+  return r.rows;
+}
+
+/**
+ * The two side totals, summed in SQL where the decimals live — the same
+ * figures the view's GROUP BY produces, so sheet total and queue row
+ * cannot disagree. Zero (not NULL) when a side is empty: a day made of
+ * completions alone shows a payment total of 0.00, which is a fact, not
+ * an absence.
+ */
+export async function dayTotals(
+  db: Db,
+  employeeId: string,
+  businessDate: string,
+): Promise<{ completionTotal: string; paymentTotal: string }> {
+  const r = await db.query<{ completion_total: string; payment_total: string }>(
+    `SELECT
+       COALESCE((SELECT SUM(amount_collected) FROM job_completions
+                 WHERE completed_by = $1 AND business_date = $2::date AND collection_mode = 'cash'),
+                0::numeric(14,2))::text AS completion_total,
+       COALESCE((SELECT SUM(amount) FROM payments
+                 WHERE received_by = $1 AND business_date = $2::date
+                   AND mode = 'cash' AND status = 'collected'),
+                0::numeric(14,2))::text AS payment_total`,
+    [employeeId, businessDate],
+  );
+  return { completionTotal: r.rows[0]!.completion_total, paymentTotal: r.rows[0]!.payment_total };
+}
+
+/** The employee's display name for the day sheet's header — or null when no such employee. */
+export async function employeeNameOf(db: Db, employeeId: string): Promise<string | null> {
+  const r = await db.query<{ full_name: string }>(
+    `SELECT full_name FROM employees WHERE id = $1`,
+    [employeeId],
+  );
+  return r.rows[0]?.full_name ?? null;
+}
+
 /**
  * The audit row the reopen is required to carry (§10: owner only, reason
  * required, audited). Same transaction as the reversal — a rolled-back

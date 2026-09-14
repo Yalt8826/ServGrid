@@ -12,6 +12,7 @@ import {
   cashQueueRowSchema,
   cashReopenRequestSchema,
 } from '@servgrid/shared';
+import { cashQueueDayQuerySchema, cashQueueDayResponseSchema } from './schemas.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
 import { ownerCashEnabled, salesRepCashEnabled } from '../flags/gates.js';
@@ -178,6 +179,21 @@ export const cashRoutes: FastifyPluginAsync = async (app) => {
     async (request) => {
       const filters = cashQueueQuerySchema.parse(queueQueryOf(request));
       return service.queue(filters);
+    },
+  );
+
+  // "View the day" (§O2, T4.9) — the completions and payments behind one
+  // row's expected figure. Same gate as the queue read (a read, not an
+  // action), and module-local schemas: the shape serves the one screen.
+  app.get(
+    '/v1/cash/queue/day',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('cash.confirm', 'read'), ownerCashEnabled],
+      config: { responseSchema: asResponseSchema(cashQueueDayResponseSchema) },
+    },
+    async (request) => {
+      const query = cashQueueDayQuerySchema.parse(request.query ?? {});
+      return service.day(query.employeeId, query.businessDate);
     },
   );
 
