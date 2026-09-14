@@ -277,6 +277,94 @@ export type JobCardOwner = z.infer<typeof JobCardOwnerSchema>;
 export type JobStackChange = z.infer<typeof jobStackChangeSchema>;
 export type JobCompletionPart = z.infer<typeof jobCompletionPartSchema>;
 
+// ── job timeline (§6.3 GET /v1/jobs/:id/events, UI/plan-2/07-OWNER.md §O4) ──
+
+/**
+ * One `job_events` row as the timeline read returns it. The payload is
+ * the event's own JSON — for a `completion_amended` event that is the
+ * money's before/after pair, which is exactly why the DISPATCHER shape
+ * below is a different response schema: his walk of the endpoint must
+ * never carry those keys (the money-leak suite holds the line).
+ */
+export const JobTimelineEventSchema = z
+  .object({
+    id: z.number().int(),
+    eventType: z.string(),
+    actorId: uuid,
+    /** The actor's name, joined for the timeline's "who do I ask" — null only for a deleted account. */
+    actorName: z.string().nullable(),
+    occurredAt: isoDateTime,
+    /** Null for an event that is not a status move. */
+    fromStatus: jobStatusSchema.nullable(),
+    toStatus: jobStatusSchema.nullable(),
+    source: z.enum(['mobile', 'web', 'system']),
+    payload: z.unknown().optional(),
+  })
+  .strict();
+export type JobTimelineEvent = z.infer<typeof JobTimelineEventSchema>;
+
+/**
+ * The dispatcher's timeline: the events and nothing else — no completion
+ * block, and payloads that could carry money history arrive redacted by
+ * the service. The strict schema is the second gate; the walk is the third.
+ */
+export const jobTimelineDispatcherResponseSchema = z
+  .object({ events: z.array(JobTimelineEventSchema) })
+  .strict();
+export type JobTimelineDispatcherResponse = z.infer<typeof jobTimelineDispatcherResponseSchema>;
+
+/**
+ * One fitted part (§6.2 step 6): a record, never a bill — `unitCost` is
+ * nullable exactly because the technician may not have known it. `name`
+ * is the catalogue name, or the technician's free text for off-catalogue
+ * kit. `quantity` is numeric and crosses as a decimal string like money.
+ */
+export const JobCompletionPartRowSchema = z
+  .object({
+    lineNo: z.number().int().min(1),
+    name: z.string(),
+    quantity: moneyString,
+    unitCost: moneyString.nullable(),
+    serialNumber: z.string().nullable(),
+    fromCustomerStock: z.boolean(),
+  })
+  .strict();
+export type JobCompletionPartRow = z.infer<typeof JobCompletionPartRowSchema>;
+
+/**
+ * The filed completion as the owner's job detail reads it — the figures
+ * the amend sheet corrects, plus the parts fitted. Absent when the job
+ * was never completed.
+ */
+export const JobCompletionDetailSchema = z
+  .object({
+    completedAt: isoDateTime,
+    workSummary: z.string(),
+    cost: moneyString.nullable(),
+    discountAmount: moneyString.nullable(),
+    discountReason: z.string().nullable(),
+    amountCollected: moneyString.nullable(),
+    collectionMode: z.enum(['cash', 'upi', 'card', 'bank_transfer', 'none']).nullable(),
+    parts: z.array(JobCompletionPartRowSchema),
+  })
+  .strict();
+export type JobCompletionDetail = z.infer<typeof JobCompletionDetailSchema>;
+
+/**
+ * The owner's timeline read (§O4: "the full `job_events` timeline, the
+ * completion with its figures, parts fitted"): events with full payloads,
+ * plus the completion. The dispatcher's shape is deliberately NOT this
+ * with fields hidden — it is the smaller schema above, the §6.3 rule
+ * that an optional field is a field that can leak.
+ */
+export const jobTimelineOwnerResponseSchema = z
+  .object({
+    events: z.array(JobTimelineEventSchema),
+    completion: JobCompletionDetailSchema.nullable(),
+  })
+  .strict();
+export type JobTimelineOwnerResponse = z.infer<typeof jobTimelineOwnerResponseSchema>;
+
 // ── assignment (§6.3): bulk results and the technician-load picker ──────────
 
 /**

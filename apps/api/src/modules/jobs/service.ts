@@ -5,7 +5,10 @@ import {
   type JobCardOwner,
   type JobCardTechnician,
   type JobCompletionAmendRequest,
+  type JobTimelineEvent,
   type JobStatus,
+  type JobTimelineDispatcherResponse,
+  type JobTimelineOwnerResponse,
   type Role,
   type TechnicianLoad,
 } from '@servgrid/shared';
@@ -81,6 +84,8 @@ export const RESCHEDULE_ACTORS_MESSAGE =
 export const ASSIGN_ACTORS_MESSAGE = 'A job is assigned by the office — the dispatcher or the owner.';
 /** T2.7 (§D1): the summary figures are an all-rows console read — "dispatcher, owner"; a technician's `assigned` scope counts his own day, not the desk's. */
 export const SUMMARY_ACTORS_MESSAGE = 'The dashboard figures are read by the office — the field app has its own screens.';
+/** §6.3: the timeline is "dispatcher, owner" — the technician reads his own trail from the mirror; a rep holds no job read at all. */
+export const TIMELINE_ACTORS_MESSAGE = 'The job timeline is read by the office — the field app reads its own mirror.';
 /** §6.3: the picker names a technician; anything else on that cell is a form error, not a 404. */
 const NOT_A_TECHNICIAN_MESSAGE = 'Pick a technician from the roster — that account is not an active technician.';
 /** §6.3: a stale version on a job with nobody on it has no name to give — the sentence stays actionable anyway. */
@@ -417,6 +422,93 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
       throw new AppError('OUT_OF_SCOPE', OUT_OF_SCOPE_MESSAGE);
     }
     return toCard(variant, row);
+  }
+
+  /**
+   * GET /v1/jobs/:id/events (§6.3 "dispatcher, owner"; §O4's detail) —
+   * the full `job_events` timeline, and for the owner the filed
+   * completion with its parts. Two shapes by role, as everywhere:
+   *
+   * - **owner** — every event with its payload (the `completion_amended`
+   *   before/after pair is the money's audit trail and the owner is its
+   *   reader), plus the completion block the detail and amend sheet render.
+   * - **dispatcher** — the events, with money-bearing payloads REDACTED
+   *   and no completion block. The money-leak walk holds this endpoint
+   *   like every dispatcher-reachable one, so the redaction happens here
+   *   in the service, not in a schema someone could forget to attach.
+   *
+   * The dispatcher's existence check runs against the view (§5 rule 2)
+   * before anything else is read, so a missing job is 404 in the same
+   * shape `getJobCard` answers with.
+   */
+  async function jobTimeline(
+    actor: Actor,
+    jobId: string,
+  ): Promise<JobTimelineDispatcherResponse | JobTimelineOwnerResponse> {
+    if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+      throw new AppError('FORBIDDEN', TIMELINE_ACTORS_MESSAGE);
+    }
+
+    const eventOf = (row: repo.TimelineEventRow, redactPayload: boolean): JobTimelineEvent => ({
+      // pg hands bigint back as a string; the domain type (§domain.ts
+      // JobEvent) is `number`, and an event id is far inside Number's
+      // exact range.
+      id: Number(row.id),
+      eventType: row.event_type,
+      actorId: row.actor_id,
+      actorName: row.actor_name,
+      occurredAt: row.occurred_at.toISOString(),
+      fromStatus: row.from_status,
+      toStatus: row.to_status,
+      source: row.source,
+      ...(redactPayload && row.event_type === 'completion_amended'
+        ? { payload: { redacted: 'completion figures — owner access' } }
+        : row.payload === null
+          ? {}
+          : { payload: row.payload }),
+    });
+
+    if (actor.role === 'dispatcher') {
+      const card = await dispatcherRepo.findDispatcherCard(getPool(), jobId);
+      if (card === null) {
+        throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+      }
+      const rows = await repo.listTimelineEvents(getPool(), jobId);
+      return { events: rows.map((row) => eventOf(row, true)) };
+    }
+
+    const card = await repo.findCard(getPool(), 'owner', jobId);
+    if (card === null) {
+      throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+    }
+    const [eventRows, completion, partRows] = await Promise.all([
+      repo.listTimelineEvents(getPool(), jobId),
+      repo.findCompletionDetail(getPool(), jobId),
+      repo.listCompletionParts(getPool(), jobId),
+    ]);
+    return {
+      events: eventRows.map((row) => eventOf(row, false)),
+      completion:
+        completion === null
+          ? null
+          : {
+              completedAt: completion.completed_at.toISOString(),
+              workSummary: completion.work_summary,
+              cost: completion.cost,
+              discountAmount: completion.discount_amount,
+              discountReason: completion.discount_reason,
+              amountCollected: completion.amount_collected,
+              collectionMode: completion.collection_mode,
+              parts: partRows.map((p) => ({
+                lineNo: p.line_no,
+                name: p.name ?? 'unnamed part',
+                quantity: p.quantity,
+                unitCost: p.unit_cost,
+                serialNumber: p.serial_number,
+                fromCustomerStock: p.from_customer_stock,
+              })),
+            },
+    };
   }
 
   /**
@@ -919,7 +1011,7 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
     };
   }
 
-  return { listJobs, getJobCard, changeStatus, completeJob, amendCompletion, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
+  return { listJobs, getJobCard, jobTimeline, changeStatus, completeJob, amendCompletion, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
 }
 
 // ── completion (§6.2) ───────────────────────────────────────────────────────

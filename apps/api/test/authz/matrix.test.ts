@@ -583,6 +583,22 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/jobs/:id/events',
+    method: 'GET',
+    url: '/v1/jobs/:id/events',
+    // The timeline (§6.3, T4.11): "dispatcher, owner" like the summary —
+    // a technician reads his trail from his mirror, a sales rep holds no
+    // job read at all. The dispatcher's answer is the SMALLER schema (no
+    // completion block), so the probe asserts its absence by role.
+    probe: (actor) => app.inject({ method: 'GET', url: `/v1/jobs/${matrixJobId}/events`, headers: bearer(actor) }),
+    expect: { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (actor, res) => {
+      const body = res.json<{ events: unknown[]; completion?: unknown }>();
+      expect(Array.isArray(body.events)).toBe(true);
+      if (actor === 'dispatcher') expect(body).not.toHaveProperty('completion');
+    },
+  },
+  {
     name: 'GET /v1/jobs/summary',
     method: 'GET',
     url: '/v1/jobs/summary',

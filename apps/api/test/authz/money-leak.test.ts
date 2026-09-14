@@ -128,6 +128,9 @@ const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   // T2.7: the dashboard figures — same view, counted server-side.
   { method: 'GET', url: '/v1/jobs/summary' },
   { method: 'GET', url: '/v1/jobs/:id' },
+  // T4.11: the timeline (§6.3) — events only for a dispatcher, with
+  // money-bearing payloads redacted in the service; walked below.
+  { method: 'GET', url: '/v1/jobs/:id/events' },
   { method: 'POST', url: '/v1/jobs/:id/cancel' },
   { method: 'PATCH', url: '/v1/jobs/:id' },
   // T2.3: assignment, bulk reassign and the picker.
@@ -597,6 +600,33 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     expect(hits, `money keys leaked on the stack read: ${hits.join(', ')}`).toEqual([]);
   });
 
+  it('GET /v1/jobs/:id/events — the timeline, with the amended event money payload redacted', async () => {
+    // The trail carries a `completion_amended` event whose stored payload
+    // is the money's before/after pair — the one event type that would
+    // leak by name (`cost`, `discountAmount`) if the redaction slipped.
+    await db.query(
+      `INSERT INTO job_events (job_card_id, event_type, actor_id, occurred_at, from_status, to_status, source, payload)
+       VALUES ($1, 'completion_amended', $2, $3, 'completed', 'completed', 'web', $4::jsonb)`,
+      [doneJobId, techId, new Date().toISOString(), JSON.stringify({ reason: 'typo', cost: { from: '5000.00', to: '500.00' } })],
+    );
+    const res = await app.inject({ method: 'GET', url: `/v1/jobs/${doneJobId}/events`, headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body.events) && body.events.length > 0, 'the fixture trail is non-empty').toBe(true);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits);
+    expect(hits, `money keys leaked in the timeline: ${hits.join(', ')}`).toEqual([]);
+    // The completion block is the owner's alone — not a hidden field on
+    // the dispatcher's shape, and not this schema at all.
+    expect(body).not.toHaveProperty('completion');
+    // The amended event's payload is visibly redacted, not silently empty.
+    const amended = body.events.find((e: { eventType: string }) => e.eventType === 'completion_amended');
+    expect(amended).toBeDefined();
+    expect(JSON.stringify(amended.payload)).not.toContain('5000.00');
+    expect(amended.payload).toMatchObject({ redacted: expect.any(String) });
+  });
+
   it('the fixture is self-proving: the OWNER reads the money the dispatcher must not', async () => {
     const res = await app.inject({ method: 'GET', url: `/v1/jobs/${doneJobId}`, headers: bearer(OWNER) });
     expect(res.statusCode, res.body).toBe(200);
@@ -607,6 +637,22 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     expect(body.cost).toBe('14500.00');
     expect(body.discountAmount).toBe('1500.00');
     expect(body.collectionMode).toBe('cash');
+
+    // The owner's timeline read carries the FULL trail: the amended
+    // event's money before/after pair — the payload the dispatcher's
+    // walk saw redacted — and the completion with its figures.
+    const ownerTimeline = await app.inject({
+      method: 'GET',
+      url: `/v1/jobs/${doneJobId}/events`,
+      headers: bearer(OWNER),
+    });
+    expect(ownerTimeline.statusCode, ownerTimeline.body).toBe(200);
+    const timeline = JSON.parse(ownerTimeline.body);
+    const amendedOwner = timeline.events.find((e: { eventType: string }) => e.eventType === 'completion_amended');
+    expect(amendedOwner.payload.cost).toEqual({ from: '5000.00', to: '500.00' });
+    expect(timeline.completion).not.toBeNull();
+    expect(timeline.completion.cost).toBe('14500.00');
+    expect(Array.isArray(timeline.completion.parts)).toBe(true);
   });
 
   it('an error envelope carries no money either', async () => {

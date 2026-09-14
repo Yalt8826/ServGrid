@@ -1,20 +1,18 @@
 /**
- * Job detail route (UI/plan-2/04-TECHNICIAN.md §T3, T1.18). The seam
- * where the pure `JobDetailScreen` meets the mirror and the session —
- * `useTechnicianMirror` owns the plumbing, the screen owns the pixels,
- * exactly like the dashboard and jobs routes.
+ * Job detail route (UI/plan-2/04-TECHNICIAN.md §T3, T1.18; the owner's
+ * copy §O4, T4.11). Role split:
  *
- * Role- and flag-aware like them: the `tech.jobs` flag keeps the screen
- * dark until the server turns it on, another role keeps the placeholder
- * until its phases build their own surfaces. Nothing here spins — the
- * mirror is local; an id the mirror does not hold shows the placeholder
- * rather than a fake docket.
+ * - **Technician branch:** the mirror-backed `JobDetailScreen` behind
+ *   `tech.jobs`; an id the mirror does not hold shows the placeholder
+ *   rather than a fake docket.
+ * - **Owner branch (T4.11):** the pushed detail screen — the full
+ *   `job_events` timeline, the completion with its figures and parts,
+ *   and the amend action. The phone frame of the same detail the desk
+ *   table opens as a side pane.
  *
  * The two rejection-banner actions (`PLAN-FRONTEND.md` §5) both end at
  * the drain: this device's only copy is the mirror row, and the delta
- * overwrite IS the office version arriving. The full resolution flow —
- * clearing the kept rejection rows once the technician has judged them —
- * lands with the completion/cancellation rejection UX (T1.19/T1.20).
+ * overwrite IS the office version arriving.
  */
 import { Linking, Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,11 +21,38 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SEMANTIC } from '@servgrid/shared';
 import { JobDetailScreen } from '../../../../src/screens/technician/JobDetailScreen';
 import { useTechJobsFlag, useTechnicianMirror } from '../../../../src/screens/technician/useTechnicianMirror';
+import { OwnerJobDetailBody } from '../../../../src/screens/owner/JobDetailBody';
+import { useOwnerAmendFlag, useOwnerJobCard, useOwnerJobDetail } from '../../../../src/screens/owner/useOwnerJobs';
 import { useSessionStore } from '../../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
+
+function OwnerJobDetailRoute({ jobId }: { jobId: string }): React.ReactNode {
+  const card = useOwnerJobCard(jobId);
+  const detail = useOwnerJobDetail(jobId);
+  const amendFlagOn = useOwnerAmendFlag();
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <OwnerJobDetailBody
+        card={card.card}
+        detail={detail.detail}
+        detailLoading={detail.detailLoading || card.loading}
+        detailError={detail.detailError ?? card.error}
+        amendFlagOn={amendFlagOn}
+        amendBusy={detail.amend.amendBusy}
+        amendError={detail.amend.amendError}
+        reopenBusy={detail.amend.reopenBusy}
+        onAmend={detail.amend.onAmend}
+        onReopen={detail.amend.onReopen}
+        onRetry={detail.reload}
+        testID="owner-job-detail-screen"
+      />
+    </SafeAreaView>
+  );
+}
 
 export default function Screen() {
   const router = useRouter();
@@ -36,6 +61,10 @@ export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   const flag = useTechJobsFlag();
   const deps = useTechnicianMirror(actor);
+
+  if (actor !== null && actor.role === 'owner' && jobId !== undefined) {
+    return <OwnerJobDetailRoute jobId={jobId} />;
+  }
 
   const view = jobId === undefined || deps === null ? null : (deps.views.find((v) => v.job.id === jobId) ?? null);
 
