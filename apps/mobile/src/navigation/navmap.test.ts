@@ -108,7 +108,7 @@ describe('tab counts — technician 4 · dispatcher 3 · sales rep 4 · owner 5'
   const EXPECTED: Record<Role, number> = {
     technician: 4,
     dispatcher: 3,
-    sales_rep: 4,
+    sales_rep: 5,
     owner: 5,
   };
   for (const role of ROLES) {

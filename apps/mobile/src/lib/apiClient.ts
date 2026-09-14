@@ -19,6 +19,7 @@
 import type { TokenStore, StoredSession } from './tokenStore';
 import type { Role, ErrorCode, ErrorEnvelope } from './types';
 import { parseErrorEnvelope } from './types';
+import { resetFeatureFlags } from '../state/featureFlags';
 import { uuid } from './uuid';
 
 export interface ApiClientOptions {
@@ -443,6 +444,12 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         );
       }
       await clearSession();
+      // The cached flags are the SERVER's answer for the user who just
+      // left. Keeping them shows the NEXT user another role's flag
+      // profile (seen on device: tech1's sales flags darkened rep1's
+      // sale form after a user switch), and every rep route reads this
+      // cache first — so it must die with the session.
+      resetFeatureFlags();
     },
   };
 }

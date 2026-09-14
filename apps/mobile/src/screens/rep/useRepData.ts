@@ -14,6 +14,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import * as FileSystem from 'expo-file-system/legacy';
+import { sha256 } from 'js-sha256';
 import * as Network from 'expo-network';
 import type {
   AuthMeResponse,
@@ -575,7 +577,7 @@ export function useRecordPayment(): { pendingRecord: PendingRecord; record: (inp
     if (intentKeyRef.current === null) intentKeyRef.current = await uuid();
     setPendingRecord({ busy: true, error: null });
     try {
-      await apiSend<PaymentRecord>('POST', '/v1/payments', {
+      const payment = await apiSend<PaymentRecord>('POST', '/v1/payments', {
         companyId: input.companyId,
         ...(input.salesCardId !== null ? { salesCardId: input.salesCardId } : {}),
         amount: input.amount,
@@ -583,6 +585,9 @@ export function useRecordPayment(): { pendingRecord: PendingRecord; record: (inp
         ...(input.referenceNo !== null ? { referenceNo: input.referenceNo } : {}),
         receivedAt: new Date().toISOString(),
       }, undefined, { idempotencyKey: intentKeyRef.current });
+      if (input.proofPhotoUri !== null) {
+        await uploadProofPhoto(payment.id, input.proofPhotoUri);
+      }
       intentKeyRef.current = null;
       setPendingRecord({ busy: false, error: null });
     } catch (e) {
@@ -593,4 +598,38 @@ export function useRecordPayment(): { pendingRecord: PendingRecord; record: (inp
   }, []);
 
   return { pendingRecord, record };
+}
+
+/**
+ * The proof photo rides POST /v1/attachments (ownerType `payment`) — the
+ * same immutable attachment row the technician's completion photos use,
+ * and which §S4's read side already scopes to the rep's own collections.
+ * It runs DIRECT after the payment (the rep writes are direct; the
+ * outbox's dependsOn ordering only applies to outboxed parents). A
+ * failure throws after the money is committed: the sheet's intent key
+ * makes the rep's natural re-press replay the SAME payment and retry
+ * only the photo, never a second charge.
+ */
+async function uploadProofPhoto(paymentId: string, fileUri: string): Promise<void> {
+  const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+  // The server verifies sha256 over the file's RAW bytes. expo-crypto's
+  // digestStringAsync UTF-8-encodes its input, which corrupts binary
+  // strings at bytes ≥ 0x80 (found on device: every upload bounced the
+  // checksum), so decode the base64 to real bytes and hash with js-sha256.
+  const checksum = sha256(base64ToBytes(base64));
+  const form = new FormData();
+  form.append('ownerType', 'payment');
+  form.append('ownerId', paymentId);
+  form.append('kind', 'photo');
+  form.append('capturedAt', new Date().toISOString());
+  form.append('fileChecksum', checksum);
+  form.append('file', { uri: fileUri, name: 'proof.jpg', type: 'image/jpeg' } as unknown as Blob);
+  await apiSend<{ id: string }>('POST', '/v1/attachments', form);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }

@@ -49,6 +49,7 @@ function line(overrides: Partial<SaleFormLine> = {}): SaleFormLine {
     productSku: 'UPS-850',
     quantity: '2',
     unitPrice: '8400',
+    discountPct: '',
     serialsOpen: false,
     serials: '',
     ...overrides,

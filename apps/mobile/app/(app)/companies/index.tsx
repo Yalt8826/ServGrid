@@ -30,6 +30,7 @@ function RepCompaniesRoute(): React.ReactNode {
         loading={companies.loading}
         onOpenCompany={(companyId) => router.push(`/companies/${companyId}`)}
         onNewSale={() => router.push('/sales/new')}
+        onNewCompany={() => router.push('/companies/new')}
         onRetry={companies.reload}
       />
     </SafeAreaView>

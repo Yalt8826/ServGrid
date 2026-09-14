@@ -37,6 +37,7 @@ export type NavGroupKey =
   | 'jobs'
   | 'operations'
   | 'sales'
+  | 'companies'
   | 'cash'
   | 'people'
   | 'profile';
@@ -73,7 +74,12 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
     {
       key: 'sales',
       label: 'Sales',
-      routes: ['/sales', '/payments', '/companies', '/contracts', '/contracts/renewals'],
+      routes: ['/sales', '/payments', '/contracts', '/contracts/renewals'],
+    },
+    {
+      key: 'companies',
+      label: 'Companies',
+      routes: ['/companies', '/companies/new'],
     },
     { key: 'cash', label: 'Cash', routes: ['/cash/handover'] },
     { key: 'profile', label: 'Profile', routes: ['/profile'] },
@@ -136,6 +142,7 @@ export const ROUTE_GUARDS: Record<string, RouteGuard> = {
   '/payments/new': { kind: 'matrix', resource: 'payment', action: 'create', landing: ['all', 'own'] },
 
   '/companies': { kind: 'matrix', resource: 'company', action: 'read', landing: ['all', 'own'] },
+  '/companies/new': { kind: 'matrix', resource: 'company', action: 'create', landing: ['all', 'own'] },
 
   '/contracts': { kind: 'matrix', resource: 'contract', action: 'read', landing: ['all', 'own'] },
   '/contracts/new': { kind: 'matrix', resource: 'contract', action: 'create', landing: ['all', 'own'] },
@@ -239,6 +246,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/payments': 'Payments',
   '/payments/new': 'Record payment',
   '/companies': 'Companies',
+  '/companies/new': 'New account',
   '/contracts': 'Contracts',
   '/contracts/new': 'New contract',
   '/contracts/renewals': 'Renewals',

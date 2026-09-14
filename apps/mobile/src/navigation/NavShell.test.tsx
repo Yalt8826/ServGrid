@@ -83,7 +83,7 @@ describe('NavTabBar renders the role group map', () => {
   const LABELS: Record<string, string[]> = {
     technician: ['Dashboard', 'Jobs', 'Cash', 'Profile'],
     dispatcher: ['Dashboard', 'Operations', 'Profile'],
-    sales_rep: ['Dashboard', 'Sales', 'Cash', 'Profile'],
+    sales_rep: ['Dashboard', 'Sales', 'Companies', 'Cash', 'Profile'],
     owner: ['Dashboard', 'Operations', 'Sales', 'People', 'Profile'],
   };
 

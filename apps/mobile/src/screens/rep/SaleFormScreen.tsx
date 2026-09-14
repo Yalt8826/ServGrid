@@ -24,7 +24,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Button, ConfirmDialog, DatePicker, haptic, MoneyField, TextField } from '../../components/ui';
+import { Button, ConfirmDialog, DatePicker, haptic, TextField } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { sumMoney } from './money';
 
@@ -46,9 +46,11 @@ export interface SaleFormLine {
   productId: string | null;
   productName: string;
   productSku: string | null;
-  /** The snapshot price — editable, because negotiated is normal. */
   quantity: string;
+  /** The owner's list price snapshot — the discount comes off THIS. */
   unitPrice: string;
+  /** Percent off list, '' for none. The unit price is computed, never typed. */
+  discountPct: string;
   serialsOpen: boolean;
   serials: string;
 }
@@ -105,6 +107,7 @@ export function lineTotalOf(quantity: string, unitPrice: string): string {
 
 const MONEY_PATTERN = /^\d+(\.\d{1,2})?$/;
 const QUANTITY_PATTERN = /^\d+(\.\d{1,2})?$/;
+const DISCOUNT_PATTERN = /^\d{1,3}(\.\d{1,2})?$/;
 
 export function isValidQuantity(raw: string): boolean {
   const n = Number(raw);
@@ -115,12 +118,31 @@ export function isValidUnitPrice(raw: string): boolean {
   return MONEY_PATTERN.test(raw);
 }
 
-/** A line is complete when its product, quantity and price are real. */
+/** '' means no discount; otherwise a percent between 0 and 100. */
+export function isValidDiscount(raw: string): boolean {
+  if (raw === '') return true;
+  if (!DISCOUNT_PATTERN.test(raw)) return false;
+  return Number(raw) <= 100;
+}
+
+/** The unit price after the rep's discount off list, rounded to paise —
+ * the price the server stores. The rep never types a unit price. */
+export function discountedUnitPriceOf(listPrice: string, discountPct: string): string {
+  if (!isValidUnitPrice(listPrice) || !isValidDiscount(discountPct) || discountPct === '') return listPrice;
+  const paise = Math.round(Number(listPrice) * (100 - Number(discountPct)));
+  const abs = Math.abs(paise);
+  const int = String(Math.floor(abs / 100));
+  const dec = String(abs % 100).padStart(2, '0');
+  return `${int}.${dec}`;
+}
+
+/** A line is complete when its product, quantity and discount are real. */
 export function lineComplete(line: SaleFormLine): boolean {
   return (
     (line.productId !== null || line.productName.trim() !== '') &&
     isValidQuantity(line.quantity) &&
-    isValidUnitPrice(line.unitPrice)
+    isValidUnitPrice(line.unitPrice) &&
+    isValidDiscount(line.discountPct)
   );
 }
 
@@ -129,7 +151,8 @@ export function formComplete(companyId: string | null, lines: readonly SaleFormL
   return companyId !== null && lines.length > 0 && lines.every(lineComplete);
 }
 
-/** The wire items — the snapshots, serials split and trimmed. */
+/** The wire items — the discounted unit price is what the server stores;
+ * the list price lives only in this line's snapshot caption. */
 export function itemsOf(lines: readonly SaleFormLine[]): Array<{
   productId?: string;
   productName: string;
@@ -148,7 +171,7 @@ export function itemsOf(lines: readonly SaleFormLine[]): Array<{
       productName: line.productName,
       ...(line.productSku !== null ? { productSku: line.productSku } : {}),
       quantity: Number(line.quantity),
-      unitPrice: line.unitPrice,
+      unitPrice: discountedUnitPriceOf(line.unitPrice, line.discountPct),
       ...(serials.length > 0 ? { serialNumbers: serials } : {}),
     };
   });
@@ -181,7 +204,10 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
     return (q === '' ? deps.products : deps.products.filter((p) => `${p.name} ${p.sku}`.toLowerCase().includes(q))).slice(0, 8);
   }, [productQuery, deps.products]);
 
-  const total = useMemo(() => sumMoney(lines.map((l) => lineTotalOf(l.quantity, l.unitPrice))), [lines]);
+  const total = useMemo(
+    () => sumMoney(lines.map((l) => lineTotalOf(l.quantity, discountedUnitPriceOf(l.unitPrice, l.discountPct)))),
+    [lines],
+  );
   const complete = formComplete(companyId, lines);
 
   function addProduct(product: PickerProduct): void {
@@ -195,6 +221,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         productSku: product.sku,
         quantity: '1',
         unitPrice: product.defaultPrice,
+        discountPct: '',
         serialsOpen: false,
         serials: '',
       },
@@ -298,7 +325,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
             <View style={styles.lineMain}>
               <Text style={styles.rowPrimary}>{line.productName}</Text>
               <Text style={styles.snapshot}>
-                {`${line.productSku ?? ''} · snapshot ₹${formatMoneyEnIN(line.unitPrice)}`}
+                {`${line.productSku ?? ''} · list ₹${formatMoneyEnIN(line.unitPrice)}`}
               </Text>
             </View>
             <Button label="Remove" variant="ghost" onPress={() => removeLine(line.key)} testID={`sale-form-line-remove-${line.key}`} />
@@ -313,17 +340,20 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
               />
             </View>
             <View style={styles.priceCell}>
-              <MoneyField
-                label="Unit price"
-                value={line.unitPrice}
-                onChangeText={(t) => patchLine(line.key, { unitPrice: t })}
-                helperText="Negotiated price is normal — the line records what was agreed."
-                testID={`sale-form-line-price-${line.key}`}
+              <TextField
+                label="Discount %"
+                value={line.discountPct}
+                onChangeText={(t) => patchLine(line.key, { discountPct: t })}
+                placeholder="0"
+                testID={`sale-form-line-discount-${line.key}`}
               />
             </View>
           </View>
+          <Text style={styles.snapshot} testID={`sale-form-line-effective-${line.key}`}>
+            {`Unit ₹${formatMoneyEnIN(discountedUnitPriceOf(line.unitPrice, line.discountPct))} after ${line.discountPct === '' ? '0' : line.discountPct}% off list`}
+          </Text>
           <Text style={styles.lineTotal} testID={`sale-form-line-total-${line.key}`}>
-            {`= ₹${formatMoneyEnIN(lineTotalOf(line.quantity, line.unitPrice))}`}
+            {`= ₹${formatMoneyEnIN(lineTotalOf(line.quantity, discountedUnitPriceOf(line.unitPrice, line.discountPct)))}`}
           </Text>
           {line.serialsOpen ? (
             <TextField

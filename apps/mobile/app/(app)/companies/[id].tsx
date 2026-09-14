@@ -13,6 +13,7 @@ import { Linking } from 'react-native';
 import { SEMANTIC } from '@servgrid/shared';
 import { CompanyLedgerScreen } from '../../../src/screens/rep/CompanyLedgerScreen';
 import { useOnline, useRecordPayment, useRepCompanyLedger, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { captureProofPhoto } from '../../../src/lib/captureProof';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -37,6 +38,7 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
         pendingRecord={pendingRecord}
         online={online}
         record={record}
+        captureProof={captureProofPhoto}
         onRecorded={() => {
           ledger.reload();
           payments.reload();

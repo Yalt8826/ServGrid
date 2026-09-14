@@ -80,6 +80,7 @@ describe('CompaniesScreen (§S4)', () => {
         loading={false}
         onOpenCompany={() => {}}
         onNewSale={() => {}}
+      onNewCompany={() => {}}
         onRetry={() => {}}
       />,
     );
@@ -100,6 +101,7 @@ describe('CompaniesScreen (§S4)', () => {
         loading={false}
         onOpenCompany={() => {}}
         onNewSale={() => {}}
+      onNewCompany={() => {}}
         onRetry={() => {}}
       />,
     );
@@ -135,6 +137,7 @@ describe('CompaniesScreen (§S4)', () => {
         loading={false}
         onOpenCompany={() => {}}
         onNewSale={() => {}}
+      onNewCompany={() => {}}
         onRetry={() => {}}
       />,
     );
@@ -192,6 +195,7 @@ describe('CompanyLedgerScreen (§S4)', () => {
       record: async () => {},
       onRecorded: () => {},
       onNewSale: () => {},
+    onNewCompany: () => {},
       onRetry: () => {},
       ...overrides,
     };

@@ -30,14 +30,14 @@
  * Pure UI over injected deps; `useRepPayments` owns the reads.
  */
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { PaymentMode } from '@servgrid/shared';
 import { formatMoneyEnIN, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
-import { Banner, Button, EmptyState, MoneyField, Select, Sheet, TextField } from '../../components/ui';
+import { Banner, Button, EmptyState, MoneyField, Select, Sheet } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
-import { CASH_HANDOVER_REMINDER, MODE_ROWS, OWED_EMPTY_MESSAGE, referenceNeededFor, referenceRequiredFor } from './model';
+import { CASH_HANDOVER_REMINDER, MODE_ROWS, OWED_EMPTY_MESSAGE } from './model';
 import type { OwedRow, PaymentRow, SaleRow } from './model';
 
 const MONEY_PATTERN = /^\d+(\.\d{1,2})?$/;
@@ -81,15 +81,16 @@ export interface RecordPaymentSheetProps {
 
 /**
  * The record-payment sheet. Validation is stated where it bites: amount
- * must be money above zero; reference is shown for non-cash modes and
- * required for cheque and bank.
+ * must be money above zero, and the proof photo is the ONE evidence —
+ * captured here for every mode, required before record when the picker
+ * is wired (the owner pulled the bank/transaction reference after the
+ * field week; the wire field stays and simply never carries a value).
  */
 export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactNode {
   const [companyId, setCompanyId] = useState<string | null>(props.initialCompanyId ?? null);
   const [amount, setAmount] = useState('');
   const [salesCardId, setSalesCardId] = useState<string | null>(null);
   const [mode, setMode] = useState<PaymentMode>('cash');
-  const [reference, setReference] = useState('');
   const [proofUri, setProofUri] = useState<string | null>(null);
   const [proofNote, setProofNote] = useState<string | null>(null);
 
@@ -101,12 +102,12 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
       .map((s) => ({ label: `${s.saleNumber ?? ''} · ₹${formatMoneyEnIN(s.total)}`, value: s.id })),
   ];
 
-  const needsReference = referenceNeededFor(mode);
-  const referenceRequired = referenceRequiredFor(mode);
-  const referenceError =
-    referenceRequired && reference.trim() === '' ? 'A cheque or bank transfer needs its reference.' : undefined;
+  const photoRequired = props.captureProof !== undefined;
   const canRecord =
-    props.online && companyId !== null && isValidAmount(amount) && (!referenceRequired || reference.trim() !== '');
+    props.online &&
+    companyId !== null &&
+    isValidAmount(amount) &&
+    (!photoRequired || proofUri !== null);
 
   async function capture(): Promise<void> {
     if (props.captureProof === undefined) {
@@ -133,7 +134,7 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
         amount,
         salesCardId,
         mode,
-        referenceNo: needsReference && reference.trim() !== '' ? reference.trim() : null,
+        referenceNo: null,
         proofPhotoUri: proofUri,
       });
     } catch {
@@ -161,7 +162,9 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
                 ? 'Pick the company.'
                 : !isValidAmount(amount)
                   ? 'Enter the amount received.'
-                  : 'Enter the reference for this mode.'
+                  : photoRequired && proofUri === null
+                    ? 'Attach the proof photo.'
+                    : 'Enter the reference for this mode.'
           }
           fullwidth
           testID="payment-sheet-submit"
@@ -231,22 +234,23 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
           </Text>
         ) : null}
 
-        {needsReference ? (
-          <TextField
-            label={mode === 'cheque' ? 'Cheque number' : mode === 'bank_transfer' ? 'Bank reference' : 'Reference'}
-            value={reference}
-            onChangeText={setReference}
-            errorText={referenceError}
-            testID="payment-sheet-reference"
-          />
-        ) : null}
-
         <View style={styles.proofBlock}>
-          <Text style={styles.fieldLabel}>Proof photo</Text>
+          <Text style={styles.fieldLabel}>{photoRequired ? 'Proof photo (required)' : 'Proof photo'}</Text>
           {proofUri !== null ? (
-            <Text style={styles.proofQueued} testID="payment-proof-queued">
-              Proof queued — uploads after the payment.
-            </Text>
+            <View style={styles.proofAttached} testID="payment-proof-attached">
+              <Image source={{ uri: proofUri }} style={styles.proofThumb} />
+              <View style={styles.proofAttachedText}>
+                <Text style={styles.proofQueued} testID="payment-proof-queued">
+                  Photo attached — uploads right after the payment.
+                </Text>
+                <Button
+                  label="Retake"
+                  variant="ghost"
+                  onPress={() => void capture()}
+                  testID="payment-proof-retake"
+                />
+              </View>
+            </View>
           ) : (
             <Button label="Capture" variant="secondary" onPress={() => void capture()} testID="payment-proof-capture" />
           )}
@@ -272,6 +276,8 @@ export interface PaymentsScreenProps {
   /** Forwarded to the record-payment sheet's submit gate. */
   online: boolean;
   record: (input: RecordPaymentInput) => Promise<void>;
+  /** Optional while the payments detail route lands per role. */
+  onOpenPayment?: (paymentId: string) => void;
   applyOptimisticPayment: (companyId: string, amount: string) => void;
   onRetry: () => void;
   /** Opened from a company row or the /payments/new route (§S3 prefill). */
@@ -356,7 +362,13 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
         <EmptyState message="No payments collected yet." testID="payments-collected-empty" />
       ) : (
         props.collected.map((row) => (
-          <View key={row.id} style={styles.collectedRow} testID={`payments-collected-${row.id}`}>
+          <Pressable
+            key={row.id}
+            accessibilityRole={props.onOpenPayment === undefined ? undefined : 'button'}
+            onPress={props.onOpenPayment === undefined ? undefined : () => props.onOpenPayment!(row.id)}
+            style={styles.collectedRow}
+            testID={`payments-collected-${row.id}`}
+          >
             <View style={styles.collectedMain}>
               <Text style={styles.collectedPrimary}>{row.companyName}</Text>
               <Text style={styles.collectedSecondary}>
@@ -364,7 +376,7 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
               </Text>
             </View>
             <Text style={styles.collectedAmount}>{`₹${formatMoneyEnIN(row.amount)}`}</Text>
-          </View>
+          </Pressable>
         ))
       )}
 
@@ -503,6 +515,21 @@ const styles = StyleSheet.create({
   proofQueued: {
     ...textStyle('body'),
     color: SEMANTIC.feedback.success,
+  },
+  proofAttached: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+  },
+  proofThumb: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    backgroundColor: SEMANTIC.line.stale,
+  },
+  proofAttachedText: {
+    flex: 1,
+    gap: SPACE[1],
   },
   proofNote: {
     ...textStyle('caption'),

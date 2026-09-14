@@ -27,6 +27,15 @@ vi.mock('../../lib/uuid', () => ({ uuid }));
 vi.mock('expo-network', () => ({
   getNetworkStateAsync: vi.fn(async () => ({ isInternetReachable: true })),
 }));
+vi.mock('expo-file-system/legacy', () => ({
+  readAsStringAsync: vi.fn(async () => 'ZmFrZWJhc2U2NA=='),
+  EncodingType: { Base64: 'base64' },
+}));
+vi.mock('expo-crypto', () => ({
+  CryptoEncoding: { SHA256: 'SHA256', HEX: 'hex' },
+  digestStringAsync: vi.fn(async () => 'aa'.repeat(32)),
+  getRandomBytesAsync: vi.fn(async () => new Uint8Array(16).fill(1)),
+}));
 
 import { useRecordPayment } from './useRepData';
 import type { RecordPaymentInput } from './PaymentsScreen';

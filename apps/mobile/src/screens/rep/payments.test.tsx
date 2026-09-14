@@ -19,7 +19,7 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 
 import { allText, create, findAll, findAllByTestID, findByTestID, toJson, type Node } from '../../components/ui/testing';
 import { PaymentsScreen, isValidAmount, RecordPaymentSheet, type RecordPaymentInput } from './PaymentsScreen';
-import { CASH_HANDOVER_REMINDER, OWED_EMPTY_MESSAGE, referenceNeededFor, referenceRequiredFor } from './model';
+import { OWED_EMPTY_MESSAGE } from './model';
 
 const COMPANY_ID = 'c1000000-0000-4000-8000-000000000001';
 
@@ -137,57 +137,39 @@ describe('PaymentsScreen (§S3)', () => {
     expect(row1Nodes.length).toBeGreaterThan(0);
   });
 
-  it('choosing Cash renders the handover reminder; choosing UPI reveals the reference field', async () => {
-    const r = await create(<PaymentsScreen {...props()} />);
-    await press(r, `payments-record-${COMPANY_ID}`);
-
-    // Cash is the default and first: the reminder is up from the start,
-    // the reference field is not.
-    expect(findByTestID(toJson(r), 'payment-cash-reminder')).toBeDefined();
-    expect(allText(toJson(r))).toContain(CASH_HANDOVER_REMINDER);
-    expect(findByTestID(toJson(r), 'payment-sheet-reference')).toBeUndefined();
-
-    await press(r, 'payment-mode-upi');
-    expect(findByTestID(toJson(r), 'payment-cash-reminder')).toBeUndefined();
-    expect(findByTestID(toJson(r), 'payment-sheet-reference')).toBeDefined();
-
-    // The rules behind the field: non-cash only; required for cheque and
-    // bank, optional for UPI and card.
-    expect(referenceNeededFor('cash')).toBe(false);
-    expect(referenceNeededFor('upi')).toBe(true);
-    expect(referenceRequiredFor('cheque')).toBe(true);
-    expect(referenceRequiredFor('bank_transfer')).toBe(true);
-    expect(referenceRequiredFor('upi')).toBe(false);
-    expect(referenceRequiredFor('card')).toBe(false);
-  });
-
-  it('a cheque without its reference cannot be recorded; a UPI reference is optional', async () => {
+  it('choosing Cash renders the handover reminder; no reference field exists for any mode', async () => {
     const r = await create(<PaymentsScreen {...props()} />);
     await press(r, `payments-record-${COMPANY_ID}`);
     await type(r, 'payment-sheet-amount', '5000');
 
-    await press(r, 'payment-mode-cheque');
-    // Reference missing: the submit button is disabled with its reason.
+    expect(findByTestID(toJson(r), 'payment-cash-reminder')).toBeTruthy();
+    // The proof photo is the ONE evidence now: no cheque number, no bank
+    // reference — the field was pulled after the field week.
+    for (const mode of ['cheque', 'bank_transfer', 'upi', 'card']) {
+      await press(r, `payment-mode-${mode}`);
+      expect(findByTestID(toJson(r), 'payment-sheet-reference')).toBeUndefined();
+    }
+  });
+
+  it('with a real capture seam, the payment cannot be recorded until a proof photo is attached', async () => {
+    let captured = 0;
+    const captureProof = vi.fn(async () => {
+      captured += 1;
+      return `file:///proof-${captured}.jpg`;
+    });
+    const r = await create(<PaymentsScreen {...props({ captureProof })} />);
+    await press(r, `payments-record-${COMPANY_ID}`);
+    await type(r, 'payment-sheet-amount', '5000');
+
     let submit = findAll(findByTestID(toJson(r), 'payment-sheet-submit')!, (n) => n.type === 'Pressable')[0]!;
     expect(submit.props.accessibilityState).toMatchObject({ disabled: true });
     await press(r, 'payment-sheet-submit');
 
-    await type(r, 'payment-sheet-reference', 'CHQ 447190');
+    await press(r, 'payment-proof-capture');
+    expect(captureProof).toHaveBeenCalledTimes(1);
     submit = findAll(findByTestID(toJson(r), 'payment-sheet-submit')!, (n) => n.type === 'Pressable')[0]!;
     expect(submit.props.accessibilityState).toMatchObject({ disabled: false });
-  });
-
-  it('offline, the submit is disabled and the reason names the connection', async () => {
-    const r = await create(<PaymentsScreen {...props({ online: false })} />);
-    await press(r, `payments-record-${COMPANY_ID}`);
-    await type(r, 'payment-sheet-amount', '5000');
-
-    // The writes run directly today: offline must be a disabled button
-    // that says so, never a silent failed POST of money.
-    const submit = findAll(findByTestID(toJson(r), 'payment-sheet-submit')!, (n) => n.type === 'Pressable')[0]!;
-    expect(submit.props.accessibilityState).toMatchObject({ disabled: true });
-    expect(allText(toJson(r)).join('\n')).toContain("You're offline — recording needs a connection.");
-    await press(r, 'payment-sheet-submit');
+    expect(findByTestID(toJson(r), 'payment-proof-queued')).toBeTruthy();
   });
 
   it('recording updates the balance optimistically BEFORE the sheet closes', async () => {
