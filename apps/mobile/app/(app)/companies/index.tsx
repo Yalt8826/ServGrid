@@ -1,9 +1,14 @@
 /**
- * Companies — the rep's route (UI/plan-2/06-SALES-REP.md §S4, T3.7). The
- * §S4 list over `useRepCompanies`: his accounts plus house accounts,
- * balance descending, `Shared` chips, no hint that other accounts exist.
- * The list itself is not flag-gated (the companies surface never was); a
- * balances read failing degrades the column, not the screen.
+ * Companies — route (UI/plan-2/06-SALES-REP.md §S4, T3.7; owner's copy
+ * §O5, T4.12). Role split:
+ *
+ * - **Rep branch:** the §S4 list over `useRepCompanies`: his accounts
+ *   plus house accounts, balance descending, `Shared` chips, and NO
+ *   reassign surface — only the owner can move an account.
+ * - **Owner branch (T4.12):** every account, both reps', plus house
+ *   accounts, with the owner rep column and the reassignment control
+ *   that exists nowhere else in the product — choosing *Nobody* makes
+ *   the account a house account, which is how leave gets covered.
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,6 +17,8 @@ import { useRouter } from 'expo-router';
 import { SEMANTIC } from '@servgrid/shared';
 import { CompaniesScreen } from '../../../src/screens/rep/CompaniesScreen';
 import { useRepCompanies } from '../../../src/screens/rep/useRepData';
+import { OwnerCompaniesScreen } from '../../../src/screens/owner/CompaniesScreen';
+import { useOwnerCompanies, useOwnerReps, useReassignCompany } from '../../../src/screens/owner/useOwnerData';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -37,9 +44,35 @@ function RepCompaniesRoute(): React.ReactNode {
   );
 }
 
+function OwnerCompaniesRoute(): React.ReactNode {
+  const router = useRouter();
+  const companies = useOwnerCompanies();
+  const reps = useOwnerReps();
+  const { reassignBusy, reassignError, reassign } = useReassignCompany(companies.reload);
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <OwnerCompaniesScreen
+        rows={companies.rows}
+        error={companies.error ?? reps.error}
+        loading={companies.loading}
+        onOpenCompany={(companyId) => router.push(`/companies/${companyId}`)}
+        reps={reps.reps}
+        onReassign={(companyId, ownerRepId) => {
+          void reassign(companyId, ownerRepId).catch(() => {});
+        }}
+        reassignBusy={reassignBusy}
+        reassignError={reassignError}
+        onRetry={companies.reload}
+      />
+    </SafeAreaView>
+  );
+}
+
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   if (actor === null) return null;
+  if (actor.role === 'owner') return <OwnerCompaniesRoute />;
   if (actor.role === 'sales_rep') return <RepCompaniesRoute />;
   return (
     <View style={styles.root}>

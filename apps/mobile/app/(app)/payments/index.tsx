@@ -1,11 +1,13 @@
 /**
- * Payments — the rep's route (UI/plan-2/06-SALES-REP.md §S3, T3.7). The
- * §S3 screen over `useRepPayments`: the Owed tab (a view of dues) and the
- * Collected tab, with the record-payment sheet's optimistic balance move.
- * Gated on `sales.payments` — the same flag the balances and payments
- * endpoints answer to, so the screen and the server go dark together.
- * Other roles keep the placeholder (the owner's payments screens are
- * Phase 4's task).
+ * Payments — the rep's route (UI/plan-2/06-SALES-REP.md §S3, T3.7;
+ * owner's copy §O5, T4.12). Role split:
+ *
+ * - **Rep branch:** the §S3 screens over `useRepPayments`: the Owed tab
+ *   (a view of dues) and the Collected tab, with the record-payment
+ *   sheet's optimistic balance move, gated on `sales.payments`.
+ * - **Owner branch (T4.12):** the §O5 list — cards on a phone, a table
+ *   with a running total on the desk — with the VOID action, reason
+ *   required (void lives here and only here, with sales).
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,7 +16,10 @@ import { useRouter } from 'expo-router';
 import { SEMANTIC } from '@servgrid/shared';
 import { PaymentsScreen } from '../../../src/screens/rep/PaymentsScreen';
 import { useOnline, useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { OwnerPaymentsScreen } from '../../../src/screens/owner/PaymentsScreen';
+import { useOwnerPayments, useVoidPayment } from '../../../src/screens/owner/useOwnerData';
 import { captureProofPhoto } from '../../../src/lib/captureProof';
+import { isFlagOn } from '../../../src/state/featureFlags';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -58,9 +63,39 @@ function RepPaymentsRoute(): React.ReactNode {
   );
 }
 
+function OwnerPaymentsRoute(): React.ReactNode {
+  const payments = useOwnerPayments();
+  const { voidBusy, voidError, voidPayment } = useVoidPayment(payments.reload);
+
+  if (!isFlagOn('sales.payments')) {
+    return (
+      <View style={styles.root}>
+        <Text>Payments</Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <OwnerPaymentsScreen
+        rows={payments.rows}
+        error={payments.error}
+        loading={payments.loading}
+        onVoid={(payment, reason) => {
+          void voidPayment(payment.id, reason).catch(() => {});
+        }}
+        voidBusy={voidBusy}
+        voidError={voidError}
+        onRetry={payments.reload}
+      />
+    </SafeAreaView>
+  );
+}
+
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   if (actor === null) return null;
+  if (actor.role === 'owner') return <OwnerPaymentsRoute />;
   if (actor.role === 'sales_rep') return <RepPaymentsRoute />;
   return (
     <View style={styles.root}>

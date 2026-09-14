@@ -27,6 +27,13 @@
  * tracked), and logout is IMMEDIATE — there is nothing queued to lose.
  * The dispatcher branch never calls `useMirrorSession`, never reads a
  * tracking health endpoint, and is dark without `dispatch.console`.
+ *
+ * **Owner (§O9, T4.12):** name, username, change password, logout, app
+ * version, the catalogue links (Products · Services live under Profile
+ * in the phone grouping), and the **second owner account reminder** —
+ * who else holds owner access, because the recovery story depends on
+ * that account existing and being remembered. NO tracking chip: owners
+ * are not tracked.
  */
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -44,6 +51,8 @@ import { matchAutostartVendor } from '../../../src/location/autostart';
 import { useMirrorSession } from '../../../src/sync/MirrorProvider';
 import { ProfileScreen, type LadderRowState } from '../../../src/screens/technician/ProfileScreen';
 import { DispatcherProfileScreen } from '../../../src/screens/dispatcher/profile';
+import { OwnerProfileScreen } from '../../../src/screens/owner/OwnerProfileScreen';
+import { useOtherOwners } from '../../../src/screens/owner/useOwnerData';
 import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
@@ -229,12 +238,67 @@ function DispatcherProfileRoute(): React.ReactNode {
   );
 }
 
+function OwnerProfileRoute(): React.ReactNode {
+  const router = useRouter();
+  const actor = useSessionStore((s) => s.actor);
+  const { others } = useOtherOwners();
+
+  // §O9 names a NAME; the session store carries only the username, so
+  // the name resolves from /v1/auth/me — the dispatcher route's
+  // resolve-into-state rule.
+  const [fullName, setFullName] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async (): Promise<AuthMeResponse | null> => {
+      const res = await api.request<AuthMeResponse>('GET', '/v1/auth/me');
+      return res.ok && res.data !== null ? res.data : null;
+    })()
+      .then((me) => {
+        if (alive && me !== null) setFullName(me.employee.fullName);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (actor === null) return null;
+
+  return (
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
+      edges={['top', 'left', 'right', 'bottom']}
+    >
+      <OwnerProfileScreen
+        fullName={fullName ?? actor.username}
+        username={actor.username}
+        appVersion={Constants.expoConfig?.version ?? 'dev'}
+        otherOwners={others}
+        changePassword={() => router.push('/change-password')}
+        logout={() => {
+          // Immediate, like the dispatcher's: the owner is online-only,
+          // there is nothing queued to lose.
+          void (async () => {
+            await api.logout();
+            useSessionStore.getState().setAnonymous();
+            router.replace('/login');
+          })();
+        }}
+        onOpenProducts={() => router.push('/products')}
+        onOpenServices={() => router.push('/services')}
+      />
+    </SafeAreaView>
+  );
+}
+
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   if (actor === null) return null;
   // The role split is the whole point of §D6: a dispatcher must never
   // see the technician's tracking and sync UI, so the dispatcher branch
   // renders a different screen from a different component — not the
-  // same screen with pieces hidden.
+  // same screen with pieces hidden. The owner gets the same treatment
+  // (§O9): no tracking UI, plus the second-owner reminder.
+  if (actor.role === 'owner') return <OwnerProfileRoute />;
   return actor.role === 'dispatcher' ? <DispatcherProfileRoute /> : <TechnicianProfileRoute />;
 }
