@@ -13,6 +13,7 @@ import { idempotencyPlugin } from './plugins/idempotency.js';
 import { rbacPlugin } from './plugins/rbac.js';
 import { genRequestId, requestContextPlugin } from './plugins/request-context.js';
 import { startWindowOpenReleaseScheduler } from './jobs/release-held-notifications.js';
+import { startLocationRequestExpiryScheduler } from './jobs/expire-location-requests.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { attachmentsRoutes } from './modules/attachments/routes.js';
 import { catalogRoutes } from './modules/catalog/routes.js';
@@ -193,6 +194,16 @@ export async function startServer(config: Config): Promise<FastifyInstance> {
   });
   app.addHook('onClose', async () => {
     releaseScheduler.stop();
+  });
+
+  // §12's second live entry: `expire-location-requests`, every minute.
+  // The console reads derive `expired` from `expires_at` per request, so
+  // the sweep's job is the durable record — failure_reason = unanswered —
+  // not the console's honesty. Stopped with the app like the scheduler
+  // above.
+  const expiryScheduler = startLocationRequestExpiryScheduler({ log: app.log });
+  app.addHook('onClose', async () => {
+    expiryScheduler.stop();
   });
 
   const shutdown = (signal: NodeJS.Signals): void => {

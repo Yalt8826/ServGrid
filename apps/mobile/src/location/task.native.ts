@@ -29,6 +29,7 @@ import { api } from '../lib/api';
 import { explicitFlagState } from '../state/featureFlags';
 import { createPingBuffer, type PingBuffer } from './buffer.native';
 import { createSqlitePingStore } from './bufferStore.native';
+import { configureLiveWindow, LIVE_INTERVAL_MS } from './live-window';
 import { inWorkWindow } from './window.native';
 
 /** The task name the OS registers; stable across versions. */
@@ -101,22 +102,88 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: { data?: unkn
  * gate below — both native. Never throws: tracking failing to start is
  * a state the health chip reports, not a crash. */
 export async function startBackgroundLocationUpdates(): Promise<boolean> {
+  return startLocationUpdates(SCHEDULED_CONFIG);
+}
+
+/** The live cadence's config (T4.4): ~10s fixes at high accuracy, no
+ * deferral — the owner is watching the dot move NOW; five minutes only. */
+const LIVE_CONFIG = {
+  accuracy: Location.Accuracy.High,
+  timeInterval: LIVE_INTERVAL_MS,
+  distanceInterval: 0,
+  deferredUpdatesInterval: 0,
+} as const;
+
+/** The scheduled cadence's config (PLAN-FRONTEND.md §6): 15 minutes,
+ * balanced accuracy, deferred so Android can batch. */
+const SCHEDULED_CONFIG = {
+  accuracy: Location.Accuracy.Balanced,
+  timeInterval: INTERVAL_MS,
+  distanceInterval: 100,
+  deferredUpdatesInterval: INTERVAL_MS,
+} as const;
+
+interface UpdatesConfig {
+  accuracy: Location.LocationAccuracy;
+  timeInterval: number;
+  distanceInterval: number;
+  deferredUpdatesInterval: number;
+}
+
+/** Which config this PROCESS last started the task with. Null after a
+ * process restart even though the OS-level task may still be running —
+ * the first start call then restarts the task to make the cadence known,
+ * which is exactly what the live revert leans on. */
+let runningConfig: UpdatesConfig | null = null;
+
+async function startLocationUpdates(config: UpdatesConfig): Promise<boolean> {
+  const base = {
+    foregroundService: {
+      notificationTitle: NOTIFICATION_TITLE,
+      notificationBody: NOTIFICATION_BODY,
+      notificationColor: NOTIFICATION_COLOR,
+    },
+    pausesUpdatesAutomatically: false,
+  };
   try {
-    if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)) return true;
-    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: INTERVAL_MS,
-      distanceInterval: 100,
-      deferredUpdatesInterval: INTERVAL_MS,
-      foregroundService: {
-        notificationTitle: NOTIFICATION_TITLE,
-        notificationBody: NOTIFICATION_BODY,
-        notificationColor: NOTIFICATION_COLOR,
-      },
-      pausesUpdatesAutomatically: false,
-    });
+    const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+    if (started && runningConfig === config) return true;
+    // A live→scheduled (or scheduled→live) flip is a stop + start: the
+    // task's interval is fixed at startLocationUpdates time. Restarting
+    // when this process cannot vouch for the running cadence also
+    // reconciles a reboot revived into a stale OS-level registration.
+    if (started) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, { ...config, ...base });
+    runningConfig = config;
     return true;
   } catch {
     return false;
   }
 }
+
+/** The live flip: ~10s fixes until `revertToScheduledLocationUpdates`. */
+export async function startLiveLocationUpdates(): Promise<boolean> {
+  return startLocationUpdates(LIVE_CONFIG);
+}
+
+/** The revert (and the plain scheduled start): 15-minute cadence again.
+ * Called by the live window's armed revert — the flip back is the part
+ * that must never be skipped (a device left at 10s intervals is a
+ * battery complaint the next morning). */
+export async function revertToScheduledLocationUpdates(): Promise<boolean> {
+  return startLocationUpdates(SCHEDULED_CONFIG);
+}
+
+// The live window's real flips, wired once at module scope: the push
+// funnel (`push/backgroundTask`) calls `onLocationLivePush`, which lands
+// here. On web this module is never loaded and the singleton stays
+// unconfigured — the push is answered false and the request expires
+// honestly server-side.
+configureLiveWindow({
+  raise: () => {
+    void startLiveLocationUpdates();
+  },
+  revert: () => {
+    void revertToScheduledLocationUpdates();
+  },
+});

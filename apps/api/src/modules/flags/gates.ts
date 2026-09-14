@@ -99,3 +99,23 @@ export async function salesPaymentsEnabled(request: FastifyRequest): Promise<voi
     throw new AppError('FLAG_DISABLED', SALES_PAYMENTS_DISABLED_MESSAGE);
   }
 }
+
+/**
+ * `owner.location` — the location console and its map (PHASE-4-OWNER.md
+ * T4.4/T4.10). The console's four reads (`POST`+`GET /v1/location/
+ * requests`, `/v1/location/employees`, `.../trail`) are a sales-only
+ * surface in the T3 sense: the matrix gives `location.read` to the owner
+ * alone, so the gate asks the flag of EVERY caller — flipping it off
+ * darkens the whole console for the one person on it, which is the T0
+ * rollback of T4.4.
+ */
+export const OWNER_LOCATION_DISABLED_MESSAGE =
+  'The location console is switched off for your account.';
+
+export async function ownerLocationEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'owner.location'))) {
+    throw new AppError('FLAG_DISABLED', OWNER_LOCATION_DISABLED_MESSAGE);
+  }
+}

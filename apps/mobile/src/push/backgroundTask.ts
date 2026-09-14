@@ -16,6 +16,7 @@
 import { getQueryClient } from '../state/runtimeQueryClient';
 import { useSessionStore } from '../state/sessionStore';
 import { handlePushWake } from '../notifications/handler';
+import { onLocationLivePush } from '../location/live-window';
 
 /** The expo-task-manager task name this module owns. */
 export const SYNC_ON_PUSH_TASK = 'servgrid-sync-on-push';
@@ -32,17 +33,27 @@ export const PUSH_INVALIDATED_QUERY_KEYS = [
 ] as const;
 
 /**
- * One push delivery, foreground or background. Returns whether the wake
- * produced something observable — a notification raised from rows the
- * sync actually received, or (with no mirror session) the query
- * invalidation for the online surfaces. Never the payload: there is no
- * payload content to show (§12.1), and a job the delta did not return
- * raises nothing.
+ * One push delivery, foreground or background. `data` is the FCM data
+ * message when the delivery surface could read it (foreground listener);
+ * the headless task currently receives none and passes undefined. Returns
+ * whether the wake produced something observable — a notification raised
+ * from rows the sync actually received, the query invalidation for the
+ * online surfaces, or (T4.4) a live locate-now window opened. Never the
+ * payload: there is no payload content to show (§12.1), and a job the
+ * delta did not return raises nothing.
  */
-export async function handleDataOnlyPush(): Promise<boolean> {
+export async function handleDataOnlyPush(data?: Record<string, unknown>): Promise<boolean> {
   // A push to a logged-out handset must not fetch anything (its tokens
-  // are revoked) and must not raise a notification.
+  // are revoked) and must not raise a notification — and must not flip
+  // tracking into a live cadence for a session that no longer exists.
   if (useSessionStore.getState().status !== 'authenticated') return false;
+
+  // T4.4: a `live` locate-now push is a tracking instruction, not a job
+  // event — it raises the cadence to ~10s (the five-minute revert is
+  // armed inside the live window) and needs no sync. The window is
+  // configured on the native graph only; unconfigured (web, tests) this
+  // answers false and the push falls through like any unknown payload.
+  if (onLocationLivePush(data)) return true;
 
   let hasClient = false;
   try {
