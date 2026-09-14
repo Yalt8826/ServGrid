@@ -4,6 +4,7 @@ import {
   type JobCardDispatcher,
   type JobCardOwner,
   type JobCardTechnician,
+  type JobCompletionAmendRequest,
   type JobStatus,
   type Role,
   type TechnicianLoad,
@@ -918,7 +919,7 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
     };
   }
 
-  return { listJobs, getJobCard, changeStatus, completeJob, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
+  return { listJobs, getJobCard, changeStatus, completeJob, amendCompletion, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
 }
 
 // ── completion (§6.2) ───────────────────────────────────────────────────────
@@ -1223,3 +1224,110 @@ export async function completeJob(
 }
 
 export type JobsService = ReturnType<typeof createJobsService>;
+
+// ── completion amendment (§6.2b) ────────────────────────────────────────────
+
+/** §6.2b/§6.3: "owner only" — the matrix cell `job.money` × `update` is the owner's alone; the service re-asserts it so a gate regression cannot spend money. */
+export const AMEND_COMPLETION_ACTORS_MESSAGE = 'A completion is amended by the owner.';
+
+/** §6.2b step 3 — the sentence names the door: reopen the confirmed day, then amend. The `details` carry the reconciliation itself. */
+const AMEND_CONFIRMED_MESSAGE =
+  'This day is signed off in a confirmed cash reconciliation — reopen that day first, then amend.';
+
+/**
+ * POST /v1/jobs/:id/completion/amend (§6.2b) — the one correction path for
+ * the one money-bearing record that had none. `reason` required (the
+ * schema); the same database constraints judge the final row, so a
+ * discount introduced here still needs one (`completion_discount_justified`,
+ * mapped to a readable 422 like at completion). No history columns on the
+ * table: the before/after pair goes to `job_events` as `completion_amended`
+ * and `version` moves under the touch trigger (§3.4).
+ */
+export async function amendCompletion(
+  actor: Actor,
+  jobId: string,
+  input: JobCompletionAmendRequest,
+  source: RequestSource,
+): Promise<JobCardOwner> {
+  if (actor.role !== 'owner') {
+    throw new AppError('FORBIDDEN', AMEND_COMPLETION_ACTORS_MESSAGE);
+  }
+
+  return withTransaction(async (client) => {
+    // Step 1 — the completion row locked; every later step rides the lock.
+    // A job with no completion was never closed — there is nothing here to
+    // correct, and NOT_FOUND says so rather than fabricating a row.
+    const before = await repo.lockCompletionForAmend(client, jobId);
+    if (before === null) {
+      throw new AppError('NOT_FOUND', 'That job has no completion to amend.');
+    }
+
+    // Step 3 BEFORE the write — the one outcome this endpoint exists to
+    // prevent is a figure moving under a signed-off day. The covering
+    // reconciliation row is locked here too (§6.2b step 1's shape), so a
+    // confirm racing this amendment serialises behind it instead of
+    // confirming a day whose figure is mid-move. Only `confirmed` blocks
+    // (§3.4 enums); `disputed` and open days amend freely.
+    const confirmed = await repo.lockCoveringReconciliation(
+      client,
+      before.completed_by,
+      before.business_date,
+    );
+    if (confirmed !== null) {
+      throw new AppError('RECONCILIATION_CONFIRMED', AMEND_CONFIRMED_MESSAGE, {
+        reconciliation: {
+          id: confirmed.id,
+          businessDate: confirmed.business_date,
+          status: confirmed.status,
+        },
+      });
+    }
+
+    // Steps 1–2 — apply the new figures, then write the trail. Absent
+    // fields keep their stored values, so the event's before/after always
+    // carries both, even where nothing moved. A database refusal (the
+    // discount rule and friends) maps to a readable 422 and rolls the
+    // whole attempt back — the patch and the event commit together.
+    try {
+      await repo.amendCompletion(client, jobId, {
+        cost: input.cost,
+        discountAmount: input.discountAmount,
+        discountReason: input.discountReason,
+      });
+      await repo.insertJobEvent(client, {
+        jobCardId: jobId,
+        eventType: 'completion_amended',
+        actorId: actor.id,
+        occurredAt: new Date().toISOString(),
+        fromStatus: 'completed',
+        toStatus: 'completed', // the point: the card did not move — the money did
+        source,
+        payload: {
+          reason: input.reason,
+          cost: { from: before.cost, to: input.cost ?? before.cost },
+          discountAmount: {
+            from: before.discount_amount,
+            to: input.discountAmount ?? before.discount_amount,
+          },
+          discountReason: {
+            from: before.discount_reason,
+            to: input.discountReason ?? before.discount_reason,
+          },
+        },
+      });
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw mapDbRefusal(error);
+    }
+
+    // The amended card, in the owner's own projection (§6.3) — the screen
+    // re-renders from this, the queue recomputes from the row.
+    const card = await repo.findCard(client, 'owner', jobId);
+    if (card === null) {
+      // Unreachable: the row is locked in this transaction and the update
+      // above succeeded. Never guess about a locked row.
+      throw new AppError('INTERNAL', 'The job could not be read back — nothing was lost, try again.');
+    }
+    return toCard('owner', card) as JobCardOwner;
+  });
+}

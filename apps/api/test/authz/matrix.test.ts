@@ -198,6 +198,36 @@ async function seedJobUnassigned(): Promise<string> {
   return r.rows[0]!.id;
 }
 
+/**
+ * A COMPLETED job with its completion row — the amend probe's target
+ * (T4.3). No covering `cash_reconciliations` row is seeded, so the day is
+ * open and the owner's probe reaches 200; the 409 path (a confirmed day)
+ * is integration/amendment.test.ts's subject.
+ */
+async function seedCompletedJobWithCompletion(): Promise<string> {
+  const jobId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO job_cards (job_number, customer_id, service_id, title, status,
+                              assigned_to, assigned_at, scheduled_for, closed_at)
+       VALUES ($1, $2, $3, 'Matrix probe job', 'completed', $4, $5, $5, $5) RETURNING id`,
+      [
+        `JC-T10-${randomBytes(4).toString('hex')}`,
+        customerId,
+        serviceId,
+        selfIds.technician,
+        new Date().toISOString(),
+      ],
+    )
+  ).rows[0]!.id;
+  await db.query(
+    `INSERT INTO job_completions
+       (job_card_id, completed_by, completed_at, work_summary, cost, collection_mode)
+     VALUES ($1, $2, now(), 'Matrix probe completion.', 100, 'cash')`,
+    [jobId, selfIds.technician],
+  );
+  return jobId;
+}
+
 async function seedEmployee(role: Role, username = `emp.t10.${randomBytes(4).toString('hex')}`): Promise<{ id: string; username: string }> {
   const r = await db.query<{ id: string }>(
     `INSERT INTO employees (username, password_hash, full_name, role)
@@ -262,6 +292,8 @@ const JOB_READERS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORB
 const STATUS_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: completion is "technician (own), owner", gated on `job.money` × `create` — a dispatcher's cell there is `none` outright. */
 const COMPLETION_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §6.2b (T4.3): amendment is "owner only" — the `job.money` × `update` cell, which only the owner holds (a technician's is write-once at completion, a dispatcher's and a rep's `none`). */
+const AMEND_COMPLETION_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: cancellation is "dispatcher, owner, technician (own)" — the `job` × `update` cell, which a sales rep does not hold. */
 const CANCEL_ACTORS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3: rescheduling (PATCH of scheduled_for) is "dispatcher, owner" — on site, the technician cancels with a new date instead. */
@@ -609,6 +641,33 @@ const ENDPOINTS: EndpointRow[] = [
     expect: COMPLETION_ACTORS,
     assertOk: (actor, res) => {
       if (actor === 'technician') expect(res.json<{ status: string }>().status).toBe('completed');
+    },
+  },
+  {
+    name: 'POST /v1/jobs/:id/completion/amend',
+    method: 'POST',
+    url: '/v1/jobs/:id/completion/amend',
+    // The owner's correction of a filed completion (§6.2b, T4.3): the
+    // `job.money` × `update` cell is the owner's alone — a dispatcher's
+    // is `none` outright and a technician's is write-once at completion —
+    // so the three field roles are 403 before the body is read and the
+    // anonymous caller is 401. The `owner.amend` flag rides enabled for
+    // the matrix owner (see beforeAll); its dark side is
+    // integration/amendment.test.ts's subject.
+    probe: async (actor) => {
+      const jobId = await seedCompletedJobWithCompletion();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/jobs/${jobId}/completion/amend`,
+        headers: bearer(actor),
+        payload: { cost: '50', reason: 'Matrix probe amendment.' },
+      });
+    },
+    expect: AMEND_COMPLETION_ACTORS,
+    assertOk: (_actor, res) => {
+      const card = res.json<{ cost: string; amountCollected: string }>();
+      expect(card.cost).toBe('50.00');
+      expect(card.amountCollected).toBe('50.00');
     },
   },
   {
@@ -1878,6 +1937,15 @@ beforeAll(async () => {
   await db.query(
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
      SELECT id, 'owner.cash', true FROM employees WHERE role = 'owner'`,
+  );
+
+  // Same for completion amendment (T4.3): the amend probe exercises ROLE
+  // authorization (the matrix gives `job.money` × `update` to the owner
+  // alone), so the owner rides with `owner.amend` enabled — the flag's own
+  // switchable behaviour is integration/amendment.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'owner.amend', true FROM employees WHERE role = 'owner'`,
   );
 
   // Same for the owner console's location reads (T4.4): the four probes

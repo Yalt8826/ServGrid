@@ -146,6 +146,7 @@ export interface JobEventInsert {
   eventType:
     | 'status_changed'
     | 'completed'
+    | 'completion_amended'
     | 'cancelled'
     | 'rescheduled'
     | 'created'
@@ -259,6 +260,104 @@ export async function completeJobCard(db: Db, jobId: string, closedAt: string): 
     jobId,
     closedAt,
   ]);
+}
+
+// ── completion amendment (§6.2b) ────────────────────────────────────────────
+
+export interface CompletionAmendLockRow {
+  /** 1:1 with the job card — the completion's key IS the job id. */
+  job_card_id: string;
+  /** The employee whose day the covering reconciliation covers. */
+  completed_by: string;
+  /** The generated IST business date the completion landed on. */
+  business_date: string;
+  /** The stored figures, as the amendment's before values. Money crosses as decimal text (§3.4). */
+  cost: string;
+  discount_amount: string;
+  discount_reason: string | null;
+}
+
+/**
+ * §6.2b step 1 — the completion row locked (`FOR UPDATE`) before anything
+ * reads or writes it, so a confirm racing this amendment serialises behind
+ * it and the figure cannot move twice at once.
+ */
+export async function lockCompletionForAmend(db: Db, jobId: string): Promise<CompletionAmendLockRow | null> {
+  const r = await db.query<CompletionAmendLockRow>(
+    `SELECT job_card_id, completed_by, business_date::text AS business_date,
+            cost::text AS cost, discount_amount::text AS discount_amount, discount_reason
+     FROM job_completions WHERE job_card_id = $1
+     FOR UPDATE`,
+    [jobId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface CoveringReconciliationRow {
+  id: string;
+  business_date: string;
+  status: ReconciliationStatusValue;
+}
+
+/** `reconciliation_status` (migration 002) — mirrored here to avoid a cross-module type import. */
+type ReconciliationStatusValue = 'submitted' | 'confirmed' | 'disputed';
+
+/**
+ * The covering `cash_reconciliations` row for the completion's
+ * (completed_by, business_date) — the employee-day whose expected cash this
+ * completion feeds — locked FOR UPDATE like the completion row, so a
+ * concurrent confirm waits rather than signing a day whose figure is
+ * mid-move (and vice versa: this read blocks behind a confirm's lock, then
+ * sees `confirmed`). Null when the day has no declaration or it is not
+ * confirmed — only `confirmed` blocks (§3.4 enums); `disputed` does not.
+ */
+export async function lockCoveringReconciliation(
+  db: Db,
+  employeeId: string,
+  businessDate: string,
+): Promise<CoveringReconciliationRow | null> {
+  const r = await db.query<CoveringReconciliationRow>(
+    `SELECT id, business_date::text AS business_date, status
+     FROM cash_reconciliations
+     WHERE employee_id = $1 AND business_date = $2::date AND status = 'confirmed'
+     FOR UPDATE`,
+    [employeeId, businessDate],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface CompletionAmendPatch {
+  cost?: string;
+  discountAmount?: string;
+  discountReason?: string;
+}
+
+/**
+ * §6.2b step 1's write — apply the new figures. Patch semantics: a field
+ * the caller omitted is not in the SET list and keeps its stored value.
+ * The constraints (`completion_discount_justified` and friends) judge the
+ * FINAL row and are this query's authority; the service maps a refusal to
+ * a readable 422 and never re-decides the rule (§6.2 step 2's shape). The
+ * touch trigger bumps `version`/`updated_at`; the before/after pair goes
+ * to `job_events` from the caller, who held both rows.
+ */
+export async function amendCompletion(db: Db, jobId: string, patch: CompletionAmendPatch): Promise<void> {
+  const sets: string[] = [];
+  const values: unknown[] = [jobId];
+  if (patch.cost !== undefined) {
+    values.push(patch.cost);
+    sets.push(`cost = $${values.length}::numeric`);
+  }
+  if (patch.discountAmount !== undefined) {
+    values.push(patch.discountAmount);
+    sets.push(`discount_amount = $${values.length}::numeric`);
+  }
+  if (patch.discountReason !== undefined) {
+    values.push(patch.discountReason);
+    sets.push(`discount_reason = $${values.length}`);
+  }
+  if (sets.length === 0) return;
+  await db.query(`UPDATE job_completions SET ${sets.join(', ')} WHERE job_card_id = $1`, values);
 }
 
 export interface StackUnitRow {

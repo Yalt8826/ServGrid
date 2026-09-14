@@ -11,6 +11,7 @@ import {
   jobBulkAssignSchema,
   jobCancelSchema,
   jobCompleteSchema,
+  jobCompletionAmendSchema,
   jobRescheduleSchema,
   jobStatusChangeSchema,
   jobStatusSchema,
@@ -20,8 +21,9 @@ import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
 import type { WorkWindow } from '../../lib/time.js';
 import { createNotificationsService } from '../notifications/service.js';
-import { dispatchBulkEnabled, dispatchConsoleEnabled } from '../flags/gates.js';
+import { dispatchBulkEnabled, dispatchConsoleEnabled, ownerAmendEnabled } from '../flags/gates.js';
 import {
+  AMEND_COMPLETION_ACTORS_MESSAGE,
   ASSIGN_ACTORS_MESSAGE,
   CANCEL_ACTORS_MESSAGE,
   COMPLETION_ACTORS_MESSAGE,
@@ -275,6 +277,37 @@ export const jobsRoutes: FastifyPluginAsync<{ workWindow: WorkWindow }> = async 
       const auth = claimsOf(request);
       const body = jobCompleteSchema.parse(request.body);
       return service.completeJob({ id: auth.sub, role: auth.role }, jobIdParam(request), body, request.context.source);
+    },
+  );
+
+  // §6.2b — the owner's correction path for a filed completion: `reason`
+  // required, the same database constraints on the money, and a 409
+  // RECONCILIATION_CONFIRMED (naming the reconciliation) once the covering
+  // employee-day is signed off. Gate order is matrix-first, the
+  // `/v1/sales/:id/void` shape: the matrix cell (`job.money` × `update` —
+  // the owner holds it alone; a dispatcher's is `none` and a technician's
+  // write-once at completion) answers who may ever amend, then
+  // `owner.amend` answers whether the surface is lit — T4.3's T0 rollback.
+  // There is deliberately no dispatcher entry in responseSchemaByRole: the
+  // dispatcher is 403 before any payload exists.
+  app.post(
+    '/v1/jobs/:id/completion/amend',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requirePermission('job.money', 'update', AMEND_COMPLETION_ACTORS_MESSAGE),
+        ownerAmendEnabled,
+      ],
+      config: {
+        responseSchemaByRole: {
+          owner: JobCardOwnerSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = jobCompletionAmendSchema.parse(request.body);
+      return service.amendCompletion({ id: auth.sub, role: auth.role }, jobIdParam(request), body, request.context.source);
     },
   );
 
