@@ -30,6 +30,8 @@ export interface CompaniesScreenProps {
   loading: boolean;
   onOpenCompany: (companyId: string) => void;
   onNewSale: () => void;
+  /** The rep's own create — the server stamps him as the owner. */
+  onNewCompany: () => void;
   onRetry: () => void;
   testID?: string;
 }
@@ -98,12 +100,19 @@ export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
         })
       )}
 
-      <Button label="+ New sale" variant="secondary" onPress={props.onNewSale} testID="companies-new-sale" />
+      <View style={styles.actions}>
+        <Button label="+ New account" onPress={props.onNewCompany} testID="companies-new-company" />
+        <Button label="+ New sale" variant="secondary" onPress={props.onNewSale} testID="companies-new-sale" />
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  actions: {
+    gap: SPACE[2],
+    marginBottom: SPACE[3],
+  },
   content: {
     padding: SPACE[4],
     paddingBottom: SPACE[8],

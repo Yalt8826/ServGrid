@@ -12,8 +12,11 @@
  * cash-handover route's: the screens' `record`/`create` seams make
  * rewiring to enqueue a route-file change only.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import * as FileSystem from 'expo-file-system/legacy';
+import { sha256 } from 'js-sha256';
+import * as Network from 'expo-network';
 import type {
   AuthMeResponse,
   Company,
@@ -25,6 +28,7 @@ import type {
 } from '@servgrid/shared';
 import { defaultFeatureFlags } from '@servgrid/shared';
 import { api } from '../../lib/api';
+import { uuid } from '../../lib/uuid';
 import { cachedFeatureFlags, setFeatureFlags } from '../../state/featureFlags';
 import type { RecordPaymentInput } from './PaymentsScreen';
 import {
@@ -47,6 +51,29 @@ import { sumMoney } from './money';
 
 // ── api helpers ────────────────────────────────────────────────────────────
 
+/**
+ * Reachability for the money surfaces' submit gates. Same fail-open
+ * semantics as the dispatcher's `useIsOnline`: `isInternetReachable !==
+ * false` stays online on an unknown answer, because a genuinely failed
+ * fetch raises its own error — dimming a submit on a guess is the wrong
+ * trade while the sales writes still run directly.
+ */
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void Network.getNetworkStateAsync()
+      .then((state) => {
+        if (alive) setOnline(state.isInternetReachable !== false);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return online;
+}
+
 /** GET that throws with the server's message — screens render it verbatim. */
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await api.request<T>('GET', path);
@@ -54,14 +81,19 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.data;
 }
 
-/** POST/PATCH that throws with the server's message. */
+/** POST/PATCH that throws with the server's message. `opts.idempotencyKey`
+ * pins the key to a caller-side intent (one open sheet, one confirm) so
+ * repeated presses replay server-side instead of re-executing — leaving it
+ * off mints a fresh key per call, which is the duplicate-charge hole on a
+ * stalled frame. */
 export async function apiSend<T>(
   method: 'POST' | 'PATCH',
   path: string,
   body: unknown,
   headers?: Record<string, string>,
+  opts?: { idempotencyKey?: string },
 ): Promise<T> {
-  const res = await api.request<T>(method, path, { body, headers });
+  const res = await api.request<T>(method, path, { body, headers, idempotencyKey: opts?.idempotencyKey });
   if (!res.ok || res.data === null) throw new Error(res.error?.message ?? 'The request could not be completed.');
   return res.data;
 }
@@ -531,18 +563,32 @@ export interface PendingRecord {
  */
 export function useRecordPayment(): { pendingRecord: PendingRecord; record: (input: RecordPaymentInput) => Promise<void> } {
   const [pendingRecord, setPendingRecord] = useState<PendingRecord>({ busy: false, error: null });
+  // One key per collection intent — the open sheet — not per request. A
+  // stalled frame can deliver several taps of the same enabled button
+  // (seen on device: three taps, three PM numbers); the server's
+  // idempotency replay is what collapses those into ONE payment, and it
+  // only sees duplicates when every press carries the same key. Cleared
+  // on success; kept across a failure so an ambiguous timeout replays
+  // rather than re-charging — the plugin frees a failed claim, so a
+  // legitimately edited retry still executes.
+  const intentKeyRef = useRef<string | null>(null);
 
   const record = useCallback(async (input: RecordPaymentInput) => {
+    if (intentKeyRef.current === null) intentKeyRef.current = await uuid();
     setPendingRecord({ busy: true, error: null });
     try {
-      await apiSend<PaymentRecord>('POST', '/v1/payments', {
+      const payment = await apiSend<PaymentRecord>('POST', '/v1/payments', {
         companyId: input.companyId,
         ...(input.salesCardId !== null ? { salesCardId: input.salesCardId } : {}),
         amount: input.amount,
         mode: input.mode,
         ...(input.referenceNo !== null ? { referenceNo: input.referenceNo } : {}),
         receivedAt: new Date().toISOString(),
-      });
+      }, undefined, { idempotencyKey: intentKeyRef.current });
+      if (input.proofPhotoUri !== null) {
+        await uploadProofPhoto(payment.id, input.proofPhotoUri);
+      }
+      intentKeyRef.current = null;
       setPendingRecord({ busy: false, error: null });
     } catch (e) {
       const message = e instanceof Error && e.message !== '' ? e.message : 'The payment could not be recorded. Try again.';
@@ -552,4 +598,38 @@ export function useRecordPayment(): { pendingRecord: PendingRecord; record: (inp
   }, []);
 
   return { pendingRecord, record };
+}
+
+/**
+ * The proof photo rides POST /v1/attachments (ownerType `payment`) — the
+ * same immutable attachment row the technician's completion photos use,
+ * and which §S4's read side already scopes to the rep's own collections.
+ * It runs DIRECT after the payment (the rep writes are direct; the
+ * outbox's dependsOn ordering only applies to outboxed parents). A
+ * failure throws after the money is committed: the sheet's intent key
+ * makes the rep's natural re-press replay the SAME payment and retry
+ * only the photo, never a second charge.
+ */
+async function uploadProofPhoto(paymentId: string, fileUri: string): Promise<void> {
+  const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+  // The server verifies sha256 over the file's RAW bytes. expo-crypto's
+  // digestStringAsync UTF-8-encodes its input, which corrupts binary
+  // strings at bytes ≥ 0x80 (found on device: every upload bounced the
+  // checksum), so decode the base64 to real bytes and hash with js-sha256.
+  const checksum = sha256(base64ToBytes(base64));
+  const form = new FormData();
+  form.append('ownerType', 'payment');
+  form.append('ownerId', paymentId);
+  form.append('kind', 'photo');
+  form.append('capturedAt', new Date().toISOString());
+  form.append('fileChecksum', checksum);
+  form.append('file', { uri: fileUri, name: 'proof.jpg', type: 'image/jpeg' } as unknown as Blob);
+  await apiSend<{ id: string }>('POST', '/v1/attachments', form);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }

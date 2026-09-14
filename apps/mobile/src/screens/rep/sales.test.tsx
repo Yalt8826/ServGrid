@@ -49,6 +49,7 @@ function line(overrides: Partial<SaleFormLine> = {}): SaleFormLine {
     productSku: 'UPS-850',
     quantity: '2',
     unitPrice: '8400',
+    discountPct: '',
     serialsOpen: false,
     serials: '',
     ...overrides,
@@ -121,6 +122,7 @@ describe('SaleFormScreen — create (§S2)', () => {
         { id: 'pr0000000-0000-4000-8000-000000000001', name: 'UPS 850VA Luminous', sku: 'UPS-850', defaultPrice: '8400' },
       ],
       today: TODAY,
+      online: true,
       initialCompanyId: COMPANY_ID,
       createDraft: vi.fn(async () => ({ id: 's1000000-0000-4000-8000-000000000009' })),
       confirmSale: vi.fn(async () => ({})),
@@ -157,6 +159,7 @@ describe('SaleFormScreen — create (§S2)', () => {
         { id: 'pr0000000-0000-4000-8000-000000000001', name: 'UPS 850VA Luminous', sku: 'UPS-850', defaultPrice: '8400' },
       ],
       today: TODAY,
+      online: true,
       initialCompanyId: COMPANY_ID,
       createDraft,
       confirmSale,
@@ -214,6 +217,7 @@ describe('SaleFormScreen — create (§S2)', () => {
         companies={[]}
         products={[]}
         today={TODAY}
+        online
         createDraft={createDraft}
         confirmSale={vi.fn(async () => ({}))}
         onDone={() => {}}
@@ -221,6 +225,32 @@ describe('SaleFormScreen — create (§S2)', () => {
     );
     const save = findAll(findByTestID(toJson(r), 'sale-form-save-draft')!, (n) => n.type === 'Pressable')[0]!;
     expect(save.props.accessibilityState).toMatchObject({ disabled: true });
+    await act(async () => {
+      save.props.onPress?.();
+    });
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it('offline, the submits are disabled and the reasons name the connection', async () => {
+    const createDraft = vi.fn(async () => ({ id: 'x' }));
+    const r = await create(
+      <SaleFormScreen
+        companies={[]}
+        products={[]}
+        today={TODAY}
+        online={false}
+        createDraft={createDraft}
+        confirmSale={vi.fn(async () => ({}))}
+        onDone={() => {}}
+      />,
+    );
+    const save = findAll(findByTestID(toJson(r), 'sale-form-save-draft')!, (n) => n.type === 'Pressable')[0]!;
+    const confirm = findAll(findByTestID(toJson(r), 'sale-form-confirm')!, (n) => n.type === 'Pressable')[0]!;
+    expect(save.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(confirm.props.accessibilityState).toMatchObject({ disabled: true });
+    // The reason names the connection, not the empty form — offline is
+    // the gate that bites first.
+    expect(allText(toJson(r)).join('\n')).toContain("You're offline — saving needs a connection.");
     await act(async () => {
       save.props.onPress?.();
     });

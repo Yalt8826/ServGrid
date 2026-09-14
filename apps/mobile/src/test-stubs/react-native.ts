@@ -15,6 +15,7 @@ export const View = 'View';
 export const Text = 'Text';
 export const TextInput = 'TextInput';
 export const Pressable = 'Pressable';
+export const Image = 'Image';
 export const ScrollView = 'ScrollView';
 export const Modal = 'Modal';
 export const ActivityIndicator = 'ActivityIndicator';

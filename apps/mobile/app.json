@@ -34,6 +34,12 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "ServGrid uses the camera to attach a proof photo to the payments you collect."
+        }
+      ],
+      [
         "expo-font",
         {
           "fonts": []

@@ -9,10 +9,12 @@
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { PaymentsScreen } from '../../../src/screens/rep/PaymentsScreen';
-import { useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { useOnline, useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { captureProofPhoto } from '../../../src/lib/captureProof';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -20,9 +22,11 @@ const styles = StyleSheet.create({
 });
 
 function RepPaymentsRoute(): React.ReactNode {
+  const router = useRouter();
   const flags = useRepFlags();
   const payments = useRepPayments();
   const { pendingRecord, record } = useRecordPayment();
+  const online = useOnline();
 
   if (!flags.ready || !flags.payments) {
     // The T0 rollback, rendered: sales.payments off is a dark screen.
@@ -43,7 +47,10 @@ function RepPaymentsRoute(): React.ReactNode {
         error={payments.error}
         loading={payments.loading}
         pendingRecord={pendingRecord}
+        online={online}
         record={record}
+        onOpenPayment={(paymentId) => router.push(`/payments/${paymentId}`)}
+        captureProof={captureProofPhoto}
         applyOptimisticPayment={payments.applyOptimisticPayment}
         onRetry={payments.reload}
       />
