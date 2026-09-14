@@ -21,6 +21,7 @@ import { cashRoutes } from './modules/cash/routes.js';
 import { companiesRoutes } from './modules/companies/routes.js';
 import { consentRoutes } from './modules/consents/routes.js';
 import { customersRoutes } from './modules/customers/routes.js';
+import { dashboardRoutes } from './modules/dashboard/routes.js';
 import { devicesRoutes } from './modules/devices/routes.js';
 import { employeesRoutes } from './modules/employees/routes.js';
 import { flagsRoutes } from './modules/flags/routes.js';
@@ -143,6 +144,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(cashRoutes);
   app.register(salesRoutes);
   app.register(paymentsRoutes);
+  app.register(dashboardRoutes);
 
   const ownsPool = options.db === undefined;
   const db: DbProbe = options.db ?? getPool({ connectionString: config.databaseUrl });
