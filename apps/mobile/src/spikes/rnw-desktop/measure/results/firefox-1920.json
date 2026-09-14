@@ -1,0 +1,182 @@
+{
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:155.0) Gecko/20100101 Firefox/155.0",
+  "viewport": {
+    "innerWidth": 1920,
+    "innerHeight": 1080
+  },
+  "scroll": {
+    "scrollHeight": 20040,
+    "clientHeight": 1024,
+    "rowsExpected": 500,
+    "rowsFit": true
+  },
+  "mount": {
+    "domContentLoaded": 382,
+    "loadEvent": 384,
+    "spikeReadyMs": 439
+  },
+  "fonts": {
+    "plexSans": true,
+    "plexSansMedium": true,
+    "plexSansSemiBold": true,
+    "plexCondensed": true
+  },
+  "stickyAtTop": {
+    "innerWidth": 1920,
+    "innerHeight": 1080,
+    "headerCount": 2,
+    "headers": [
+      {
+        "top": 56,
+        "height": 40
+      },
+      {
+        "top": 56,
+        "height": 40
+      }
+    ],
+    "container": {
+      "top": 56,
+      "bottom": 1080,
+      "height": 1024
+    },
+    "firstRowText": "JC-2627-00100 Purva Highlands · S Iyer"
+  },
+  "steadySweep": {
+    "stepPx": 40,
+    "scrolledTo": 19016,
+    "frames": {
+      "frames": 475,
+      "avgMs": 7.59,
+      "medianMs": 7,
+      "p95Ms": 14,
+      "maxMs": 21,
+      "dropped32": 0,
+      "dropped50": 0,
+      "fps": 131.8
+    }
+  },
+  "stressSweep": {
+    "stepPx": 400,
+    "scrolledTo": 19016,
+    "frames": {
+      "frames": 47,
+      "avgMs": 12.85,
+      "medianMs": 14,
+      "p95Ms": 21,
+      "maxMs": 21,
+      "dropped32": 0,
+      "dropped50": 0,
+      "fps": 77.8
+    }
+  },
+  "stickyAtBottom": {
+    "innerWidth": 1920,
+    "innerHeight": 1080,
+    "headerCount": 2,
+    "headers": [
+      {
+        "top": -18960,
+        "height": 40
+      },
+      {
+        "top": 56,
+        "height": 40
+      }
+    ],
+    "container": {
+      "top": 56,
+      "bottom": 1080,
+      "height": 1024
+    },
+    "firstRowText": "JC-2627-00575 Total Environment · N Kamath",
+    "scrollTop": 19016
+  },
+  "stickyHeld": true,
+  "sorts": [
+    {
+      "key": "customer",
+      "to": {
+        "key": "customer",
+        "dir": "asc"
+      },
+      "appliedMs": 43,
+      "pressed": "realClick",
+      "orderChanged": true,
+      "rowsRendered": 51,
+      "frames": {
+        "frames": 92,
+        "avgMs": 7.58,
+        "medianMs": 7,
+        "p95Ms": 8,
+        "maxMs": 49,
+        "dropped32": 1,
+        "dropped50": 0,
+        "fps": 132
+      }
+    },
+    {
+      "key": "amount",
+      "to": {
+        "key": "amount",
+        "dir": "desc"
+      },
+      "appliedMs": 53,
+      "pressed": "realClick",
+      "orderChanged": true,
+      "rowsRendered": 48,
+      "frames": {
+        "frames": 89,
+        "avgMs": 7.48,
+        "medianMs": 7,
+        "p95Ms": 7,
+        "maxMs": 55,
+        "dropped32": 1,
+        "dropped50": 1,
+        "fps": 133.6
+      }
+    },
+    {
+      "key": "scheduledForMs",
+      "to": {
+        "key": "scheduledForMs",
+        "dir": "asc"
+      },
+      "appliedMs": 45,
+      "pressed": "realClick",
+      "orderChanged": true,
+      "rowsRendered": 47,
+      "frames": {
+        "frames": 88,
+        "avgMs": 7.38,
+        "medianMs": 7,
+        "p95Ms": 7,
+        "maxMs": 49,
+        "dropped32": 1,
+        "dropped50": 0,
+        "fps": 135.5
+      }
+    },
+    {
+      "key": "jobNumber",
+      "to": {
+        "key": "jobNumber",
+        "dir": "asc"
+      },
+      "appliedMs": 36,
+      "pressed": "realClick",
+      "orderChanged": true,
+      "rowsRendered": 49,
+      "frames": {
+        "frames": 88,
+        "avgMs": 7.32,
+        "medianMs": 7,
+        "p95Ms": 7,
+        "maxMs": 42,
+        "dropped32": 1,
+        "dropped50": 0,
+        "fps": 136.7
+      }
+    }
+  ]
+}
