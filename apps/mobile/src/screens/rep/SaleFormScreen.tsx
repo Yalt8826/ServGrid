@@ -73,6 +73,9 @@ export interface SaleFormDeps {
     }>;
   }) => Promise<{ id: string }>;
   confirmSale: (id: string) => Promise<unknown>;
+  /** Reachability. Drafts and confirms are server writes that run
+   * directly today — offline both submits are disabled and say so. */
+  online: boolean;
   /** Called after the draft saved (`confirmed=false`) or confirmed. */
   onDone: (draftId: string, confirmed: boolean) => void;
   testID?: string;
@@ -385,8 +388,12 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
           variant="secondary"
           onPress={() => void submit(false)}
           loading={busy}
-          disabled={!complete}
-          disabledReason="Pick the company and add at least one complete line."
+          disabled={!complete || !deps.online}
+          disabledReason={
+            !deps.online
+              ? "You're offline — saving needs a connection."
+              : 'Pick the company and add at least one complete line.'
+          }
           fullwidth
           testID="sale-form-save-draft"
         />
@@ -396,8 +403,12 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
             haptic('primaryActionPress');
             setConfirming(true);
           }}
-          disabled={!complete}
-          disabledReason="Pick the company and add at least one complete line."
+          disabled={!complete || !deps.online}
+          disabledReason={
+            !deps.online
+              ? "You're offline — confirming needs a connection."
+              : 'Pick the company and add at least one complete line.'
+          }
           fullwidth
           testID="sale-form-confirm"
         />

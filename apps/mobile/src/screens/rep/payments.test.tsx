@@ -42,6 +42,7 @@ function props(overrides: Partial<Parameters<typeof PaymentsScreen>[0]> = {}) {
     error: null,
     loading: false,
     pendingRecord: { busy: false, error: null },
+    online: true,
     record: vi.fn(async (_input: RecordPaymentInput) => {}),
     applyOptimisticPayment: vi.fn(),
     onRetry: () => {},
@@ -176,6 +177,19 @@ describe('PaymentsScreen (§S3)', () => {
     expect(submit.props.accessibilityState).toMatchObject({ disabled: false });
   });
 
+  it('offline, the submit is disabled and the reason names the connection', async () => {
+    const r = await create(<PaymentsScreen {...props({ online: false })} />);
+    await press(r, `payments-record-${COMPANY_ID}`);
+    await type(r, 'payment-sheet-amount', '5000');
+
+    // The writes run directly today: offline must be a disabled button
+    // that says so, never a silent failed POST of money.
+    const submit = findAll(findByTestID(toJson(r), 'payment-sheet-submit')!, (n) => n.type === 'Pressable')[0]!;
+    expect(submit.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(allText(toJson(r)).join('\n')).toContain("You're offline — recording needs a connection.");
+    await press(r, 'payment-sheet-submit');
+  });
+
   it('recording updates the balance optimistically BEFORE the sheet closes', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -270,6 +284,7 @@ describe('RecordPaymentSheet input shape', () => {
     const r = await create(
       <RecordPaymentSheet
         visible
+        online
         companies={[{ id: COMPANY_ID, name: 'Sterling Industries' }]}
         openSales={[
           {

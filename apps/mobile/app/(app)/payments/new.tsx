@@ -11,7 +11,7 @@ import { useLocalSearchParams } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { PaymentsScreen } from '../../../src/screens/rep/PaymentsScreen';
-import { useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { useOnline, useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -23,6 +23,7 @@ function RepRecordPaymentRoute(): React.ReactNode {
   const flags = useRepFlags();
   const payments = useRepPayments();
   const { pendingRecord, record } = useRecordPayment();
+  const online = useOnline();
   const companyParam = Array.isArray(params.company) ? params.company[0] : params.company;
 
   if (!flags.ready || !flags.payments) {
@@ -43,6 +44,7 @@ function RepRecordPaymentRoute(): React.ReactNode {
         error={payments.error}
         loading={payments.loading}
         pendingRecord={pendingRecord}
+        online={online}
         record={record}
         applyOptimisticPayment={payments.applyOptimisticPayment}
         onRetry={payments.reload}

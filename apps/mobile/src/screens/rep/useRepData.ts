@@ -12,8 +12,9 @@
  * cash-handover route's: the screens' `record`/`create` seams make
  * rewiring to enqueue a route-file change only.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import * as Network from 'expo-network';
 import type {
   AuthMeResponse,
   Company,
@@ -25,6 +26,7 @@ import type {
 } from '@servgrid/shared';
 import { defaultFeatureFlags } from '@servgrid/shared';
 import { api } from '../../lib/api';
+import { uuid } from '../../lib/uuid';
 import { cachedFeatureFlags, setFeatureFlags } from '../../state/featureFlags';
 import type { RecordPaymentInput } from './PaymentsScreen';
 import {
@@ -47,6 +49,29 @@ import { sumMoney } from './money';
 
 // ── api helpers ────────────────────────────────────────────────────────────
 
+/**
+ * Reachability for the money surfaces' submit gates. Same fail-open
+ * semantics as the dispatcher's `useIsOnline`: `isInternetReachable !==
+ * false` stays online on an unknown answer, because a genuinely failed
+ * fetch raises its own error — dimming a submit on a guess is the wrong
+ * trade while the sales writes still run directly.
+ */
+export function useOnline(): boolean {
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void Network.getNetworkStateAsync()
+      .then((state) => {
+        if (alive) setOnline(state.isInternetReachable !== false);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return online;
+}
+
 /** GET that throws with the server's message — screens render it verbatim. */
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await api.request<T>('GET', path);
@@ -54,14 +79,19 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.data;
 }
 
-/** POST/PATCH that throws with the server's message. */
+/** POST/PATCH that throws with the server's message. `opts.idempotencyKey`
+ * pins the key to a caller-side intent (one open sheet, one confirm) so
+ * repeated presses replay server-side instead of re-executing — leaving it
+ * off mints a fresh key per call, which is the duplicate-charge hole on a
+ * stalled frame. */
 export async function apiSend<T>(
   method: 'POST' | 'PATCH',
   path: string,
   body: unknown,
   headers?: Record<string, string>,
+  opts?: { idempotencyKey?: string },
 ): Promise<T> {
-  const res = await api.request<T>(method, path, { body, headers });
+  const res = await api.request<T>(method, path, { body, headers, idempotencyKey: opts?.idempotencyKey });
   if (!res.ok || res.data === null) throw new Error(res.error?.message ?? 'The request could not be completed.');
   return res.data;
 }
@@ -531,8 +561,18 @@ export interface PendingRecord {
  */
 export function useRecordPayment(): { pendingRecord: PendingRecord; record: (input: RecordPaymentInput) => Promise<void> } {
   const [pendingRecord, setPendingRecord] = useState<PendingRecord>({ busy: false, error: null });
+  // One key per collection intent — the open sheet — not per request. A
+  // stalled frame can deliver several taps of the same enabled button
+  // (seen on device: three taps, three PM numbers); the server's
+  // idempotency replay is what collapses those into ONE payment, and it
+  // only sees duplicates when every press carries the same key. Cleared
+  // on success; kept across a failure so an ambiguous timeout replays
+  // rather than re-charging — the plugin frees a failed claim, so a
+  // legitimately edited retry still executes.
+  const intentKeyRef = useRef<string | null>(null);
 
   const record = useCallback(async (input: RecordPaymentInput) => {
+    if (intentKeyRef.current === null) intentKeyRef.current = await uuid();
     setPendingRecord({ busy: true, error: null });
     try {
       await apiSend<PaymentRecord>('POST', '/v1/payments', {
@@ -542,7 +582,8 @@ export function useRecordPayment(): { pendingRecord: PendingRecord; record: (inp
         mode: input.mode,
         ...(input.referenceNo !== null ? { referenceNo: input.referenceNo } : {}),
         receivedAt: new Date().toISOString(),
-      });
+      }, undefined, { idempotencyKey: intentKeyRef.current });
+      intentKeyRef.current = null;
       setPendingRecord({ busy: false, error: null });
     } catch (e) {
       const message = e instanceof Error && e.message !== '' ? e.message : 'The payment could not be recorded. Try again.';

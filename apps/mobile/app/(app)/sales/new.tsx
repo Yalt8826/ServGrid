@@ -8,15 +8,16 @@
  * to enqueue outbox rows a route-file change only. Gated on
  * `sales.cards` — the same flag the sales surface answers to.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import type { Company, Product, SaleRecord } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
+import { uuid } from '../../../src/lib/uuid';
 import { SaleFormScreen, type PickerCompany, type PickerProduct } from '../../../src/screens/rep/SaleFormScreen';
-import { apiGet, apiSend, useRepFlags } from '../../../src/screens/rep/useRepData';
+import { apiGet, apiSend, useOnline, useRepFlags } from '../../../src/screens/rep/useRepData';
 import { istBusinessDate } from '../../../src/screens/technician/HandoverScreen';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
@@ -28,8 +29,15 @@ function RepSaleFormRoute(): React.ReactNode {
   const router = useRouter();
   const params = useLocalSearchParams<{ company?: string | string[] }>();
   const flags = useRepFlags();
+  const online = useOnline();
   const [companies, setCompanies] = useState<PickerCompany[]>([]);
   const [products, setProducts] = useState<PickerProduct[]>([]);
+  // One key per confirm intent: a stalled frame can deliver several taps
+  // of the same enabled button, and the server's idempotency replay is
+  // what turns those into ONE confirmation of the balance move. Cleared
+  // on success; a failed confirm frees its claim server-side, so keeping
+  // the key across a retry is safe (the body is the same `{}`).
+  const confirmKeyRef = useRef<string | null>(null);
   const companyParam = Array.isArray(params.company) ? params.company[0] : params.company;
 
   useEffect(() => {
@@ -45,9 +53,15 @@ function RepSaleFormRoute(): React.ReactNode {
       }
       if (productsR.status === 'fulfilled') {
         setProducts(
-          productsR.value
-            .filter((p) => p.isActive)
-            .map((p) => ({ id: p.id, name: p.name, sku: p.sku, defaultPrice: p.defaultPrice })),
+          // No isActive filter here: GET /v1/products already returns
+          // active rows only (§6.4) and the wire schema carries no
+          // isActive — filtering on it silently emptied the picker.
+          productsR.value.map((p) => ({
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            defaultPrice: p.defaultPrice,
+          })),
         );
       }
     })();
@@ -71,8 +85,16 @@ function RepSaleFormRoute(): React.ReactNode {
         products={products}
         today={istBusinessDate(new Date())}
         initialCompanyId={companyParam ?? null}
+        online={online}
         createDraft={(input) => apiSend<SaleRecord>('POST', '/v1/sales', input)}
-        confirmSale={(id) => apiSend<SaleRecord>('POST', `/v1/sales/${id}/confirm`, {})}
+        confirmSale={async (id) => {
+          if (confirmKeyRef.current === null) confirmKeyRef.current = await uuid();
+          const sale = await apiSend<SaleRecord>('POST', `/v1/sales/${id}/confirm`, {}, undefined, {
+            idempotencyKey: confirmKeyRef.current,
+          });
+          confirmKeyRef.current = null;
+          return sale;
+        }}
         onDone={() => {
           // Back to the list, where the draft (or the number arriving
           // from the confirm) is the newest row.

@@ -69,6 +69,9 @@ export interface RecordPaymentSheetProps {
   initialCompanyId?: string | null;
   busy: boolean;
   error: string | null;
+  /** Reachability. The writes run directly today — offline the submit is
+   * disabled and says so, never a silent failed POST of money. */
+  online: boolean;
   record: (input: RecordPaymentInput) => Promise<void>;
   /** The proof-photo capture seam; the route owns the picker. */
   captureProof?: () => Promise<string | null>;
@@ -103,7 +106,7 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
   const referenceError =
     referenceRequired && reference.trim() === '' ? 'A cheque or bank transfer needs its reference.' : undefined;
   const canRecord =
-    companyId !== null && isValidAmount(amount) && (!referenceRequired || reference.trim() !== '');
+    props.online && companyId !== null && isValidAmount(amount) && (!referenceRequired || reference.trim() !== '');
 
   async function capture(): Promise<void> {
     if (props.captureProof === undefined) {
@@ -152,11 +155,13 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
           loading={props.busy}
           disabled={!canRecord}
           disabledReason={
-            companyId === null
-              ? 'Pick the company.'
-              : !isValidAmount(amount)
-                ? 'Enter the amount received.'
-                : 'Enter the reference for this mode.'
+            !props.online
+              ? "You're offline — recording needs a connection."
+              : companyId === null
+                ? 'Pick the company.'
+                : !isValidAmount(amount)
+                  ? 'Enter the amount received.'
+                  : 'Enter the reference for this mode.'
           }
           fullwidth
           testID="payment-sheet-submit"
@@ -264,6 +269,8 @@ export interface PaymentsScreenProps {
   error: string | null;
   loading: boolean;
   pendingRecord: { busy: boolean; error: string | null };
+  /** Forwarded to the record-payment sheet's submit gate. */
+  online: boolean;
   record: (input: RecordPaymentInput) => Promise<void>;
   applyOptimisticPayment: (companyId: string, amount: string) => void;
   onRetry: () => void;
@@ -371,6 +378,7 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
           initialCompanyId={sheetCompany}
           busy={props.pendingRecord.busy}
           error={props.pendingRecord.error}
+          online={props.online}
           record={record}
           captureProof={props.captureProof}
           onDismiss={() => setSheetOpen(false)}

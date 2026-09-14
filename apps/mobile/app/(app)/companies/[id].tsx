@@ -12,7 +12,7 @@ import { Linking } from 'react-native';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { CompanyLedgerScreen } from '../../../src/screens/rep/CompanyLedgerScreen';
-import { useRecordPayment, useRepCompanyLedger, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { useOnline, useRecordPayment, useRepCompanyLedger, useRepPayments } from '../../../src/screens/rep/useRepData';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -24,6 +24,7 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
   const ledger = useRepCompanyLedger(companyId);
   const payments = useRepPayments();
   const { pendingRecord, record } = useRecordPayment();
+  const online = useOnline();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
@@ -34,6 +35,7 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
         loading={ledger.loading}
         openSales={payments.openSales.filter((s) => s.companyId === companyId)}
         pendingRecord={pendingRecord}
+        online={online}
         record={record}
         onRecorded={() => {
           ledger.reload();

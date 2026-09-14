@@ -36,6 +36,8 @@ export interface CompanyLedgerScreenProps {
   /** Confirmed sales — the record-payment sheet's *Against* options. */
   openSales: SaleRow[];
   pendingRecord: { busy: boolean; error: string | null };
+  /** Forwarded to the record-payment sheet's submit gate. */
+  online: boolean;
   record: (input: RecordPaymentInput) => Promise<void>;
   captureProof?: () => Promise<string | null>;
   onRecorded: () => void;
@@ -138,6 +140,7 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
           initialCompanyId={company.id}
           busy={props.pendingRecord.busy}
           error={props.pendingRecord.error}
+          online={props.online}
           record={props.record}
           captureProof={props.captureProof}
           onDismiss={() => setSheetOpen(false)}
