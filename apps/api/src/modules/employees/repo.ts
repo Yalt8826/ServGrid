@@ -169,6 +169,115 @@ export async function listDevices(db: Db, employeeId: string): Promise<DeviceDia
   return r.rows;
 }
 
+// ── deactivation preconditions (T4.5, PLAN-BACKEND.md §4.1, PLAN.md §5, PLAN-GAPS.md G15) ──
+//
+// One query per blocking condition, each returning the rows the 409 must
+// name — the owner's screen renders `details` as the list of things to
+// reassign or clear, so a row that cannot be named cannot be cleared.
+// Every function takes its executor explicitly and runs inside the
+// caller's transaction, so the check and the write it guards read one
+// database state.
+
+/** An open job held by the employee — condition 1. Anything not yet completed or cancelled. */
+export interface OpenJobRow {
+  id: string;
+  job_number: string;
+  title: string;
+  status: string;
+}
+
+export async function listOpenJobs(db: Db, employeeId: string): Promise<OpenJobRow[]> {
+  const r = await db.query<OpenJobRow>(
+    `SELECT id::text, job_number, title, status::text
+     FROM job_cards
+     WHERE assigned_to = $1 AND status NOT IN ('completed', 'cancelled')
+     ORDER BY job_number`,
+    [employeeId],
+  );
+  return r.rows;
+}
+
+/** A company he owns — condition 2. Reassignment is `owner_rep_id = NULL` (house account) or another rep. */
+export interface OwnedCompanyRow {
+  id: string;
+  name: string;
+}
+
+export async function listOwnedCompanies(db: Db, employeeId: string): Promise<OwnedCompanyRow[]> {
+  const r = await db.query<OwnedCompanyRow>(
+    `SELECT id::text, name::text
+     FROM companies
+     WHERE owner_rep_id = $1
+     ORDER BY name`,
+    [employeeId],
+  );
+  return r.rows;
+}
+
+/** A cash reconciliation the owner has not confirmed — condition 3, the easy one to omit. */
+export interface UnconfirmedCashRow {
+  id: string;
+  business_date: string;
+  status: string;
+  declared_amount: string;
+}
+
+export async function listUnconfirmedCash(db: Db, employeeId: string): Promise<UnconfirmedCashRow[]> {
+  const r = await db.query<UnconfirmedCashRow>(
+    `SELECT id::text, business_date::text, status::text, declared_amount::text
+     FROM cash_reconciliations
+     WHERE employee_id = $1 AND status IN ('submitted', 'disputed')
+     ORDER BY business_date`,
+    [employeeId],
+  );
+  return r.rows;
+}
+
+/**
+ * A drain claim with no stored verdict — the fourth condition, role
+ * changes only. The outbox itself lives on the handset and nothing
+ * server-side can count its queued rows; what the server CAN see is the
+ * drain ledger: while `POST /v1/sync/batch` works through an operation,
+ * the idempotency middleware holds a claim row with `response_status`
+ * NULL, and a drain that died mid-flight leaves exactly that row behind
+ * for the retry. Either way the queue is not empty and the role must not
+ * flip — §4.1's client-side drain-first rule stays the primary
+ * guarantee; this is the server's backstop against the one state it can
+ * actually observe.
+ */
+export interface UndrainedOperationRow {
+  key: string;
+  endpoint: string;
+  created_at: Date;
+}
+
+export async function listUndrainedOperations(db: Db, employeeId: string): Promise<UndrainedOperationRow[]> {
+  const r = await db.query<UndrainedOperationRow>(
+    `SELECT key, endpoint, created_at
+     FROM idempotency_keys
+     WHERE employee_id = $1 AND response_status IS NULL
+     ORDER BY created_at`,
+    [employeeId],
+  );
+  return r.rows;
+}
+
+/**
+ * The deactivation consequence chain (G15): his handsets drop out of
+ * device diagnostics and any future locate-now. A `completed`/`cancelled`
+ * style soft flip — the rows stay, `is_active` was never a delete. The
+ * touch trigger keeps `updated_at` honest for the sync cursor.
+ */
+export async function deactivateDevices(db: Db, employeeId: string): Promise<number> {
+  const r = await db.query<{ id: string }>(
+    `UPDATE devices SET is_active = false
+     WHERE employee_id = $1 AND is_active
+     RETURNING id`,
+    [employeeId],
+  );
+  return r.rows.length;
+}
+
 export interface AuditInsert {
   action: string;
   employeeId: string | null;

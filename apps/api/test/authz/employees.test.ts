@@ -98,15 +98,20 @@ function envelopeOf(status: number, body: string): ErrorEnvelope['error'] {
   return parsed.error;
 }
 
-/** Current version of the subject row — PATCH tests chain off the live value. */
-async function subjectVersion(): Promise<number> {
+/** Current version of any employee row — PATCH tests chain off the live value. */
+async function otherVersion(id: string): Promise<number> {
   const res = await app.inject({
     method: 'GET',
-    url: `/v1/employees/${subject.id}`,
+    url: `/v1/employees/${id}`,
     headers: bearer('owner'),
   });
   expect(res.statusCode).toBe(200);
   return res.json<{ version: number }>().version;
+}
+
+/** Current version of the subject row — PATCH tests chain off the live value. */
+async function subjectVersion(): Promise<number> {
+  return otherVersion(subject.id);
 }
 
 beforeAll(async () => {
@@ -407,34 +412,43 @@ describe('PATCH /v1/employees/:id — If-Match, and the stubbed preconditions', 
     expect(envelopeOf(res.statusCode, res.body).code).toBe('VALIDATION_FAILED');
   });
 
-  it('refuses deactivation with 409 EMPLOYEE_HAS_OPEN_WORK and an empty details array — the T4.5 stub', async () => {
+  it('deactivates an employee whose roster is clear — the T4.5 gate passes him through', async () => {
+    // A fresh account with no open jobs, no companies, no unconfirmed cash:
+    // the blocking listing lives in test/integration/deactivation.test.ts;
+    // here the clear path is the pin, on this endpoint, in this matrix.
+    const clear = await seedEmployee('technician', `emp.t8.${randomBytes(4).toString('hex')}`);
     const res = await app.inject({
       method: 'PATCH',
-      url: `/v1/employees/${subject.id}`,
-      headers: { ...bearer('owner'), 'if-match': String(await subjectVersion()) },
+      url: `/v1/employees/${clear.id}`,
+      headers: { ...bearer('owner'), 'if-match': String(await otherVersion(clear.id)) },
       payload: { isActive: false },
     });
-    expect(res.statusCode).toBe(409);
-    const error = envelopeOf(res.statusCode, res.body);
-    expect(error.code).toBe('EMPLOYEE_HAS_OPEN_WORK');
-    expect(error.details).toEqual([]); // empty now; Phase 4 lists the blocking rows
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ isActive: boolean; username: string }>()).toMatchObject({
+      isActive: false,
+      username: clear.username,
+    });
   });
 
-  it('refuses a real role change under the same gate — a no-op role write passes', async () => {
+  it('lands a real role change on a clear roster — and a no-op role write still passes', async () => {
+    // The gate itself is proven against blocking rows in
+    // test/integration/deactivation.test.ts; here a promotion of an
+    // account with nothing open goes through.
+    const promotee = await seedEmployee('technician', `emp.t8.${randomBytes(4).toString('hex')}`);
     const promote = await app.inject({
       method: 'PATCH',
-      url: `/v1/employees/${subject.id}`,
-      headers: { ...bearer('owner'), 'if-match': String(await subjectVersion()) },
+      url: `/v1/employees/${promotee.id}`,
+      headers: { ...bearer('owner'), 'if-match': String(await otherVersion(promotee.id)) },
       payload: { role: 'dispatcher' },
     });
-    expect(promote.statusCode).toBe(409);
-    expect(envelopeOf(promote.statusCode, promote.body).code).toBe('EMPLOYEE_HAS_OPEN_WORK');
+    expect(promote.statusCode).toBe(200);
+    expect(promote.json<{ role: string }>().role).toBe('dispatcher');
 
     const sameRole = await app.inject({
       method: 'PATCH',
-      url: `/v1/employees/${subject.id}`,
-      headers: { ...bearer('owner'), 'if-match': String(await subjectVersion()) },
-      payload: { role: 'technician' },
+      url: `/v1/employees/${promotee.id}`,
+      headers: { ...bearer('owner'), 'if-match': String(await otherVersion(promotee.id)) },
+      payload: { role: 'dispatcher' },
     });
     expect(sameRole.statusCode).toBe(200);
   });
@@ -495,26 +509,5 @@ describe('POST /v1/employees/:id/password — owner resets someone', () => {
     });
     expect(res.statusCode).toBe(404);
     expect(envelopeOf(res.statusCode, res.body).code).toBe('NOT_FOUND');
-  });
-});
-
-describe('PATCH deactivation preconditions — the Phase 4 contract, stubbed', () => {
-  // TODO(T4.5): unskip when migrations 007 (job_cards) and 010
-  // (cash_reconciliations) exist; the seeding SQL is written then. The
-  // contract it will pin (PLAN-BACKEND.md §4.1, PLAN-GAPS.md G15):
-  //
-  // 1. given one open job assigned to the employee, PATCH isActive:false
-  //    answers 409 EMPLOYEE_HAS_OPEN_WORK with *that job* in details;
-  // 2. given a company he owns (owner_rep_id), details names the company;
-  // 3. given a cash reconciliation still submitted/disputed, details
-  //    names the reconciliation;
-  // 4. with all three clear, the same PATCH succeeds — every refresh
-  //    token revoked, devices marked inactive, completions/payments
-  //    untouched, and the row out of v_employee_tracking_health.
-  //
-  // Phase 0 ships the refusal half of (1)-(3) as an empty details array —
-  // pinned live, unskipped, by the stub tests above.
-  it.skip('refuses with the blocking rows listed, then succeeds once they are resolved (needs migrations 007/010 — completed in T4.5)', async () => {
-    throw new Error('T4.5 — unskip when job_cards (007) and cash_reconciliations (010) exist');
   });
 });
