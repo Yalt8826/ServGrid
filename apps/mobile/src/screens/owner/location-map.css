@@ -1,0 +1,36 @@
+/*
+ * The selected dot's pulse (T4.10, UI/plan-2/07-OWNER.md §O3) — the one
+ * permitted continuous animation in the product, and only on the web
+ * desk where the map lives. The class is applied to the selected
+ * marker's element exactly while `pulseActive` (focused && live window
+ * open) and REMOVED otherwise; removing the class cancels the animation
+ * — the dot does not keep pulsing in a background tab.
+ */
+
+@keyframes location-dot-pulse-frames {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.9);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.location-dot-pulse {
+  animation: location-dot-pulse-frames 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Reduced motion removes movement, never feedback (02-MOTION.md §10):
+   * the window-open state stays visible as a held ring, not a pulse. */
+  .location-dot-pulse {
+    animation: none;
+    box-shadow: 0 0 0 4px rgba(22, 32, 43, 0.25);
+  }
+}
