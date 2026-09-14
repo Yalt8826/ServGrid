@@ -19,8 +19,11 @@
  *   per-flag darks the hook computes (`salesOff` / `paymentsOff`).
  *   Renewing soon comes from the loader below — the contracts backend
  *   is a later phase, so today it honestly returns [].
+ * - **owner** (T4.8) — online-only reads through `useOwnerDashboard`
+ *   (the figures and attention feed have no sync working set); the door
+ *   is the api's permission gate, which 403s every role but the owner,
+ *   and the screen itself branches on density for the two layouts.
  *
- * An owner session keeps the placeholder until Phase 4 builds theirs.
  * Nothing here spins while flags load: the answer arrives when the
  * session does, and the placeholder is the honest dark.
  */
@@ -40,6 +43,8 @@ import {
 } from '../../src/screens/dispatcher/useDispatcherDashboard';
 import { DashboardScreen } from '../../src/screens/technician/DashboardScreen';
 import { useTechJobsFlag, useTechnicianMirror } from '../../src/screens/technician/useTechnicianMirror';
+import { OwnerDashboardScreen } from '../../src/screens/owner/dashboard';
+import { useOwnerDashboard } from '../../src/screens/owner/useOwnerDashboard';
 import { useSessionStore } from '../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -120,6 +125,31 @@ function DispatcherDashboardRoute(): React.ReactNode {
   );
 }
 
+/** The owner's half of the route (T4.8, §O1): online-only reads; the
+ * density branch inside the screen produces the phone cards and the
+ * desk row-and-table from the same injected data. */
+function OwnerDashboardRoute(): React.ReactNode {
+  const router = useRouter();
+  const data = useOwnerDashboard(new Date());
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <OwnerDashboardScreen
+        now={new Date()}
+        offline={data.offline}
+        figures={data.figures}
+        jobsPerDay={data.jobsPerDay}
+        revenuePerWeek={data.revenuePerWeek}
+        dashboardError={data.dashboardError}
+        attention={data.attention}
+        attentionError={data.attentionError}
+        onRetry={data.retry}
+        onOpenRow={(target) => router.push(target)}
+      />
+    </SafeAreaView>
+  );
+}
+
 export default function Screen() {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
@@ -148,8 +178,14 @@ export default function Screen() {
     return <DispatcherDashboardRoute />;
   }
 
+  if (actor.role === 'owner') {
+    // T4.8 — the owner's dashboard. Its hook mounts only in the owner's
+    // component above, never under a field role's session.
+    return <OwnerDashboardRoute />;
+  }
+
   if (actor.role !== 'technician' || !flag.flagOn || deps === null) {
-    // Dark without the flag; the owner's dashboard is Phase 4's task.
+    // Dark without the flag; the owner's other screens are Phase 4's tasks.
     return (
       <View style={styles.root}>
         <Text>Dashboard</Text>
