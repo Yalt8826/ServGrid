@@ -96,6 +96,8 @@ let matrixServiceRowId = '';
 let matrixCompanyId = '';
 /** An attachment on the matrix technician's job, for the GET probe. */
 let matrixAttachmentId = '';
+/** A locate-now request by the matrix owner, for the GET probe (T4.4). */
+let matrixLocationRequestId = '';
 
 /** A tiny valid PNG — big enough to sniff, small enough to not care about. */
 async function probePng(): Promise<Buffer> {
@@ -825,6 +827,91 @@ const ENDPOINTS: EndpointRow[] = [
     assertOk: (actor, res) => {
       const row = trackingHealthSchema.parse(res.json());
       expect(row.employeeId).toBe(selfIds[actor!]);
+    },
+  },
+  {
+    name: 'POST /v1/location/requests',
+    method: 'POST',
+    url: '/v1/location/requests',
+    // §8 (T4.4): locate-now — the console's write. `location.read` ×
+    // create is the owner's `all` and nobody else's anything: the
+    // dispatcher is refused at the door, exactly as for the roster read
+    // below, because a request row names a position someone will draw.
+    // The gate is requireAll behind `owner.location`; the body parses
+    // after requireAuth, so `anon` is 401, not 422. No matrix device
+    // holds an FCM token, so the owner's probe lands on the honest
+    // no_pushable_device close — 200 with the row, never an error.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/location/requests',
+        headers: bearer(actor),
+        payload: { employeeId: subject.id, mode: 'fix' },
+      }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const row = res.json<Record<string, unknown>>();
+      expect(row['targetEmployeeId']).toBe(subject.id);
+      expect(row['mode']).toBe('fix');
+      expect(['failed', 'pushed']).toContain(row['status']);
+    },
+  },
+  {
+    name: 'GET /v1/location/requests/:id',
+    method: 'GET',
+    url: '/v1/location/requests/:id',
+    // §8 (T4.4): the poll. Owner only, same cell as the create — a
+    // request row's lifecycle IS position information in waiting.
+    probe: (actor) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/location/requests/${matrixLocationRequestId}`,
+        headers: bearer(actor),
+      }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const row = res.json<Record<string, unknown>>();
+      expect(row['id']).toBe(matrixLocationRequestId);
+      expect(row['targetEmployeeId']).toBe(subject.id);
+    },
+  },
+  {
+    name: 'GET /v1/location/employees',
+    method: 'GET',
+    url: '/v1/location/employees',
+    // §8's Phase 4 row (T4.4): latest position + health per tracked
+    // employee. THE coordinate surface — the one place the `location
+    // .health` / `location.read` split puts coordinates on the wire — so
+    // the matrix gives it to the owner alone and the walk asserts the
+    // others are refused, not merely unlisted.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/location/employees', headers: bearer(actor) }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const rows = res.json<Array<Record<string, unknown>>>();
+      expect(Array.isArray(rows)).toBe(true);
+      for (const row of rows) {
+        expect(row, 'a console roster row').toHaveProperty('health');
+        expect(row).toHaveProperty('position');
+        expect(['technician', 'sales_rep']).toContain(row['role']);
+      }
+    },
+  },
+  {
+    name: 'GET /v1/location/employees/:id/trail',
+    method: 'GET',
+    url: '/v1/location/employees/:id/trail',
+    // §8's Phase 4 row (T4.4): a day's ordered pings. Owner alone, for
+    // the same reason as the roster — the trail is coordinates in bulk.
+    probe: (actor) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/location/employees/${subject.id}/trail?date=${todayIst}`,
+        headers: bearer(actor),
+      }),
+    expect: { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const rows = res.json<Array<Record<string, unknown>>>();
+      expect(Array.isArray(rows)).toBe(true);
     },
   },
   {
@@ -1765,6 +1852,17 @@ beforeAll(async () => {
      SELECT id, 'owner.cash', true FROM employees WHERE role = 'owner'`,
   );
 
+  // Same for the owner console's location reads (T4.4): the four probes
+  // exercise ROLE authorization (the matrix gives `location.read` to the
+  // owner alone), so the owner rides with `owner.location` enabled — the
+  // flag's own switchable behaviour is integration/flags.test.ts's
+  // subject, and locate-now's lifecycle is integration/locate-now
+  // .test.ts's.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'owner.location', true FROM employees WHERE role = 'owner'`,
+  );
+
   // The jobs-endpoint probes need a real job (migration 007) assigned to
   // the matrix technician.
   customerId = (
@@ -1807,6 +1905,21 @@ beforeAll(async () => {
     await db.query<{ id: string }>(
       `INSERT INTO services (code, name) VALUES ($1, 'Matrix probe catalogue service') RETURNING id`,
       [`T10-SVC-${randomBytes(4).toString('hex')}`],
+    )
+  ).rows[0]!.id;
+
+  // The GET /v1/location/requests/:id probe needs a real request row —
+  // seeded directly, with a future expiry so it polls as `pushed`
+  // whatever hour the suite runs at. No FCM token exists on any matrix
+  // device, so POST probes take the honest no_pushable_device door and
+  // never reach the (unconfigured) FCM client.
+  matrixLocationRequestId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO location_requests
+         (requested_by, target_employee_id, mode, requested_at, expires_at, pushed_at)
+       VALUES ($1, $2, 'fix', now(), now() + interval '10 minutes', now())
+       RETURNING id`,
+      [selfIds.owner, subject.id],
     )
   ).rows[0]!.id;
 

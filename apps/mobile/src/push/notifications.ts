@@ -86,10 +86,12 @@ export function initPush(): void {
     }
     // Foreground delivery of the data-only wake. Our own local
     // notifications also arrive here — ignore them, or raising one
-    // would wake again and loop.
+    // would wake again and loop. The data message rides along (T4.4:
+    // a `live` locate-now push is recognised by its payload) — only
+    // this surface can read it; the headless task runs payload-blind.
     Notifications.addNotificationReceivedListener((notification) => {
       if (isLocallyRaised(notification)) return;
-      void runWake();
+      void runWake(notification.request.content.data as Record<string, unknown> | undefined);
     });
     // A tap on a row notification is an explicit user action; the wake it
     // triggers is the sync the tap exists to cause.
@@ -105,9 +107,9 @@ export function initPush(): void {
  * composition inside `handleDataOnlyPush` owns what is raised — per-row
  * local notifications from synced rows, and nothing when the delta
  * returned nothing. */
-async function runWake(): Promise<void> {
+async function runWake(data?: Record<string, unknown>): Promise<void> {
   try {
-    await handleDataOnlyPush();
+    await handleDataOnlyPush(data);
   } catch {
     // A wake failing must never crash the app or the headless task.
   }

@@ -75,7 +75,7 @@ export const WAKE_DATA: Readonly<Record<string, string>> = Object.freeze({ type:
  * permanent, and as unrecoverable as UNREGISTERED, so lib/fcm.ts's
  * `unregistered` flag alone is not the whole stale set (§12.1 names both).
  */
-const SENDER_ID_MISMATCH = /sender.?id.?mismatch/i;
+export const SENDER_ID_MISMATCH = /sender.?id.?mismatch/i;
 
 /** Sends started but not yet settled — the drain hook's subject. Module-level so the
  * HTTP-triggered sends are observable from the integration suite without plumbing. */

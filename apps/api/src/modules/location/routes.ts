@@ -10,8 +10,16 @@ import {
 import { createSlidingWindowLimiter } from '../../lib/rate-limit.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
-import { dispatchConsoleEnabled } from '../flags/gates.js';
-import { createLocationService } from './service.js';
+import { dispatchConsoleEnabled, ownerLocationEnabled } from '../flags/gates.js';
+import { createLocationConsoleService, createLocationService } from './service.js';
+import {
+  locationRequestCreateSchema,
+  locationRequestParamsSchema,
+  locationRequestSchema,
+  trailPingSchema,
+  trailQuerySchema,
+  trackedEmployeeLocationSchema,
+} from './schemas.js';
 
 /**
  * Location routes (PLAN-BACKEND.md §8): `POST /v1/location/pings`, the
@@ -23,13 +31,21 @@ import { createLocationService } from './service.js';
  * The health reads ship in phases (§8's table): `GET
  * /v1/location/health/me` (Phase 1, the chip on his own profile) and,
  * since T2.7, `GET /v1/location/health` — the roster warning on the
- * dispatcher's dashboard, the same surface the owner's Phase 4 console
- * will read. Both select `v_employee_tracking_health`: a health value
- * and a last-ping age, with no coordinate column in the view at all.
- * `/v1/location/employees` (Phase 4 — positions) is still deliberately
- * not registered: a path that does not exist answers the framework's
- * generic 404 to every role alike, so it cannot leak that other
- * employees' positions exist.
+ * dispatcher's dashboard. Both select `v_employee_tracking_health`: a
+ * health value and a last-ping age, with no coordinate column in the
+ * view at all.
+ *
+ * The console reads (T4.4) are the Phase 4 half of §8's table — `POST
+ * /v1/location/requests`, `GET /v1/location/requests/:id`,
+ * `GET /v1/location/employees` and `GET
+ * /v1/location/employees/:id/trail` — and they are where coordinates
+ * finally cross the wire. They are `location.read` reads: the matrix
+ * gives that cell to the owner alone (the dispatcher's roster warning
+ * above stays a `location.health` read — he may know a device went
+ * quiet, never where). Until T4.4 only the health routes existed, and a
+ * path that does not exist answers the framework's generic 404 to every
+ * role alike; now they exist, and `requireAll` on `location.read` is
+ * the door every one of them closes behind the owner.
  */
 
 /** §13 rate limits: ping ingest 60/min per device. Keyed on the signed
@@ -60,6 +76,11 @@ const HEALTH_ME_FORBIDDEN_MESSAGE = 'Tracking health shows your own handset only
  * `/health/me`, never by a collection he could enumerate. */
 const HEALTH_ROSTER_FORBIDDEN_MESSAGE = 'Tracking health is read by the office.';
 
+/** The console reads' refusal (T4.4): `location.read` × `read` is `all`
+ * for the owner and `none` for every other role — positions are the one
+ * surface the matrix gives to a single person (§5). */
+const CONSOLE_FORBIDDEN_MESSAGE = 'Positions are read by the owner console only.';
+
 /**
  * preHandler for `/me`-shaped self-service surfaces whose matrix cell is
  * `own`: 403 unless the shared matrix gives this role exactly `own` on
@@ -86,6 +107,7 @@ export const locationRoutes: FastifyPluginAsync<{ workWindow: { start: string; e
   opts,
 ) => {
   const service = createLocationService({ workWindow: opts.workWindow });
+  const consoleService = createLocationConsoleService(app.log);
   const limiter = createSlidingWindowLimiter({ limit: PING_RATE_LIMIT, windowMs: PING_RATE_WINDOW_MS });
 
   app.post(
@@ -165,5 +187,96 @@ export const locationRoutes: FastifyPluginAsync<{ workWindow: { start: string; e
       },
     },
     async () => service.rosterHealth(),
+  );
+
+  // ── the owner console (T4.4, §8's Phase 4 rows) ──────────────────────────
+  //
+  // Every route below carries the same two-door preHandler: `requireAll`
+  // on `location.read` × `read` (the matrix's owner-only cell — a
+  // dispatcher calling any of these is a 403 before any query exists),
+  // then the `owner.location` flag (the console's T0 rollback tier — a
+  // stale client must not find the surface lit).
+
+  // §8: "inserts a `location_requests` row, THEN sends a data-only FCM
+  // push". The persistence is what lets the console be honest — a push
+  // that dies still leaves a queryable request, and the poll below can
+  // say "requested 40s ago, device has not answered" instead of spinning.
+  app.post(
+    '/v1/location/requests',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('location.read', 'read', CONSOLE_FORBIDDEN_MESSAGE),
+        ownerLocationEnabled,
+      ],
+      config: { responseSchema: locationRequestSchema },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = locationRequestCreateSchema.parse(request.body);
+      const created = await consoleService.createRequest(auth.sub, body);
+      request.log.info(
+        { requestId: created.id, status: created.status, mode: created.mode },
+        'locate-now: request created',
+      );
+      return created;
+    },
+  );
+
+  // §8: "polled by the console". The status is derived from the row per
+  // read, so `expired` is reported the instant the window closes.
+  app.get(
+    '/v1/location/requests/:id',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('location.read', 'read', CONSOLE_FORBIDDEN_MESSAGE),
+        ownerLocationEnabled,
+      ],
+      config: { responseSchema: locationRequestSchema },
+    },
+    async (request) => {
+      claimsOf(request);
+      const params = locationRequestParamsSchema.parse(request.params);
+      return consoleService.getRequest(params.id);
+    },
+  );
+
+  // §8's table, Phase 4 row: latest position + health per tracked
+  // employee. The one endpoint where coordinates ride the wire — which
+  // is exactly why it is a `location.read` read and not the dispatcher's
+  // `location.health` roster above.
+  app.get(
+    '/v1/location/employees',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('location.read', 'read', CONSOLE_FORBIDDEN_MESSAGE),
+        ownerLocationEnabled,
+      ],
+      config: { responseSchema: z.array(trackedEmployeeLocationSchema) },
+    },
+    async () => consoleService.trackedEmployees(),
+  );
+
+  // A day's ordered pings — the trail line under the roster's selected
+  // employee. Ordered by `recorded_at` in the query; scoped to the
+  // requested IST business date by the generated column.
+  app.get(
+    '/v1/location/employees/:id/trail',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('location.read', 'read', CONSOLE_FORBIDDEN_MESSAGE),
+        ownerLocationEnabled,
+      ],
+      config: { responseSchema: z.array(trailPingSchema) },
+    },
+    async (request) => {
+      claimsOf(request);
+      const params = locationRequestParamsSchema.parse(request.params);
+      const query = trailQuerySchema.parse(request.query);
+      return consoleService.trail(params.id, query.date);
+    },
   );
 };
