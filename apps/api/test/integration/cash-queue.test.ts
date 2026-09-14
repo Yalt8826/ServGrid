@@ -615,3 +615,110 @@ describe('POST /v1/cash/handovers/:id/reopen — reversing the sign-off', () => 
     expect((await declarationOf(id)).status).toBe('confirmed');
   });
 });
+
+// ── T4.9 — "View the day": the completions and payments behind the figure ───
+
+describe('GET /v1/cash/queue/day — the completions and payments behind the expected figure (T4.9)', () => {
+  interface DayEnvelope {
+    employeeId: string;
+    employeeName: string;
+    businessDate: string;
+    completions: { jobId: string; jobNumber: string; amountCollected: string }[];
+    cashPayments: { paymentId: string; paymentNumber: string; amount: string }[];
+    completionTotal: string;
+    paymentTotal: string;
+  }
+
+  function getDay(token: string, employeeId: string, date: string) {
+    return app.inject({
+      method: 'GET',
+      url: `/v1/cash/queue/day?employeeId=${employeeId}&businessDate=${date}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+  }
+
+  it('returns the cash completions and cash payments of one employee-day, totals matching the queue row', async () => {
+    const day = await bd(-10);
+    // One completion (300) + one cash payment (250) for TECH_A on `day`;
+    // the queue row's expected figure must be their sum, and the day
+    // sheet's two side totals must reproduce it exactly.
+    await seedCompletion(TECH_A.id, day, '300');
+    await seedCashPayment(TECH_A.id, day, '250');
+
+    const res = await getDay(OWNER.token, TECH_A.id, day);
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json<DayEnvelope>();
+    expect(body.employeeId).toBe(TECH_A.id);
+    expect(body.businessDate).toBe(day);
+    expect(body.completions).toHaveLength(1);
+    expect(body.completions[0]!.amountCollected).toBe('300.00');
+    expect(body.completions[0]!.jobNumber).toMatch(/^JC-/);
+    expect(body.cashPayments).toHaveLength(1);
+    expect(body.cashPayments[0]!.amount).toBe('250.00');
+    expect(body.completionTotal).toBe('300.00');
+    expect(body.paymentTotal).toBe('250.00');
+
+    // The whole point: sheet total === queue figure, from the view itself.
+    const body10 = await queueFor(OWNER.token, `?from=${day}&to=${day}`);
+    const row = body10.rows.find((r) => r.businessDate === day && r.employeeId === TECH_A.id);
+    expect(row).toBeDefined();
+    expect(String(row!.expectedCash)).toBe('550.00');
+  });
+
+  it('another employee day and another mode money stay out', async () => {
+    const day = await bd(-11);
+    await seedCompletion(TECH_A.id, day, '400');
+    // SALES_REP's cash on the SAME day, and TECH_A's UPI completion —
+    // neither is behind TECH_A's expected figure for `day`.
+    await seedCashPayment(SALES_REP.id, day, '900');
+    jobSeq += 1;
+    const upiJobId = (
+      await db.query<{ id: string }>(
+        `INSERT INTO job_cards (job_number, customer_id, service_id, title, status,
+                                assigned_to, assigned_at, scheduled_for, closed_at)
+         VALUES ($1, $2, $3, 'T42 upi job', 'completed', $4, $5, $5, $5)
+         RETURNING id`,
+        [
+          `JC-T42-${jobSeq}-${randomBytes(3).toString('hex')}`,
+          customerId,
+          serviceId,
+          TECH_A.id,
+          noonOf(day),
+        ],
+      )
+    ).rows[0]!.id;
+    await db.query(
+      `INSERT INTO job_completions
+         (job_card_id, completed_by, completed_at, work_summary, cost, collection_mode)
+       VALUES ($1, $2, $3, 'UPI job', '120', 'upi')`,
+      [upiJobId, TECH_A.id, noonOf(day)],
+    );
+
+    const res = await getDay(OWNER.token, TECH_A.id, day);
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json<DayEnvelope>();
+    expect(body.completions).toHaveLength(1); // the UPI completion is not behind the cash figure
+    expect(body.completionTotal).toBe('400.00');
+    expect(body.cashPayments).toHaveLength(0); // the rep's cash is behind the REP's day, not TECH_A's
+    expect(body.paymentTotal).toBe('0.00');
+  });
+
+  it('an unknown employee is a 404 — an empty sheet must not read as "a day with no cash"', async () => {
+    const res = await getDay(OWNER.token, randomUUID(), await bd(-1));
+    expect(res.statusCode, res.body).toBe(404);
+    expect(envelopeOf(res.statusCode, res.body).code).toBe('NOT_FOUND');
+  });
+
+  it('a bad query is a 422, and the flag dark answers 409 like the queue read', async () => {
+    const bad = await app.inject({
+      method: 'GET',
+      url: `/v1/cash/queue/day?employeeId=not-a-uuid&businessDate=${await bd(-1)}`,
+      headers: { authorization: `Bearer ${OWNER.token}` },
+    });
+    expect(bad.statusCode).toBe(422);
+
+    const dark = await getDay(OWNER_NOFLAG.token, TECH_A.id, await bd(-1));
+    expect(dark.statusCode, dark.body).toBe(409);
+    expect(envelopeOf(dark.statusCode, dark.body).code).toBe('FLAG_DISABLED');
+  });
+});

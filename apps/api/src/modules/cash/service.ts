@@ -9,6 +9,7 @@ import type {
   CashQueueRow,
   CashReopenRequest,
 } from '@servgrid/shared';
+import type { CashQueueDayResponse } from './schemas.js';
 import { AppError } from '../../plugins/errors.js';
 import { getPool } from '../../db/pool.js';
 import { withTransaction } from '../../db/tx.js';
@@ -319,7 +320,55 @@ export function createCashService() {
     });
   }
 
-  return { declare, amend, history, queue, confirm, dispute, reopen };
+  // ── the day behind the expected figure (Phase 4, T4.9, §O2) ───────────────
+
+  /**
+   * GET /v1/cash/queue/day — "View the day" (UI/plan-2/07-OWNER.md §O2):
+   * the completions and payments behind one row's expected figure, so the
+   * owner can see which jobs produced the cash before he confirms it. A
+   * read, not an action: it changes nothing, which is the point — the
+   * only things this screen lets a shortfall meet are confirm, dispute,
+   * or the owner's own eyes.
+   *
+   * An employee id that names nobody is a 404, not an empty sheet — an
+   * empty sheet for a bad id would read as "a day with no cash", which is
+   * a real state a `no_expected_cash` row exists for.
+   */
+  async function day(employeeId: string, businessDate: string): Promise<CashQueueDayResponse> {
+    const name = await repo.employeeNameOf(getPool(), employeeId);
+    if (name === null) {
+      throw new AppError('NOT_FOUND', "We couldn't find that employee.");
+    }
+    const [completions, payments, totals] = await Promise.all([
+      repo.dayCompletions(getPool(), employeeId, businessDate),
+      repo.dayCashPayments(getPool(), employeeId, businessDate),
+      repo.dayTotals(getPool(), employeeId, businessDate),
+    ]);
+    return {
+      employeeId,
+      employeeName: name,
+      businessDate,
+      completions: completions.map((c) => ({
+        jobId: c.job_card_id,
+        jobNumber: c.job_number,
+        customerName: c.customer_name,
+        workSummary: c.work_summary,
+        amountCollected: c.amount_collected,
+        completedAt: c.completed_at.toISOString(),
+      })),
+      cashPayments: payments.map((p) => ({
+        paymentId: p.id,
+        paymentNumber: p.payment_number,
+        companyName: p.company_name,
+        amount: p.amount,
+        receivedAt: p.received_at.toISOString(),
+      })),
+      completionTotal: totals.completionTotal,
+      paymentTotal: totals.paymentTotal,
+    };
+  }
+
+  return { declare, amend, history, queue, confirm, dispute, reopen, day };
 }
 
 export type CashService = ReturnType<typeof createCashService>;
