@@ -18,6 +18,7 @@ import {
 import { loadConfig, type Config } from '../../src/config.js';
 import { closePool } from '../../src/db/pool.js';
 import { runMigrations } from '../../src/db/migrate.js';
+import { ownerAttentionResponseSchema, ownerDashboardResponseSchema } from '../../src/modules/dashboard/schemas.js';
 import { hashPassword } from '../../src/lib/password.js';
 import { buildServer } from '../../src/server.js';
 import { ULID, validEnv } from '../helpers/env.js';
@@ -1142,6 +1143,33 @@ const ENDPOINTS: EndpointRow[] = [
     expect: STACK_WRITERS,
     assertOk: (_actor, res) => {
       expect(res.json<{ ok: boolean }>().ok).toBe(true);
+    },
+  },
+  {
+    name: 'GET /v1/dashboard/owner',
+    method: 'GET',
+    url: '/v1/dashboard/owner',
+    // T4.6: the door is `cash.confirm` × `read` — the one matrix cell that
+    // is `all` for the owner and `none` for every other role, since the
+    // figures count cash only the owner may confirm.
+    probe: (actor) =>
+      app.inject({ method: 'GET', url: '/v1/dashboard/owner', headers: bearer(actor) }),
+    expect: OWNER_ONLY,
+    assertOk: (_actor, res) => {
+      const body = ownerDashboardResponseSchema.parse(res.json());
+      expect(body.jobsPerDay).toHaveLength(30);
+      expect(body.revenuePerWeek).toHaveLength(12);
+    },
+  },
+  {
+    name: 'GET /v1/dashboard/owner/attention',
+    method: 'GET',
+    url: '/v1/dashboard/owner/attention',
+    probe: (actor) =>
+      app.inject({ method: 'GET', url: '/v1/dashboard/owner/attention', headers: bearer(actor) }),
+    expect: OWNER_ONLY,
+    assertOk: (_actor, res) => {
+      ownerAttentionResponseSchema.parse(res.json());
     },
   },
   {
