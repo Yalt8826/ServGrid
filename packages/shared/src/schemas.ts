@@ -130,6 +130,28 @@ export const jobCompleteSchema = z
     { message: 'A discount requires a reason.' },
   );
 
+/**
+ * `POST /v1/jobs/:id/completion/amend` (§6.2b): the owner's correction of
+ * a filed completion. Patch semantics — a money field that is absent leaves
+ * the stored one standing — with `reason` required: an amendment without a
+ * stated why is exactly the ₹50,000-typo path this endpoint exists to close.
+ *
+ * There is deliberately no discount-requires-reason refine here, unlike
+ * `jobCompleteSchema`: the database constraint (`completion_discount_justified`)
+ * judges the FINAL row — a completion that already carries a reason stays
+ * justified when only its amount moves — and the service maps a refusal to
+ * a readable 422. Re-deciding the rule in the schema would fork it from the
+ * constraint that is its authority.
+ */
+export const jobCompletionAmendSchema = z
+  .object({
+    cost: moneyString.optional(),
+    discountAmount: moneyString.optional(),
+    discountReason: z.string().optional(),
+    reason: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+
 export const jobAssignSchema = z
   .object({ technicianId: uuid })
   .strict();
@@ -197,6 +219,7 @@ export const jobRescheduleSchema = z
 
 export type JobCancel = z.infer<typeof jobCancelSchema>;
 export type JobReschedule = z.infer<typeof jobRescheduleSchema>;
+export type JobCompletionAmendRequest = z.infer<typeof jobCompletionAmendSchema>;
 
 // ── job card responses — one schema per role, no optional-field overlaps ────
 

@@ -122,6 +122,26 @@ export async function ownerCashEnabled(request: FastifyRequest): Promise<void> {
 }
 
 /**
+ * `owner.amend` — completion amendment (PHASE-4-OWNER.md T4.3): the owner's
+ * correction of a filed completion. The same shape as `owner.cash`: an
+ * owner-only surface — nobody else holds a `job.money` update cell — so the
+ * gate asks the flag of EVERY caller (the matrix gate runs BEFORE it, the
+ * `/v1/sales/:id/void` order) and flipping it off darkens the endpoint for
+ * everyone on it, which is the T0 rollback of T4.3. A stopgap only: with
+ * the flag dark a mistyped amount cannot be corrected at all.
+ */
+export const OWNER_AMEND_DISABLED_MESSAGE =
+  'Completion amendment is switched off for your account.';
+
+export async function ownerAmendEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'owner.amend'))) {
+    throw new AppError('FLAG_DISABLED', OWNER_AMEND_DISABLED_MESSAGE);
+  }
+}
+
+/**
  * `owner.location` — the location console and its map (PHASE-4-OWNER.md
  * T4.4/T4.10). The console's four reads (`POST`+`GET /v1/location/
  * requests`, `/v1/location/employees`, `.../trail`) are a sales-only
