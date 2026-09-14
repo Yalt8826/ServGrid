@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import {
   type EmployeeAdmin,
   type EmployeeCreateRequest,
@@ -5,6 +6,7 @@ import {
   type EmployeeListFilter,
   type EmployeePatchRequest,
   type EmployeePublic,
+  type Role,
 } from '@servgrid/shared';
 import { AppError } from '../../plugins/errors.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
@@ -29,28 +31,74 @@ import * as repo from './repo.js';
 /** Unique-violation SQLSTATE — the employees_username_unique constraint. */
 const UNIQUE_VIOLATION = '23505';
 
-const DEACTIVATED_MESSAGE =
-  'This employee may still hold open work, so the account cannot be changed yet.';
+const OPEN_WORK_MESSAGE =
+  'This employee still has open work. Clear the listed items — reassign the jobs and ' +
+  'accounts, answer the cash — then try again.';
 
 /**
- * TODO(T4.5) — the deactivation and role-change preconditions, stubbed for
- * Phase 0 and completed in Phase 4. The three blocking conditions are:
- *
- *   1. open jobs assigned to the employee        (job_cards — migration 007)
- *   2. companies he owns                         (companies.owner_rep_id — 005, but listed with the others)
- *   3. cash reconciliations submitted/disputed   (cash_reconciliations — migration 010)
- *
- * …and a role change adds a fourth: his outbox must be empty (Phase 1
- * sync). A technician silently deactivated mid-week leaves six jobs
- * assigned to someone who can no longer log in; an unconfirmed handover
- * is a row in a queue the owner may not have reached. The check refuses
- * rather than guesses: until the tables exist there is no honest way to
- * say "no open work", so every deactivation and role change gets
- * `409 EMPLOYEE_HAS_OPEN_WORK` with an empty `details` array — the shape
- * Phase 4 will fill with the blocking rows.
+ * The roles whose handset carries a mirror and an outbox (PLAN-FRONTEND.md
+ * §4: dispatchers and owners are online-only, and Phase 3's rep reuses the
+ * Phase 1 outbox unchanged). A role change out of one of these roles is
+ * what removes offline capability at his next login, so it is the change
+ * the fourth blocking condition guards.
  */
-async function refuseWhileOpenWorkUnverifiable(): Promise<never> {
-  throw new AppError('EMPLOYEE_HAS_OPEN_WORK', DEACTIVATED_MESSAGE, []);
+const OFFLINE_CAPABLE_ROLES: ReadonlySet<Role> = new Set<Role>(['technician', 'sales_rep']);
+
+/**
+ * One row the owner must clear before the account can change (T4.5,
+ * PLAN.md §5, PLAN-GAPS.md G15). `kind` tells the owner's screen which
+ * reassignment link to render; the 409 is a list of these, not an error
+ * message — the screen hands him the work rather than describing it.
+ */
+export type BlockingRow =
+  | { kind: 'job'; id: string; jobNumber: string; title: string; status: string }
+  | { kind: 'company'; id: string; name: string }
+  | { kind: 'cash'; id: string; businessDate: string; status: string; declaredAmount: string }
+  | { kind: 'outbox'; id: string; endpoint: string };
+
+/**
+ * The deactivation and role-change preconditions (T4.5), completing the
+ * Phase 0 stub. Three conditions block both, and a real role change adds
+ * a fourth:
+ *
+ *   1. open jobs assigned to the employee        (job_cards)
+ *   2. companies he owns                         (companies.owner_rep_id)
+ *   3. cash reconciliations submitted/disputed   (cash_reconciliations)
+ *   4. (role change out of an offline role) an undrained operation
+ *
+ * A technician silently deactivated mid-week leaves six jobs assigned to
+ * someone who can no longer log in; a rep's accounts become invisible to
+ * both reps at once; and an unconfirmed handover is a row in a queue the
+ * owner may not have reached — deactivating the person is how a real
+ * discrepancy becomes an unanswerable one. The promoted technician loses
+ * offline capability at his next login, so his outbox must be empty
+ * first; the server cannot count queued rows on a handset, so it refuses
+ * on the drain evidence it does have (see repo.listUndrainedOperations),
+ * with §4.1's client-side drain-first rule carrying the rest.
+ */
+async function collectBlockingRows(
+  client: PoolClient,
+  employeeId: string,
+  includeOutbox: boolean,
+): Promise<BlockingRow[]> {
+  const jobs = await repo.listOpenJobs(client, employeeId);
+  const companies = await repo.listOwnedCompanies(client, employeeId);
+  const cash = await repo.listUnconfirmedCash(client, employeeId);
+  const outbox = includeOutbox ? await repo.listUndrainedOperations(client, employeeId) : [];
+  return [
+    ...jobs.map((j): BlockingRow => ({ kind: 'job', id: j.id, jobNumber: j.job_number, title: j.title, status: j.status })),
+    ...companies.map((c): BlockingRow => ({ kind: 'company', id: c.id, name: c.name })),
+    ...cash.map(
+      (c): BlockingRow => ({
+        kind: 'cash',
+        id: c.id,
+        businessDate: c.business_date,
+        status: c.status,
+        declaredAmount: c.declared_amount,
+      }),
+    ),
+    ...outbox.map((o): BlockingRow => ({ kind: 'outbox', id: o.key, endpoint: o.endpoint })),
+  ];
 }
 
 export function toEmployeeAdmin(row: repo.EmployeeAdminRecord): EmployeeAdmin {
@@ -147,10 +195,15 @@ export function createEmployeesService() {
   }
 
   /**
-   * Name, phone, role, active — under `If-Match`. Deactivation and any
-   * real role change run the open-work precondition first (T4.5 stub
-   * above), so a deactivation is currently always refused; re-activation
-   * and no-op writes are field updates and pass.
+   * Name, phone, role, active — under `If-Match`. A deactivation and any
+   * real role change run the open-work preconditions first (T4.5), inside
+   * the same transaction as the write they guard. A deactivated account's
+   * consequence chain — every refresh token revoked, his devices marked
+   * inactive — is exactly the password-reset chain plus the devices; the
+   * health view and the roster drop him through `is_active` itself, and
+   * his completions, payments and pings are untouched: `is_active` was
+   * never a delete. Re-activation and no-op writes are field updates and
+   * pass.
    */
   async function update(id: string, ifMatch: number, patch: EmployeePatchRequest): Promise<EmployeeAdmin> {
     const row = await repo.findEmployeeAdminById(getPool(), id);
@@ -166,14 +219,39 @@ export function createEmployeesService() {
     const roleChanges = patch.role !== undefined && patch.role !== row.role;
     const deactivates = patch.isActive === false && row.is_active;
     if (roleChanges || deactivates) {
-      await refuseWhileOpenWorkUnverifiable();
+      return withTransaction(async (client) => {
+        // The fourth condition is a role change's alone: promotion is what
+        // strips offline capability at his next login, so his queue must
+        // have drained first (§4.1).
+        const blocking = await collectBlockingRows(
+          client,
+          id,
+          roleChanges && OFFLINE_CAPABLE_ROLES.has(row.role),
+        );
+        if (blocking.length > 0) {
+          throw new AppError('EMPLOYEE_HAS_OPEN_WORK', OPEN_WORK_MESSAGE, blocking);
+        }
+        const updated = await repo.updateEmployeeFields(client, id, {
+          fullName: patch.fullName,
+          phone: patch.phone,
+          // The gated branch is here because the role truly changed; write it.
+          role: patch.role,
+          isActive: patch.isActive,
+        });
+        if (deactivates) {
+          await authRepo.revokeAllForEmployee(client, id);
+          await repo.deactivateDevices(client, id);
+        }
+        return toEmployeeAdmin(updated);
+      });
     }
 
     const updated = await repo.updateEmployeeFields(getPool(), id, {
       fullName: patch.fullName,
       phone: patch.phone,
-      // A same-value role write is not a role change; it passes with the rest.
-      role: roleChanges ? undefined : patch.role,
+      // Here the role is absent or same-value — a no-op role write passes
+      // with the rest, and the column keeps at least one SET clause.
+      role: patch.role,
       isActive: patch.isActive,
     });
     return toEmployeeAdmin(updated);
