@@ -181,6 +181,88 @@ export async function insertJobEvent(db: Db, e: JobEventInsert): Promise<void> {
   );
 }
 
+// ── timeline (§6.3 GET /v1/jobs/:id/events) ─────────────────────────────────
+
+export interface TimelineEventRow {
+  id: number;
+  event_type: string;
+  actor_id: string;
+  actor_name: string | null;
+  occurred_at: Date;
+  from_status: JobStatus | null;
+  to_status: JobStatus | null;
+  source: 'mobile' | 'web' | 'system';
+  /** The event's own jsonb, parsed by pg — the caller shapes it per role. */
+  payload: unknown;
+}
+
+/**
+ * The job's whole event trail, oldest first (a timeline reads in time
+ * order — O3's trail rule). Actors are LEFT JOINed so every row names its
+ * person: the owner's question is "is this right, and if not, who do I
+ * ask". A deleted account leaves an honest null, not a dropped row.
+ */
+export async function listTimelineEvents(db: Db, jobId: string): Promise<TimelineEventRow[]> {
+  const r = await db.query<TimelineEventRow>(
+    `SELECT je.id, je.event_type, je.actor_id, e.full_name AS actor_name,
+            je.occurred_at, je.from_status, je.to_status, je.source, je.payload
+       FROM job_events je
+       LEFT JOIN employees e ON e.id = je.actor_id
+      WHERE je.job_card_id = $1
+      ORDER BY je.occurred_at ASC, je.id ASC`,
+    [jobId],
+  );
+  return r.rows;
+}
+
+export interface CompletionDetailRow {
+  completed_at: Date;
+  work_summary: string;
+  cost: string | null;
+  discount_amount: string | null;
+  discount_reason: string | null;
+  amount_collected: string | null;
+  collection_mode: 'cash' | 'upi' | 'card' | 'bank_transfer' | 'none' | null;
+}
+
+/** The filed completion's own columns — the owner's detail and amend sheet read these. */
+export async function findCompletionDetail(db: Db, jobId: string): Promise<CompletionDetailRow | null> {
+  const r = await db.query<CompletionDetailRow>(
+    `SELECT completed_at, work_summary, cost::text AS cost,
+            discount_amount::text AS discount_amount, discount_reason,
+            amount_collected::text AS amount_collected, collection_mode
+       FROM job_completions
+      WHERE job_card_id = $1`,
+    [jobId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export interface CompletionPartRowT {
+  line_no: number;
+  /** Catalogue name, or the technician's free text for off-catalogue kit. */
+  name: string | null;
+  quantity: string;
+  unit_cost: string | null;
+  serial_number: string | null;
+  from_customer_stock: boolean;
+}
+
+/** The parts fitted, in line order — a record of what was fitted, read back for the owner (§O4). */
+export async function listCompletionParts(db: Db, jobId: string): Promise<CompletionPartRowT[]> {
+  const r = await db.query<CompletionPartRowT>(
+    `SELECT p.line_no, COALESCE(pr.name, p.free_text_name) AS name,
+            p.quantity::text AS quantity, p.unit_cost::text AS unit_cost,
+            p.serial_number, p.from_customer_stock
+       FROM job_completion_parts p
+       LEFT JOIN products pr ON pr.id = p.product_id
+      WHERE p.job_card_id = $1
+      ORDER BY p.line_no ASC`,
+    [jobId],
+  );
+  return r.rows;
+}
+
 // ── completion (§6.2) ───────────────────────────────────────────────────────
 
 export interface JobCompletionLockRow {

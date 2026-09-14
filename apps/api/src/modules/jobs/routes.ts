@@ -15,6 +15,8 @@ import {
   jobRescheduleSchema,
   jobStatusChangeSchema,
   jobStatusSchema,
+  jobTimelineDispatcherResponseSchema,
+  jobTimelineOwnerResponseSchema,
   uuid,
 } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
@@ -36,8 +38,10 @@ import {
  * T1.5 — `GET /v1/jobs`, `GET /v1/jobs/:id`, `POST /v1/jobs/:id/status` —
  * T1.6's `POST /v1/jobs/:id/complete`, and T1.7's two date-writing
  * paths: `POST /v1/jobs/:id/cancel` (which may raise a successor) and
- * `PATCH /v1/jobs/:id` of `scheduled_for` (which never does). Creation,
- * assignment and the timeline are later tasks on the same module.
+ * `PATCH /v1/jobs/:id` of `scheduled_for` (which never does). The
+ * timeline (`GET /v1/jobs/:id/events`) and the completion amendment
+ * (T4.3) are here too. Creation and assignment are later tasks on the
+ * same module.
  *
  * Response shape **by role** is three separate schemas (`JobCardTechnician`
  * / `JobCardDispatcher` / `JobCardOwner`, §6.3) — attached per request via
@@ -229,6 +233,28 @@ export const jobsRoutes: FastifyPluginAsync<{ workWindow: WorkWindow }> = async 
     async (request) => {
       const auth = claimsOf(request);
       return service.getJobCard({ id: auth.sub, role: auth.role }, jobIdParam(request));
+    },
+  );
+
+  // §6.3 — the timeline read ("dispatcher, owner"), and §O4's detail
+  // source: the full `job_events` trail plus, for the owner only, the
+  // filed completion with its parts. The dispatcher's shape is the
+  // smaller schema, and his money-bearing payloads are redacted in the
+  // service — the money-leak walk holds this endpoint like the rest.
+  app.get(
+    '/v1/jobs/:id/events',
+    {
+      preHandler: app.requireAuth,
+      config: {
+        responseSchemaByRole: {
+          owner: jobTimelineOwnerResponseSchema,
+          dispatcher: jobTimelineDispatcherResponseSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      return service.jobTimeline({ id: auth.sub, role: auth.role }, jobIdParam(request));
     },
   );
 

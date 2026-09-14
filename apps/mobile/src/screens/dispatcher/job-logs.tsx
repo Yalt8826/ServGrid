@@ -363,8 +363,13 @@ function FilterChip({
  * resolution). One option sheet open at a time; choosing applies and
  * closes; ✕ clears everything and is visible exactly when the filters
  * are not default.
+ *
+ * EXPORTED since T4.11: the owner's job list (07-OWNER.md §O4, "Phone:
+ * `JobCard` list with the dispatcher's filter bar") mounts THIS bar —
+ * the same chips, the same sheets, the same filter state type — instead
+ * of a second filter bar drifting beside it.
  */
-function FilterBar({
+export function FilterBar({
   filters,
   technicians,
   offline,

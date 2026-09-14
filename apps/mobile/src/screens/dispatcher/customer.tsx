@@ -10,10 +10,13 @@
  *
  * The two absences the spec is explicit about:
  *
- * - **No company field.** Not on the form, stripped server-side
- *   (`DispatcherCustomerCreateSchema` / `dispatcherCustomerPatchSchema`,
- *   PLAN.md §5 rule 3). The form fields don't even carry a `companyId`
- *   in their type — see `customerForm.ts`.
+ * - **No company field on the dispatcher's form.** Not rendered, and
+ *   stripped server-side (`DispatcherCustomerCreateSchema` /
+ *   `dispatcherCustomerPatchSchema`, PLAN.md §5 rule 3). The form fields
+ *   don't even carry a `companyId` in their type — see
+ *   `customerForm.ts`. The OWNER's routes (§O4b) pass the company
+ *   capability to the SAME form, which is how his copy grows the field
+ *   without a second form existing.
  * - **The stack is read-only here.** Technicians own the stack because
  *   they are the ones who know what got fitted (PLAN.md §4); a
  *   dispatcher editing it from a phone call is how a serial number
@@ -32,7 +35,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { STATUS, SEMANTIC, SPACE, TAP, type JobStatus } from '@servgrid/shared';
 import type { CustomerDetailDispatcher } from '@servgrid/shared';
-import { Banner, Button, EmptyState, TextField } from '../../components/ui';
+import { Banner, Button, EmptyState, Sheet, TextField } from '../../components/ui';
+import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
 import {
   emptyCustomerForm,
@@ -44,6 +48,8 @@ import { firstNameOf } from './dispatchForm';
 import { shortJobNumber } from './jobLogsFilters';
 
 export const CUSTOMER_OFFLINE_MESSAGE = 'No connection. This screen is not live.';
+
+const hitSlop = { top: 8, bottom: 8, left: 8, right: 8 };
 
 /** One search hit — the two-line row's content. */
 export interface CustomerSearchRow {
@@ -387,6 +393,23 @@ export function CustomerDetailScreen(deps: CustomerDetailDeps): React.ReactNode 
 
 // ── the form — /customers/new and /customers/[id]/edit ───────────────────
 
+/**
+ * The COMPANY field as a capability prop (§O4b, the same seam as
+ * `StackSection`'s `editable`): the DISPATCHER'S routes never pass it,
+ * so the field is not on his form at all; the OWNER'S routes pass it,
+ * and the same form renders it on create and on edit. `companyId` is an
+ * owner and rep field (PLAN.md §5) and the api strips it from
+ * dispatcher payloads — the form carries that as a type, not as trust.
+ */
+export interface CustomerFormCompanyDeps {
+  /** The accounts the owner can link the site to, name ascending. */
+  companies: ReadonlyArray<{ id: string; name: string }>;
+  selectedCompanyId: string | null;
+  /** `null` detaches the site — a house-account-less site is normal. */
+  onSelectCompany(companyId: string | null): void;
+  disabled?: boolean;
+}
+
 export interface CustomerFormDeps {
   offline: boolean;
   mode: 'create' | 'edit';
@@ -395,6 +418,8 @@ export interface CustomerFormDeps {
   initial: CustomerFormFields | null;
   saving: boolean;
   submitError: string | null;
+  /** Present for the owner (§O4b): renders the company field, create and edit. */
+  company?: CustomerFormCompanyDeps | null;
   /** Called only when the submit-time validation passes. */
   onSave(fields: CustomerFormFields): void;
   onCancel(): void;
@@ -404,6 +429,7 @@ export function CustomerFormScreen(deps: CustomerFormDeps): React.ReactNode {
   const [fields, setFields] = useState<CustomerFormFields>(deps.initial ?? emptyCustomerForm());
   const [filledFrom, setFilledFrom] = useState<CustomerFormFields | null>(deps.initial);
   const [attempted, setAttempted] = useState(false);
+  const [companySheetOpen, setCompanySheetOpen] = useState(false);
 
   // Edit mode's record arrives from the network after mount. Fill once,
   // and only while the dispatcher has not started typing — a value he
@@ -439,10 +465,10 @@ export function CustomerFormScreen(deps: CustomerFormDeps): React.ReactNode {
       </Text>
       {deps.submitError !== null ? <Banner tone="danger" message={deps.submitError} testID="customer-form-error" /> : null}
 
-      {/* The form fields, in full. There is NO company field: the
-      dispatcher cannot read company data (PLAN.md §5), the form does not
-      offer it, and the shared type cannot carry it — the server strips
-      it a second time regardless (§D4's first absence). */}
+      {/* The form fields. The COMPANY field renders only when the route
+      passed the capability (§O4b) — the dispatcher's routes do not, so
+      on his form there is no company field at all (§D4's first
+      absence), and his payload type cannot carry one regardless. */}
       <View style={styles.fieldWrap}>
         <TextField label="Name" value={fields.name} onChangeText={change('name')} testID="customer-field-name" />
         {problems.name !== undefined ? (
@@ -459,6 +485,36 @@ export function CustomerFormScreen(deps: CustomerFormDeps): React.ReactNode {
           </Text>
         ) : null}
       </View>
+      {/* The company field — only where the capability was passed (§O4b).
+      The dispatcher's form renders nothing here: no prop, no field, and
+      the payload type cannot carry one regardless. */}
+      {deps.company !== undefined && deps.company !== null ? (
+        <View style={styles.fieldWrap}>
+          <Text style={styles.fieldLabel}>Company</Text>
+          <Pressable
+            testID="customer-field-company"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: deps.company.disabled === true }}
+            disabled={deps.company.disabled === true}
+            hitSlop={hitSlop}
+            onPress={() => {
+              haptic('pickerSelect');
+              setCompanySheetOpen(true);
+            }}
+            style={styles.trigger}
+          >
+            <Text
+              style={
+                deps.company.selectedCompanyId === null ? styles.triggerPlaceholderLabel : styles.triggerLabel
+              }
+            >
+              {companyLabelOf(deps.company)}
+            </Text>
+            <Text style={styles.triggerChevron}> ▾</Text>
+          </Pressable>
+          <Text style={styles.fieldHelper}>Links the site's jobs to the company ledger.</Text>
+        </View>
+      ) : null}
       <View style={styles.fieldWrap}>
         <TextField label="Alt phone" value={fields.altPhone} onChangeText={change('altPhone')} testID="customer-field-alt-phone" />
       </View>
@@ -482,8 +538,52 @@ export function CustomerFormScreen(deps: CustomerFormDeps): React.ReactNode {
         <Button label="Save customer" loading={deps.saving} onPress={save} fullwidth testID="customer-save" />
         <Button label="Cancel" variant="ghost" onPress={deps.onCancel} fullwidth testID="customer-cancel" />
       </View>
+
+      {/* The company picker — the owner's one extra sheet. Choosing applies
+      and closes; "No company" detaches the site. */}
+      {deps.company !== undefined && deps.company !== null && companySheetOpen ? (
+        <Sheet visible title="Which company" onDismiss={() => setCompanySheetOpen(false)} testID="customer-company-sheet">
+          <Pressable
+            testID="company-option-none"
+            accessibilityRole="button"
+            accessibilityState={{ selected: deps.company.selectedCompanyId === null }}
+            onPress={() => {
+              deps.company?.onSelectCompany(null);
+              setCompanySheetOpen(false);
+            }}
+            style={styles.optionRow}
+          >
+            <Text style={deps.company.selectedCompanyId === null ? styles.optionLabelSelected : styles.optionLabel}>
+              No company
+            </Text>
+          </Pressable>
+          {deps.company.companies.map((company) => (
+            <Pressable
+              key={company.id}
+              testID={`company-option-${company.id}`}
+              accessibilityRole="button"
+              accessibilityState={{ selected: deps.company?.selectedCompanyId === company.id }}
+              onPress={() => {
+                deps.company?.onSelectCompany(company.id);
+                setCompanySheetOpen(false);
+              }}
+              style={styles.optionRow}
+            >
+              <Text style={deps.company?.selectedCompanyId === company.id ? styles.optionLabelSelected : styles.optionLabel}>
+                {company.name}
+              </Text>
+            </Pressable>
+          ))}
+        </Sheet>
+      ) : null}
     </ScrollView>
   );
+}
+
+/** The trigger's label — the linked account's name, or the honest empty. */
+function companyLabelOf(company: CustomerFormCompanyDeps): string {
+  if (company.selectedCompanyId === null) return 'No company';
+  return company.companies.find((c) => c.id === company.selectedCompanyId)?.name ?? 'No company';
 }
 
 // ── shared styles ────────────────────────────────────────────────────────
@@ -568,5 +668,30 @@ const styles = StyleSheet.create({
   newCustomerLabel: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
   fieldWrap: { marginTop: SPACE[3] },
   fieldError: { ...textStyle('caption'), color: SEMANTIC.feedback.danger, marginTop: 4 },
+  fieldLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 },
+  fieldHelper: { ...textStyle('caption'), color: SEMANTIC.text.secondary, marginTop: 4 },
+  trigger: {
+    minHeight: 44,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    backgroundColor: SEMANTIC.bg.raised,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  triggerLabel: { ...textStyle('body'), color: SEMANTIC.text.primary, flexShrink: 1 },
+  triggerPlaceholderLabel: { ...textStyle('body'), color: SEMANTIC.text.placeholder, flexShrink: 1 },
+  triggerChevron: { ...textStyle('body'), color: SEMANTIC.text.secondary },
+  optionRow: {
+    minHeight: TAP.min,
+    justifyContent: 'center',
+    paddingHorizontal: SPACE[2],
+    borderTopWidth: 1,
+    borderTopColor: SEMANTIC.line.default,
+  },
+  optionLabel: { ...textStyle('body'), color: SEMANTIC.text.primary },
+  optionLabelSelected: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
   actions: { marginTop: SPACE[5], gap: SPACE[3] },
 });
