@@ -1,10 +1,13 @@
 /**
- * Sales — the list route (UI/plan-2/06-SALES-REP.md §S2, T3.7). The rep's
- * branch renders the §S2 list (drafts first, Draft chip, status pills)
- * over `useRepSales`, gated on `sales.cards` the same way the server's
- * sales surface is: the flag decides whether the screen answers, and a
- * dark placeholder is the honest off. Other roles keep the placeholder
- * (the owner's sales screens are Phase 4's task).
+ * Sales — the list route (UI/plan-2/06-SALES-REP.md §S2, T3.7;
+ * owner's copy §O5, T4.12). Role split:
+ *
+ * - **Rep branch:** the §S2 list (drafts first, Draft chip, status
+ *   pills) over `useRepSales`, gated on `sales.cards` the same way the
+ *   server's sales surface is.
+ * - **Owner branch (T4.12):** the §O5 list — cards on a phone, a table
+ *   with a running total on the desk — with the VOID action, the one
+ *   place in the product a sale can be reversed, reason required.
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +16,9 @@ import { useRouter } from 'expo-router';
 import { SEMANTIC } from '@servgrid/shared';
 import { SalesScreen } from '../../../src/screens/rep/SalesScreen';
 import { useRepFlags, useRepSales } from '../../../src/screens/rep/useRepData';
+import { OwnerSalesScreen } from '../../../src/screens/owner/SalesScreen';
+import { useOwnerSales, useVoidSale } from '../../../src/screens/owner/useOwnerData';
+import { isFlagOn } from '../../../src/state/featureFlags';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -54,9 +60,39 @@ function RepSalesRoute(): React.ReactNode {
   );
 }
 
+function OwnerSalesRoute(): React.ReactNode {
+  const sales = useOwnerSales();
+  const { voidBusy, voidError, voidSale } = useVoidSale(sales.reload);
+
+  if (!isFlagOn('sales.cards')) {
+    return (
+      <View style={styles.root}>
+        <Text>Sales</Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <OwnerSalesScreen
+        rows={sales.rows}
+        error={sales.error}
+        loading={sales.loading}
+        onVoid={(sale, reason) => {
+          void voidSale(sale.id, reason).catch(() => {});
+        }}
+        voidBusy={voidBusy}
+        voidError={voidError}
+        onRetry={sales.reload}
+      />
+    </SafeAreaView>
+  );
+}
+
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   if (actor === null) return null;
+  if (actor.role === 'owner') return <OwnerSalesRoute />;
   if (actor.role === 'sales_rep') return <RepSalesRoute />;
   return (
     <View style={styles.root}>

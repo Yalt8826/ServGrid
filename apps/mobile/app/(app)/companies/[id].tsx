@@ -1,9 +1,14 @@
 /**
- * Company detail — the rep's route (UI/plan-2/06-SALES-REP.md §S4,
- * T3.7). The §S4 ledger screen over `useRepCompanyLedger`, with the
- * record-payment sheet (the same `useRecordPayment` seam /payments uses)
- * and *New sale* prefilled with the company. Scoping is the server's: a
- * company that is not his answers OUT_OF_SCOPE, rendered as the banner.
+ * Company detail — route (UI/plan-2/06-SALES-REP.md §S4, T3.7; owner's
+ * copy §O5, T4.12). Role split:
+ *
+ * - **Rep branch:** the §S4 ledger screen over `useRepCompanyLedger`,
+ *   with the record-payment sheet and *New sale* prefilled with the
+ *   company. Scoping is the server's: a company that is not his answers
+ *   OUT_OF_SCOPE, rendered as the banner.
+ * - **Owner branch (T4.12):** the same ledger, unscoped, over a header
+ *   that names the owner rep and carries the reassignment control —
+ *   voided documents keep their rows with their reasons.
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +18,8 @@ import { Linking } from 'react-native';
 import { SEMANTIC } from '@servgrid/shared';
 import { CompanyLedgerScreen } from '../../../src/screens/rep/CompanyLedgerScreen';
 import { useOnline, useRecordPayment, useRepCompanyLedger, useRepPayments } from '../../../src/screens/rep/useRepData';
+import { OwnerCompanyDetailScreen } from '../../../src/screens/owner/CompanyDetailScreen';
+import { useOwnerCompanyLedger, useOwnerReps, useReassignCompany } from '../../../src/screens/owner/useOwnerData';
 import { captureProofPhoto } from '../../../src/lib/captureProof';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
@@ -51,11 +58,45 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
   );
 }
 
+function OwnerCompanyLedgerRoute({ companyId }: { companyId: string }): React.ReactNode {
+  const router = useRouter();
+  const ledger = useOwnerCompanyLedger(companyId);
+  const reps = useOwnerReps();
+  const { reassignBusy, reassignError, reassign } = useReassignCompany(ledger.reload);
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      <OwnerCompanyDetailScreen
+        companyId={companyId}
+        companyName={ledger.company?.name ?? ''}
+        contactPerson={ledger.company?.contactPerson ?? null}
+        phone={ledger.company?.phone ?? null}
+        gstin={ledger.company?.gstin ?? null}
+        ownerRepName={ledger.ownerRepName}
+        shared={ledger.shared}
+        ledger={ledger.ledger}
+        error={ledger.error ?? reps.error}
+        loading={ledger.loading}
+        reps={reps.reps}
+        onReassign={(id, ownerRepId) => {
+          void reassign(id, ownerRepId).catch(() => {});
+        }}
+        reassignBusy={reassignBusy}
+        reassignError={reassignError}
+        onNewSale={() => router.push(`/sales/new?company=${companyId}`)}
+        onRecordPayment={() => router.push(`/payments/new?company=${companyId}`)}
+        onRetry={ledger.reload}
+      />
+    </SafeAreaView>
+  );
+}
+
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const companyId = Array.isArray(params.id) ? params.id[0] : params.id;
   if (actor === null || companyId === undefined) return null;
+  if (actor.role === 'owner') return <OwnerCompanyLedgerRoute companyId={companyId} />;
   if (actor.role === 'sales_rep') return <RepCompanyLedgerRoute companyId={companyId} />;
   return (
     <View style={styles.root}>
