@@ -156,7 +156,7 @@ Dispatcher requests additionally run under `SET LOCAL ROLE servgrid_dispatcher`,
 - [ ] **Or the item is cut.** That is a legitimate outcome, and it is why this is flagged separately
 
 **If it fails**
-**Cut it.** The application-layer guarantees — separate repo files, three lint rules, the recursive money-leak CI assertion, per-role response schemas — already carry the promise. This is a belt over braces, and a belt that fights the connection pool is worse than no belt.
+**Cut it.** The application-layer guarantees — separate repo files, the custom lint rules, the recursive money-leak CI assertion, per-role response schemas — already carry the promise. This is a belt over braces, and a belt that fights the connection pool is worse than no belt.
 
 **Commits**
 `chore(start): T5.3 dispatcher db role` → `feat(db): migration 014 — optional dispatcher role with revoked money and location`
@@ -237,7 +237,7 @@ Each cell is filled from what happened on that device. **A cell inferred from an
 **If it fails**
 Per-vendor investigation using `battery_pct` at last ping. **If tracking is unfixable on the majority of handsets after genuine mitigation effort, the Phase 1 descope is still available**: on-demand *Locate now* plus a manual "I'm on site" check-in, and continuous tracking becomes a spike.
 
-That is a real option, not a consolation. **Jobs, offline completion, cash handover and the product stack are the majority of the app's value, and none of them depend on a ping every 15 minutes.** Deciding this in advance is what stopped tracking holding the other 80% hostage.
+That is a real option, not a consolation. **Jobs, completion, cash handover and the product stack are the majority of the app's value, and none of them depend on a ping every 15 minutes.** Deciding this in advance is what stopped tracking holding the other 80% hostage.
 
 **Commits**
 `chore(start): T5.5 OEM matrix` → `docs(ops): OEM matrix filled per roster handset, staleness threshold settled`
@@ -348,7 +348,7 @@ A contrast failure in the field is a token change, not a "we'll note it". `UI/pl
 - `v_cash_reconciliation_queue` over 90 days — the `FULL OUTER JOIN` is the most expensive query in the system
 - The dispatcher's Job Logs filter at 2,000 jobs
 - A company ledger at 500 rows
-- The delta sync's **scope-exit query** — it runs on every delta and was added late, so it has the least production exposure
+- The technician's work read (`GET /v1/technician/work`) — it runs on every focus, foreground and push wake, and replaced delta sync late (2026-09-15), so it has the least production exposure
 - A location trail for one employee for one day
 
 **Done when**
@@ -423,6 +423,6 @@ The whole thing is done when, **for one full month:**
 - A backup has been restored successfully at least once
 - **No dispatcher has ever seen a revenue figure** — from `job_completions` or from `service_contracts` — **verifiable from the response-schema assertions in CI, not from anyone's recollection**
 - AMC visits are raised, assigned and closed without anyone tracking them outside the app
-- **No queued field work has been lost:** not to a logout, not to a shared handset, not to a rejected sync, not to a scope change
+- **No submitted field work has been silently lost:** not to a dropped connection, not to a shared handset, not to a refused submit, not to a scope change
 
-That last line is the one to read again at the end. It is the promise the whole offline architecture exists to keep, and it is the only one on this list that cannot be recovered from after the fact.
+That last line is the one to read again at the end. It is the promise the original offline architecture was built to keep — the online design keeps it by never discarding what someone typed until the server has it — and it is the only one on this list that cannot be recovered from after the fact.

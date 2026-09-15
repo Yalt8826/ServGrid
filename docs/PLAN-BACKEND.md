@@ -11,14 +11,14 @@ The API's job description, stated once: **the app never talks to the database di
 | Phase | Backend deliverable | Unblocks |
 |---|---|---|
 | 0 | Fastify skeleton, config, pg pool, migrations 001–005, error envelope, auth, **employee CRUD (§4.1)**, `packages/shared` permission matrix + zod schemas, **FCM project confirmed and a push sent end to end** | everything |
-| 1 | Jobs module, completion/cancellation, `job_events`, idempotency plugin, sync bootstrap/delta/batch, location ingest, attachments, cash handover declare, stack changes **via the completion payload**, **`v_employee_tracking_health` + `GET /v1/location/health/me`** | Technician app |
+| 1 | Jobs module, completion/cancellation, `job_events`, idempotency plugin, technician work read (`GET /v1/technician/work`, which replaced sync bootstrap/delta/batch on 2026-09-15), location ingest, attachments, cash handover declare, stack changes **via the completion payload**, **`v_employee_tracking_health` + `GET /v1/location/health/me`** | Technician app |
 | 2 | Dispatcher job queries against `v_job_cards_dispatcher`, assignment + bulk reassign, `v_technician_load`, customer CRUD, **standalone stack endpoints (§6.4)**, **assignment push notifications** | Dispatcher app |
 | 2B | `service_contracts` + `contract_visits` CRUD, nightly visit generator, `v_contracts_expiring` | Contracts |
 | 3 | Companies with rep ownership, sales cards + items, payments, `v_company_balances`, company ledger, rep cash handover | Sales Rep app |
 | 4 | Cash reconciliation queue + confirm/dispute/reopen, **completion amendment**, location console queries, on-demand FCM requests, employee **deactivation preconditions and role change**, owner dashboards | Owner app |
 | 5 | Tracking-health sweep + alerting, retention jobs, DB role hardening, load sanity | Hardening |
 
-Phase 1 is deliberately the largest. Idempotency, the sync protocol and location ingest are the three pieces that are painful to retrofit, and Phase 1 is the only phase where the surface is small enough to get them right.
+Phase 1 is deliberately the largest. Idempotency, the job write path and location ingest are the three pieces that are painful to retrofit, and Phase 1 is the only phase where the surface is small enough to get them right.
 
 **FCM moves forward two phases.** It was scoped as a Phase 4 concern for the owner's *Locate now*. Assignment notifications (§12) need it the moment dispatchers exist, so the Google project must be confirmed in Phase 0 and the channel is a **Phase 2 blocker**. Confirming it early costs an afternoon; discovering in Phase 2 that the account does not exist costs the phase.
 
@@ -44,7 +44,7 @@ apps/api/src/
   modules/
     auth/       employees/   customers/   products/   services/
     jobs/       sales/       payments/    companies/  cash/
-    location/   devices/     attachments/ sync/       dashboard/
+    location/   devices/     attachments/ technician/ dashboard/
   lib/
     sequences.ts          allocateNumber('job' | 'sale' | 'payment')
     time.ts               IST business date, work-window predicate
@@ -73,7 +73,7 @@ One shape, always:
              "requestId": "01JB…" } }
 ```
 
-`message` is written for the technician holding the phone, not for a log. It is the string the offline conflict banner shows verbatim, so it must be plain and must say *what happened*, not *what failed*.
+`message` is written for the technician holding the phone, not for a log. It is the string the submitting screen shows verbatim, so it must be plain and must say *what happened*, not *what failed*.
 
 Codes are an exhaustive union in `packages/shared`, so the client can switch on them:
 
@@ -86,8 +86,8 @@ Codes are an exhaustive union in `packages/shared`, so the client can switch on 
 | `NOT_FOUND` | 404 | |
 | `VERSION_CONFLICT` | 409 | `If-Match` version stale |
 | `ILLEGAL_TRANSITION` | 409 | status machine refused |
-| `JOB_ALREADY_CLOSED` | 409 | completed/cancelled while client was offline |
-| `DUPLICATE_ENTITY` | 409 | unique violation on an offline create; `details.existing` names the server's row |
+| `JOB_ALREADY_CLOSED` | 409 | already completed or cancelled — typically by the office while the technician was on his way |
+| `DUPLICATE_ENTITY` | 409 | unique violation on a create; `details.existing` names the server's row |
 | `RECONCILIATION_CONFIRMED` | 409 | completion amendment refused — that day is signed off; `details` names the reconciliation |
 | `EMPLOYEE_HAS_OPEN_WORK` | 409 | deactivation refused; `details` lists open jobs and owned companies |
 | `IDEMPOTENCY_IN_FLIGHT` | 409 | same key still processing |
@@ -132,9 +132,9 @@ Returns `{ accessToken, refreshToken, employee, mustChangePassword, consent: { r
 
 **Tokens** — access JWT, HS256, **15 minutes**, claims `{ sub, role, deviceId, jti }`. Refresh token opaque 256-bit random, sha256-stored, **60 days**, rotated on every use.
 
-60 days is long on purpose. Field staff are offline for hours, and a technician re-entering a password on a 6" screen in the sun to clear a queued outbox is a failure of the design, not of the technician. The mitigation for the long window is rotation plus reuse detection: presenting a revoked refresh token revokes the entire chain and forces a fresh login.
+60 days is long on purpose. Field staff use the app all day for weeks, and a technician re-entering a password on a 6" screen in the sun with a customer waiting is a failure of the design, not of the technician. Staying signed in is one of the two things the phone keeps (decision 2026-09-15). The mitigation for the long window is rotation plus reuse detection: presenting a revoked refresh token revokes the entire chain and forces a fresh login.
 
-**Offline interaction.** The outbox drain treats `401 UNAUTHENTICATED` as "refresh, then retry once" — never as "drop the operation". If the refresh also fails, the queue *stays queued* and the UI shows a re-login prompt without discarding a single pending item. This rule is stated here because it is a backend contract as much as a client one: the API must never return a body on 401 that a naive client would treat as a terminal rejection.
+**Refresh interaction.** The API client treats `401 UNAUTHENTICATED` as "refresh, then retry once" — never as a terminal refusal of the submit. If the refresh also fails, the screen keeps everything typed and asks the person to sign in again; the retry afterwards reuses the same idempotency key. This rule is stated here because it is a backend contract as much as a client one: the API must never return a body on 401 that a naive client would treat as a terminal rejection.
 
 **Password change** — `POST /v1/auth/password` for self; `POST /v1/employees/:id/password` for the owner resetting someone. Both revoke every refresh token for that employee.
 
@@ -149,7 +149,7 @@ Returns `{ accessToken, refreshToken, employee, mustChangePassword, consent: { r
 2. **Companies he owns.** Reassign or null them first — otherwise a rep's accounts become invisible to both reps at once.
 3. **Cash reconciliations still `submitted` or `disputed`.** This is the one that is easy to omit and worst to omit. The first two are visible on screens the owner already looks at; an unconfirmed handover is a row in a queue he may not have reached. Deactivating the person is how a real discrepancy becomes an unanswerable one — the only person who could explain it can no longer log in and has probably left. Confirm or dispute the day first; that takes a minute and is the point of the queue.
 
-**A role change is gated the same way.** `PATCH /v1/employees/:id { role }` is refused under the same three conditions plus a fourth: a technician promoted to dispatcher loses offline capability at his next login, so his outbox must be empty. The client already handles the queue-drain half (`PLAN-FRONTEND.md` §5); the server refusing the change while work is open is what stops the two halves disagreeing.
+**A role change is gated the same way.** `PATCH /v1/employees/:id { role }` is refused under the same three conditions. A fourth — an empty outbox for a technician losing offline capability — was removed with the outbox on 2026-09-15; the new role applies at the person's next sign-in.
 
 On success: revoke every refresh token, mark his devices inactive, and exclude him from `v_employee_tracking_health` so a deactivated account does not sit permanently amber in the owner's console. Completions, payments and pings are untouched — `is_active` was never a delete.
 
@@ -192,7 +192,7 @@ Owner only, except `GET /v1/employees/me`. There is no self-registration and no 
 
 `POST /v1/employees` is needed from **Phase 0**, not Phase 4: the fourteen accounts have to exist before anyone can log in, and seeding them by hand into production is how a password ends up in a shell history. The owner-facing *screen* is Phase 4; the endpoint is Phase 0.
 
-Role changes are allowed but not free — a technician promoted to dispatcher keeps his historical completions, which is correct, but his offline capability disappears on next login and any queued items must drain first. The client handles this the same way it handles logout (`PLAN-FRONTEND.md` §5): the role change takes effect after the queue is empty.
+Role changes are allowed but not free — a technician promoted to dispatcher keeps his historical completions, which is correct, and the change is gated by the same open-work conditions as deactivation (§4.1). The new role applies at his next sign-in; with nothing stored on the phone there is no queue to drain first.
 
 ---
 
@@ -263,7 +263,7 @@ Defined in `packages/shared` so client and server agree on what is legal before 
 
 Reassigning from `en_route` resets the status to `assigned` — the new technician has not set off — and emits `reassigned`, which fires the push to both handsets (§12.1). **Bulk reassign applies the same rule per job**, so a multi-select spanning a started job returns partial results naming it, which is the honest outcome the dispatcher screen already renders (`UI/plan-2/05-DISPATCHER.md` §D2).
 
-**The transition that matters** is the one `PLAN.md` §6 names: a technician completes a job offline that the office cancelled while he was underground. The server rejects with `409 JOB_ALREADY_CLOSED` and a message naming who cancelled it and when. The client keeps the local record and shows a banner. **No silent overwrite in either direction** — the server does not accept it, and it does not delete the technician's work either. The rejected completion stays in the outbox as `rejected` and is inspectable.
+**The transition that matters** is the one `PLAN.md` §6 names: a technician submits a completion for a job the office cancelled while he was on his way. The server rejects with `409 JOB_ALREADY_CLOSED` and a message naming who cancelled it and when, and the complete sheet shows that sentence in front of him with everything he typed still in place. **No silent overwrite in either direction** — the server does not accept it, and nothing he entered is thrown away until he closes the sheet himself.
 
 ### 6.2 Completion
 
@@ -413,13 +413,15 @@ FCM failures (`UNREGISTERED`, `SENDER_ID_MISMATCH`) clear the stale `fcm_token` 
 
 **Device registration** — `POST /v1/devices` upserts by `(employee_id, installId)`, carrying the FCM token and the four diagnostics. Called on login, on app foreground when permissions change, and after each onboarding step completes. **This endpoint is how the health chip becomes truthful**; without a fresh `location_permission`, the chip can only report absence of pings, not the reason.
 
+**`GET /v1/devices/me`** returns the device the access token was issued for (the token's `deviceId` claim) with its diagnostics. The permission ladder reads its battery-exemption and autostart answers back from here after a reinstall, so no copy lives on the phone (decision 2026-09-15).
+
 ---
 
 ## 9. Attachments
 
 **`POST /v1/attachments`** — one multipart request carrying the file, `ownerType`, `ownerId`, `kind`, `capturedAt`, and an `Idempotency-Key`.
 
-Single request rather than presign/PUT/confirm. Three round trips on a flaky 2G connection is three chances to fail, and the offline drain has to reason about a half-created attachment. At 14 users the API can absorb the bytes. **Presigned direct-to-storage is the documented scale path, not the starting point.**
+Single request rather than presign/PUT/confirm. Three round trips on a flaky 2G connection is three chances to fail, and the client has to reason about a half-created attachment. At 14 users the API can absorb the bytes. **Presigned direct-to-storage is the documented scale path, not the starting point.**
 
 Server: validates MIME against `image/jpeg|png|webp` and `application/pdf`, re-encodes JPEG to max 1600px long edge (a completion photo does not need 12 MP), computes sha256, writes to S3-compatible storage under `{ownerType}/{yyyy}/{mm}/{uuid}.{ext}`, inserts the row.
 
@@ -455,9 +457,9 @@ The rule mirrors completion amendment exactly (§6.2b): **correctable until it i
 
 The employee does not see the expected figure before declaring. He declares what he is handing over; the system's expectation is the check, and showing him the answer first turns a reconciliation into a form-fill.
 
-**The queue lags the field by a sync, and the owner has to know that.** `job_completions.business_date` is generated from `completed_at`, which is the technician's clamped device time — so cash collected in a basement on Monday lands on **Monday**, whenever it syncs. That is right: it puts the money on the day it was physically taken, which is the day it was handed over.
+**The queue lags the field by a sync, and the owner has to know that.** `job_completions.business_date` is generated from `completed_at`, which is the technician's clamped device time — so cash collected in a basement on Monday lands on **Monday**, whenever it reaches the server. That is right: it puts the money on the day it was physically taken, which is the day it was handed over.
 
-The consequence is that a day's expected figure is not final until that day's work has drained. A technician who declares on Monday evening and syncs on Tuesday morning produces, for a few hours, a Monday row with a declaration and no expected cash — flagged `no_expected_cash`, which reads exactly like the problem it is not. So the queue **defaults to a range ending yesterday**, with today reachable but marked *“still syncing”*. An owner who learns that the flags lie on the current day learns to discount the flags, which costs more than a one-day delay ever will.
+The consequence is that a day's expected figure is not final until that day's work has all reached the server. A declaration made on Monday evening before the day's last completion was submitted — or a completion retried after midnight — produces, for a few hours, a Monday row with a declaration and no expected cash — flagged `no_expected_cash`, which reads exactly like the problem it is not. So the queue **defaults to a range ending yesterday**, with today reachable but marked *“still syncing”*. An owner who learns that the flags lie on the current day learns to discount the flags, which costs more than a one-day delay ever will.
 
 The owner's queue must default to a range that includes days with no submission — the `missing_submission` flag is the row the whole feature exists to catch, and a default filter of "submitted handovers" would hide exactly it.
 
@@ -551,11 +553,11 @@ A visit raised late is raised for the day it was due, not for today — `schedul
 
 Not a cron row, because it is triggered by a mutation. On assign, reassign, cancellation of an assigned job, and priority escalation, the service sends a **data-only** FCM message to the assigned technician's devices.
 
-The message **carries no job content**. It wakes the app, which runs a delta sync and raises a *local* notification from the row it just received. A push that carried the job would be stale the moment the office changed something, and would deliver job details to a handset that may since have been logged out.
+The message **carries no job content**. It wakes the app, which refetches the technician's work read (`GET /v1/technician/work`) and raises a *local* notification from the job it just received. A push that carried the job would be stale the moment the office changed something, and would deliver job details to a handset that may since have been logged out.
 
-**Why this exists at all:** the client drains and syncs on reconnect, on foreground, and on a 60-second timer *while the app is active*. None of those fire when the app is backgrounded, so without a push a technician learns about an urgent job when he next happens to open it. For a dispatch application that is close to a defect.
+**Why this exists at all:** the client refetches on reconnect, on foreground and on screen focus *while the app is active*. None of those fire when the app is backgrounded, so without a push a technician learns about an urgent job when he next happens to open it. For a dispatch application that is close to a defect.
 
-**The system must remain correct with every push dropped.** Push is a latency improvement over the existing sync triggers, never the transport for anything. A technician who receives none still gets the job on next foreground. Keeping FCM off the correctness path is what makes it safe to depend on a delivery channel nobody controls — and it means an expired token, a dead Google project or a silenced OEM degrades timeliness rather than losing work.
+**The system must remain correct with every push dropped.** Push is a latency improvement over the existing refetch triggers, never the transport for anything. A technician who receives none still gets the job on next foreground. Keeping FCM off the correctness path is what makes it safe to depend on a delivery channel nobody controls — and it means an expired token, a dead Google project or a silenced OEM degrades timeliness rather than losing work.
 
 Failures clear the stale token exactly as `/v1/location/requests` does (§8), and a device that cannot be reached is a tracking-health finding either way.
 
@@ -569,7 +571,7 @@ Failures clear the stale token exactly as `/v1/location/requests` does (§8), an
 
 **Backups** — nightly `pg_dump` plus WAL archiving to off-site object storage; MinIO bucket replicated. **Test the restore in Phase 5.** An untested backup is a belief, not a backup.
 
-**Observability** — `pino` structured JSON with `requestId`; slow-query log above 200ms; a `/healthz` covering DB and storage reachability. Metrics that actually get looked at: outbox rejection rate by error code, ping acceptance rate per device manufacturer, sync batch size distribution. The middle one is the OEM investigation's dataset.
+**Observability** — `pino` structured JSON with `requestId`; slow-query log above 200ms; a `/healthz` covering DB and storage reachability. Metrics that actually get looked at: mutation refusal rate by error code, ping acceptance rate per device manufacturer, idempotency replay rate (submits retried after a dropped connection). The middle one is the OEM investigation's dataset.
 
 **Alerting.** `/healthz` is polled every five minutes by an external uptime checker, alerting the developer and the owner by phone. That plus the existing `tracking-health-sweep` push is the entire alerting story, and saying so is the point: at 14 users there is no on-call rota and there should not be one, but a silent API outage on a Tuesday morning stops the business. Naming the destination now stops Phase 5 discovering a gap and over-building in response.
 
@@ -599,7 +601,7 @@ Failures clear the stale token exactly as `/v1/location/requests` does (§8), an
 | Endpoint authorisation | supertest + testcontainers Postgres | every endpoint as every role — the suite that protects the revenue guarantee |
 | Business rules | integration against real Postgres | status machine, discount constraint, sequence allocation under concurrency |
 | Idempotency | integration | replay, differing-body reuse, concurrent in-flight |
-| Sync | integration | `dependsOn` short-circuit, rejection isolation, cursor monotonicity |
+| Technician work read | integration | own jobs only, a reassigned job absent on the next read, contract inline, flag gate |
 | Views | SQL fixtures | especially `v_cash_reconciliation_queue`'s `missing_submission` row, and that a day with cash collected on *both* sides — a completion and a payment — sums into one expected figure |
 | Contract | zod schemas shared with the client | response shape per role |
 | Contracts module | integration | generator idempotency under a repeated run, prepaid visit rejects a non-zero cost, cancellation leaves raised jobs alone |
@@ -619,11 +621,11 @@ No mocked database anywhere. The schema's generated columns, partial indexes and
 
 | # | Item | Impact | Needed by |
 |---|---|---|---|
-| 1 | Access-token lifetime vs. offline drain — 15 min is fine given refresh-on-401, but the retry-once rule needs an integration test with an expired token and a full queue | Medium | Phase 1 |
+| 1 | ~~Access-token lifetime vs. offline drain~~ **Closed by the online-only decision (2026-09-15)** — there is no queue. An expired token on submit is refresh-once-and-retry with the same idempotency key, covered by the API client tests. | — | Done |
 | 2 | Whether the technician's own completion history should show amounts. Matrix says "writes own"; read-back is unspecified. Proposed: no. | Low, but visible to staff | Phase 1, confirm with owner |
 | 3 | `dependsOn` is single-parent. A completion depending on both a status change and an attachment would need a list. | Low — no current case | Revisit Phase 3 |
 | 4 | FCM requires a Google project even without Play Store distribution. **Now needed for assignment notifications, not just *Locate now*.** | **Confirm in Phase 0, blocking for Phase 2** | Before Phase 2 |
-| 5 | ~~Bulk reassign notification — the losing technician now *does* get a push, since §12.1 fires on reassign. What the local notification should say when work is taken away is a wording decision, not a technical one.~~ **Closed: A1 — "Job reassigned — `<job_number>` is no longer yours. You don't need to do anything."**, and a bulk reassign collapses to one summary notification ("3 of your jobs were reassigned…") instead of one per job. T2.6 composes this from the synced rows; never a server-side push body (§12.1 stays data-only). | — | Done (2026-09-12, `docs/decisions/2026-09-12-phase-2-entry-decisions.md` Memo A) |
+| 5 | ~~Bulk reassign notification — the losing technician now *does* get a push, since §12.1 fires on reassign. What the local notification should say when work is taken away is a wording decision, not a technical one.~~ **Closed: A1 — "Job reassigned — `<job_number>` is no longer yours. You don't need to do anything."**, and a bulk reassign collapses to one summary notification ("3 of your jobs were reassigned…") instead of one per job. T2.6 composes this from the refetched work read; never a server-side push body (§12.1 stays data-only). | — | Done (2026-09-12, `docs/decisions/2026-09-12-phase-2-entry-decisions.md` Memo A) |
 | 6 | ~~Should a technician be pushed for a job assigned outside the 09:00–19:00 work window? The location service has a window; notifications do not. Proposed: suppress until the window opens, except `priority = 'urgent'`.~~ **Closed: hold-and-release (B1)** — out-of-window assignments are held server-side in the send path and released at window-open in a batch; `priority = 'urgent'` bypasses and pushes immediately; in-window assignments push immediately. Held ≠ dropped, and nothing client-side is new. | — | Done (2026-09-12, `docs/decisions/2026-09-12-phase-2-entry-decisions.md` Memo B) |
 | 7 | ~~Contract visit `due_date` moves — who may do it.~~ **Closed: dispatcher and owner**, per the §11.1 endpoint table and `PLAN.md` §5. A customer phoning ahead reaches the office, so the office moves the date; the technician's equivalent is the on-site reschedule from his cancel sheet. A rep cannot — he sold the agreement, he does not run the schedule. | — | Done |
 | 8 | Whether a technician should be able to *see* a completion he amended — the owner's correction is invisible to him, which is right for revenue and arguably wrong for a disputed job. Proposed: no change; the owner rings him. | Low | Phase 4, confirm with owner |

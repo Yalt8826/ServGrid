@@ -2,9 +2,9 @@
 
 Companion to `PLAN.md` §1, §3, §6, §8, §9. Covers `apps/mobile` — Expo Router, Android for all four roles plus a desktop web build for the owner.
 
-Visual and interaction design — philosophy, tokens, motion, components, and a screen-by-screen specification for all four roles — lives in `UI/plan-2/`. (`UI/plan-1/` is a superseded alternative kept for the record; `UI/COMPARISON.md` says why plan-2 was taken. Build from plan-2.) This document stays the architectural one: routes, state, sync, and the platform seams.
+Visual and interaction design — philosophy, tokens, motion, components, and a screen-by-screen specification for all four roles — lives in `UI/plan-2/`. (`UI/plan-1/` is a superseded alternative kept for the record; `UI/COMPARISON.md` says why plan-2 was taken. Build from plan-2.) This document stays the architectural one: routes, state, connection handling, and the platform seams.
 
-The framing that keeps this app honest, from `PLAN.md` §1: **offline need is independent of platform**, and **the owner is the only role needing two layouts**. Everything below is arranged so those two facts stay separate in the code, because they are the ones most likely to get conflated once files exist.
+The framing that keeps this app honest, from `PLAN.md` §1: **every role works online, but only the owner and dispatchers may sign in on web**, and **the owner is the only role needing two layouts**. Everything below is arranged so those two facts stay separate in the code, because they are the ones most likely to get conflated once files exist.
 
 ---
 
@@ -13,16 +13,16 @@ The framing that keeps this app honest, from `PLAN.md` §1: **offline need is in
 | Phase | Deliverable | Proves |
 |---|---|---|
 | 0 | App shell, fonts, design tokens, session store, secure storage, login, consent screen, API client with refresh-on-401 | the seams |
-| 1 | **Technician app** — dashboard, job tabs, job detail, complete/cancel sheets, profile; SQLite mirror; outbox; location task + permission ladder; tracking health chip | offline and location while scope is small |
+| 1 | **Technician app** — dashboard, job tabs, job detail, complete/cancel sheets, profile; online reads and intent-keyed writes; location task + permission ladder; tracking health chip | idempotency and location while scope is small |
 | 2 | **Dispatcher app** — dashboard, dispatch form, phone-native Job Logs with Overdue, load-aware assignment picker, customer CRUD; online-only with explicit error states | the one screen where phone-first costs something |
 | 2B | **Contracts** — contract list and detail, visit schedule, renewal list; contract context on the technician's job detail | a module that adds no new client machinery |
-| 3 | **Sales Rep app** — sales cards, company balances, payment capture with proof photo, cash handover; reuses the Phase 1 outbox unchanged | the outbox generalises |
+| 3 | **Sales Rep app** — sales cards with list price and discount per line, company balances, payment capture with proof photo, cash handover | money on a phone, in front of the customer |
 | 4 | **Owner app** — Android five-group nav, desktop left rail, DataTable, location console with map, cash reconciliation queue | one route tree, two presentations |
 | 5 | Hardening — OEM matrix testing on the real handsets, sunlight legibility check, glove-and-vehicle tap testing | the risks in `PLAN.md` §11 |
 
-Phase 1 builds the outbox and the location service for one role. Phase 3 must reuse them without modification; if it cannot, the Phase 1 abstraction was wrong and that is the moment to find out — while there is still one consumer.
+Phase 1 was built with an offline SQLite mirror and outbox, and Phase 3 reused them. Both were removed by the online-only decision of 2026-09-15 (`implementation/PHASE-ON-ONLINE.md`); the rows above describe the app as it now stands.
 
-Phase 2B is a deliberately quiet phase on this side. Contracts introduce screens but no new client machinery: no new state layer, no outbox change, no platform seam. A generated visit arrives as an ordinary job card, so the technician's app needs one extra chip and one conditional field. If contracts turn out to require changes to the outbox or the sync cycle, something has been modelled wrong on the server.
+Phase 2B is a deliberately quiet phase on this side. Contracts introduce screens but no new client machinery: no new state layer, no new write path, no platform seam. A generated visit arrives as an ordinary job card, so the technician's app needs one extra chip and one conditional field. If contracts turn out to need a technician read beyond the contract object inline on his work read, something has been modelled wrong on the server.
 
 ---
 
@@ -127,7 +127,7 @@ Two routes therefore change home by role rather than being hidden:
 
 Products and services live under Profile because they are settings — the owner edits a price or adds an SKU a few times a year. Putting them in Operations would give the group the dispatcher uses hourly two entries nobody opens.
 
-- **Android, any role** — bottom tabs from that role's map. **Technician 4, dispatcher 3, sales rep 4, owner 5.** One component, one map per role.
+- **Android, any role** — bottom tabs from that role's map. **Technician 4, dispatcher 3, sales rep 5, owner 5.** One component, one map per role.
 - **Web, owner** — the same groups become sections in a persistent left rail, each expanded to its individual routes.
 
 `RoleGate` still guards every route from `permit()`; the map decides *reachability*, the matrix decides *permission*, and a route in a role's map that `permit()` refuses is a bug the Phase 0 test suite should catch by walking both.
@@ -236,9 +236,9 @@ A chip that only ever says "active" is decoration.
 
 **Web** — none of this. `location/`'s background module is `.native.ts` only; the web bundle has no counterpart file and never imports one. Owners are not tracked, so there is nothing to degrade gracefully.
 
-**Assignment notifications share this plumbing.** The same FCM channel that carries *Locate now* carries a data-only message on assign, reassign, cancellation of an assigned job, and priority escalation. The handler does not render the push: it triggers a delta sync and then raises a **local** notification from the row that arrived. A push that carried the job text would be stale the moment the office changed something.
+**Assignment notifications share this plumbing.** The same FCM channel that carries *Locate now* carries a data-only message on assign, reassign, cancellation of an assigned job, and priority escalation. The handler does not render the push: it refetches the technician's work read and then raises a **local** notification from the job that arrived. A push that carried the job text would be stale the moment the office changed something.
 
-Without this, the drain and sync triggers — reconnect, foreground, a 60-second timer *while the app is active* — none of which run in the background, mean a technician learns about an urgent job when he next opens the app.
+Without this, the refetch triggers — reconnect, foreground, screen focus — none of which run in the background, mean a technician learns about an urgent job when he next opens the app.
 
 **Treat every push as optional.** The app must behave identically if none ever arrive, because OEM battery management will eat some and there is nothing the client can do about it. A missed push costs latency, never work — and a notification permission the technician declines is a degraded experience, not a broken one. The permission ask belongs *after* the location ladder, not inside it, so a refusal here cannot strand someone mid-ladder.
 
@@ -315,9 +315,9 @@ Domain (`components/domain/`):
 | `TechnicianPicker` | **Shows load inline** — "Ravi · 3 today", "Anitha · 6 today". Never a bare dropdown of eight names. |
 | `FilterBar` | Persistent, horizontally scrollable chips; technician, status, date. Reflects state in the URL. |
 | `MultiSelectList` | Long-press enters selection mode, header becomes a count + bulk action. Replaces table checkboxes. |
-| `PhotoCapture` | Camera + gallery, local URI, queued thumbnail with upload state. |
+| `PhotoCapture` | Camera + gallery, local URI, thumbnail with upload state. Uploads right after its parent submit is accepted; the temp file is deleted once uploaded. |
 | `PartsList` | Repeating row: product picker, quantity, optional serial. Collapsed by default. **Never shows a subtotal** — see §9. |
-| `SyncBanner` + `PendingBadge` | Outbox state, always visible for offline roles. |
+| `NoConnectionGate` | Full-screen *No connection* over the authenticated stack, every role. Rendered above the stack, never instead of it, so typed input survives. Replaced `SyncBanner` + `PendingBadge` (2026-09-15). |
 | `TrackingHealthChip` | Four states (§6). Red and amber link back into the permission ladder at the failed step. |
 | `DataTable` | Web only. Sortable, sticky header, virtualised. Lives in `.web.tsx`. |
 | `MoneyGate` | Renders children only if `permit(role,'job.money','read') !== 'none'`. Belt-and-braces over the API's schema separation. |
@@ -340,15 +340,15 @@ None of them is yellow. A job card can already carry a status rail in `inProgres
 
 ### Technician — Phase 1
 
-| Screen | Data | Actions | Offline |
+| Screen | Data | Actions | Reads / writes |
 |---|---|---|---|
-| Dashboard | today's assigned jobs, pending count, tracking health | open a job | full, from mirror |
-| Jobs | tabs: Today / Upcoming / Completed | filter, open | full |
-| Job detail | job, customer, **the specific unit**, product stack, warranty and contract chips, events | call, **Navigate** (deep-link to Google Maps), status change | full |
-| Complete sheet | — | work summary, **one amount field**, optional discount + reason, collection mode, photos, stack changes, parts used | queued |
-| Cancel sheet | — | reason code, note, **optional reschedule date** | queued |
-| Cash handover | his own declaration for today, plus his history | declare amount, note; **amend his own figure while it is still `submitted`** | queued |
-| Profile | health chip, permission ladder state, pending count | re-run ladder steps, logout | reads mirror |
+| Dashboard | today's assigned jobs, tracking health | open a job | `GET /v1/technician/work` |
+| Jobs | tabs: Today / Upcoming / Completed | filter, open | `GET /v1/technician/work` |
+| Job detail | job, customer, **the specific unit**, product stack, warranty and contract chips, events | call, **Navigate** (deep-link to Google Maps), status change | work read + `GET /v1/jobs/:id/events`; `POST /v1/jobs/:id/status` |
+| Complete sheet | — | work summary, **one amount field**, optional discount + reason, collection mode, photos, stack changes, parts used | `POST /v1/jobs/:id/complete`, then photos |
+| Cancel sheet | — | reason code, note, **optional reschedule date** | `POST /v1/jobs/:id/cancel` |
+| Cash handover | his own declaration for today, plus his history | declare amount, note; **amend his own figure while it is still `submitted`** | cash handover endpoints |
+| Profile | health chip, permission ladder state | re-run ladder steps, logout | `GET /v1/location/health/me`, `GET /v1/devices/me` |
 
 **Navigate deep-links to Google Maps** (`google.navigation:q=lat,lng`) — traffic, voice guidance and offline tiles nothing in-app would match. There is no map in the technician app at all.
 
@@ -397,8 +397,8 @@ Dispatcher screens never request or render money. The API will not send it; `Mon
 | Screen | Notes |
 |---|---|
 | Dashboard | month's sales, outstanding across his accounts, recent payments, **contracts expiring in 60 days** |
-| Sales | list, create with line items — product picker snapshots name and price at add time |
-| Payment | **Pending** = companies with `balance > 0` (a view, not rows); **Collected** = his payments. Capture: amount, mode, reference, proof photo |
+| Sales | list, create with line items — product picker snapshots name and price at add time; each line records **list price, discount % and the final price** |
+| Payment | **Pending** = companies with `balance > 0` (a view, not rows); **Collected** = his payments. Capture: amount, mode, proof photo — **no reference field**; the photo is the evidence |
 | Company | **his accounts plus house accounts**, with balances; detail with ledger and running balance |
 | Contracts | his accounts' contracts; create, activate, and the renewal list |
 | Cash handover | his own declaration, same screen as the technician's with a different heading |
@@ -410,7 +410,7 @@ Dispatcher screens never request or render money. The API will not send it; `Mon
 
 The Pending tab distinction is worth stating in the UI copy: it lists **companies that owe money**, not scheduled collections. Labelling it "Pending payments" invites the reading that a row is a payment, which is exactly the stored-counter thinking the data model rejects.
 
-Sales reps reuse the Phase 1 outbox with no changes. If the API surface differs enough that the drain needs a special case, the Phase 1 abstraction leaked.
+Sales reps write straight to the API like every other role; a failed submit keeps the form and retries with the same idempotency key (§5).
 
 ### Owner — Phase 4
 
@@ -443,10 +443,10 @@ Both layouts. Fourteen routes in five Android groups; a left rail on web.
 | Layer | Tool | Scope |
 |---|---|---|
 | Permission rendering | vitest + RTL | every screen under every role — asserts money is absent for dispatchers, **including `contract_value` on the contracts screen** |
-| Outbox | vitest, fake timers + MSW | enqueue, backoff, `dependsOn` skip, rejection banner, 401 refresh-and-retry, **key stability across retries**, **logout blocked with queued rows**, **rejected rows survive logout and reappear for the same employee only** |
+| Intent writes | vitest | **key generated once per submit intent and reused across retries**; kept on a network error or 5xx, cleared on a definite 4xx or success; 401 refresh-and-retry; typed input survives every failure |
 | Complete sheet | vitest + RTL | prepaid visit hides the amount field; in-warranty charge raises exactly one confirmation; discount discloses a mandatory reason; **parts list renders no subtotal and does not alter the amount** |
 | Cancel sheet | vitest + RTL | contract visit with no date shows the "spends a visit" warning; a date returns the visit to scheduled; date is bounded by the contract's end |
-| Offline flows | Maestro on a device with airplane mode toggling | complete a job offline → reconnect → number arrives |
+| Connection loss | vitest + a device with airplane mode toggling | the *No connection* screen covers every role; a half-typed complete sheet is intact when it returns and submits once |
 | Location | manual matrix, Phase 5 | per handset: overnight survival, basement gap recovery, battery cost over a work day |
 | Visual | screenshots at 360dp, 412dp, 1280px, 1920px | the card-vs-row rule on every owner screen |
 | Field | Phase 5 | sunlight legibility, gloved tap accuracy at 52px, one-handed complete sheet |

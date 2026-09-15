@@ -39,7 +39,7 @@ These are not preferences. Each one fails a specific condition this app is used 
 
 The most premium thing this app can do is respond in under 100 milliseconds, every time, including on 2G in a basement with fourteen percent battery. Nothing else in the interface will matter as much as that.
 
-The architecture already bought it: `PLAN.md` §6's optimistic write — the user acts, the local mirror updates, the row enqueues, the UI already shows the new state. **The UI's entire job is to make that instantaneity visible and believable.**
+The architecture has to earn it. `PLAN.md` §6 makes every role online (decision 2026-09-15), so a submit waits on the network: reads come from a warm in-memory cache and refetch quietly, a write shows its busy state at once and answers with the server's result, and nothing typed is ever lost to a failure. **The UI's entire job is to make every wait short, honest and obviously in hand.**
 
 Which reframes what animation is for. It is not decoration laid on top of a slow system to distract from the wait. It is the receipt: evidence that the system heard you, and a description of where things went.
 
@@ -63,7 +63,7 @@ Motion has exactly three legitimate jobs here:
 | **State** | What just changed? |
 | **Continuity** | Is my finger still driving this? |
 
-Anything that does none of these is deleted. This is how the app can be *highly animated* while honouring `PLAN.md` §9's "no entrance animation on every card" — the number of animated moments is high, and every single one is load-bearing. A card that slides in because it just synced is information. A card that slides in because the screen loaded is noise.
+Anything that does none of these is deleted. This is how the app can be *highly animated* while honouring `PLAN.md` §9's "no entrance animation on every card" — the number of animated moments is high, and every single one is load-bearing. A card that slides in because a refetch just delivered it is information. A card that slides in because the screen loaded is noise.
 
 ### 4.3 Physical believability
 
@@ -123,7 +123,7 @@ So the app's distinctiveness comes from three places instead:
 4. **Active state as a 2px accent underline**, never a filled pill. Pills are everywhere; a precise underline is not.
 5. **The status stepper** — the one animated element in the product.
 
-**State richness.** Most interfaces look dead because only the default state was designed. Every component in `03-COMPONENTS.md` is specified in eight states — default, pressed, focused, disabled, loading, empty, error, and *stale/offline*, which most design systems do not have and this app needs on every screen.
+**State richness.** Most interfaces look dead because only the default state was designed. Every component in `03-COMPONENTS.md` is specified in seven states — default, pressed, focused, disabled, loading, empty and error. (An eighth, *stale*, existed while field roles worked offline; it was retired on 2026-09-15.)
 
 **Deliberate non-adoption.** The list in §2. Keeping it written down is what stops a reasonable-seeming pull request from eroding it one component at a time — the same failure mode `PLAN-FRONTEND.md` §7 describes for the accent colour.
 
@@ -135,7 +135,7 @@ So the app's distinctiveness comes from three places instead:
 
 The brief for this document asked for something smooth, interactive and heavily animated. Those are reconcilable, and the reconciliation is principle 4.2.
 
-**`PLAN.md` restricts orchestration, not responsiveness.** One *orchestrated* moment — a multi-element, staged, hero animation — is the stepper. That stands. But an app where every tap answers instantly with a spring, where sheets carry momentum from the finger that threw them, where a rejected sync drops a banner with weight, and where a long-press physically picks a card up, is *more* animated than one with decorative fades everywhere — and every frame of it is doing work.
+**`PLAN.md` restricts orchestration, not responsiveness.** One *orchestrated* moment — a multi-element, staged, hero animation — is the stepper. That stands. But an app where every tap answers instantly with a spring, where sheets carry momentum from the finger that threw them, where a refused submit drops a banner with weight, and where a long-press physically picks a card up, is *more* animated than one with decorative fades everywhere — and every frame of it is doing work.
 
 `02-MOTION.md` names the six signature moments and budgets them. Six is enough to feel crafted and few enough to stay honest.
 

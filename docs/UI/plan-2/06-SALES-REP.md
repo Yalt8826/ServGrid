@@ -1,8 +1,8 @@
 # Sales Rep — Screen Specifications
 
-Density `field`. **Offline-first** — reuses the Phase 1 outbox unchanged. Two users, Phase 3.
+Density `field`. **Online** — every read and write goes to the API (decision 2026-09-15). Two users, Phase 3.
 
-Four tabs: Dashboard · Sales · **Cash** · Profile. The Sales group carries sales, payments, companies, contracts and renewals — contracts are commercial for a rep, not operational, which is why the group map is per role rather than the owner's map with rows hidden (`PLAN-FRONTEND.md` §3).
+Five tabs: Dashboard · Sales · **Companies** · **Cash** · Profile. The Sales group carries sales, payments, contracts and renewals; Companies is its own tab because a rep's day is largely his account list in order — contracts are commercial for a rep, not operational, which is why the group map is per role rather than the owner's map with rows hidden (`PLAN-FRONTEND.md` §3).
 
 **The role's condition:** in a customer's office or reception, phone in hand, often mid-conversation about money. Signal is usually fine but not guaranteed. Unlike the technician, he is not rushed and not gloved — but he is **being watched by the person whose balance is on the screen**, which is its own constraint.
 
@@ -20,7 +20,7 @@ Four tabs: Dashboard · Sales · **Cash** · Profile. The Sales group carries sa
 
 ```
 ┌────────────────────────────────────────┐
-│ Anitha                       ⟳ 2       │
+│ Anitha                                 │
 ├────────────────────────────────────────┤
 │  ₹4,20,000        ₹1,85,000            │
 │  sold this month  outstanding          │  display 32 Condensed
@@ -49,7 +49,8 @@ Four tabs: Dashboard · Sales · **Cash** · Profile. The Sales group carries sa
 ### States
 
 - **Empty:** "No sales yet this month." No illustration.
-- **Stale:** the *figures* carry the dashed inset when the mirror has unsynced writes behind them. This matters more here than anywhere: a balance shown to a customer while a payment sits in the outbox is the single most embarrassing thing this app can do. The inset plus `Pending sync` is the honest answer.
+- **Offline:** the full-screen *No connection* gate — a balance is never shown to a customer from a read that stopped being live.
+- **Loading:** skeletons on a cold first load; figures cross-fade when a refetch changes them.
 
 ### Motion
 
@@ -88,7 +89,7 @@ Notes       [                          ]
 ### Content decisions
 
 - **The product picker snapshots name, SKU and price at add time.** The row shows the snapshot, not a live lookup — a repricing next quarter must not rewrite this sale (`PLAN-DATA-MODEL.md` §3.5).
-- **The unit price is editable** on the line, because a negotiated price is normal. The snapshot records what was actually agreed.
+- **A negotiated price is a discount off the list price**, entered per line as a percentage. The line keeps all three — list price, discount % and the final unit price — and the server computes the final price itself, so the sale detail can always say *List ₹12,000 · 10% off · ₹10,800* (migration 019, decision 2026-09-15). A price typed with no list price behind it stores no discount.
 - **Serial numbers** are an optional per-line field, collapsed.
 - **Total is computed and displayed**, unlike the technician's parts list — here it *is* a bill, and `v_sales_card_totals` defines it.
 - **Confirm allocates the number.** Until then the card shows `Draft`, never a fake number.
@@ -99,7 +100,7 @@ Notes       [                          ]
 
 ### Motion
 
-Adding a line: 220ms height + opacity, and the total cross-fades. Removing: swipe left on the row reveals delete, `spring.snap`. Confirm: `ImpactMedium` haptic, then the sheet closes and the number arrives from sync — the row's `Pending sync` chip becomes `SL-2627-00018` with a 140ms cross-fade.
+Adding a line: 220ms height + opacity, and the total cross-fades. Removing: swipe left on the row reveals delete, `spring.snap`. Confirm: `ImpactMedium` haptic, then, when the server accepts, the sheet closes and the row shows `SL-2627-00018` from the response — there is no placeholder chip, because the number arrives with the answer.
 
 ---
 
@@ -124,20 +125,19 @@ Company     [ Sterling Industries        ]  prefilled if from a row
 Amount      ₹ [                          ]
 Against     [ On account ▾ ]  or a specific sale
 Mode        [ Cash ][ UPI ][ Cheque ][ Bank ][ Card ]
-Reference   [                          ]     (shown for non-cash)
 Proof photo [ 📷 Capture ]
 [ Record payment ]
 ```
 
 - **Mode as segments, on two rows.** Five segments across 360dp gives each about 64dp, and “Bank transfer” does not fit in it at `label` size without truncating to something ambiguous. So: **`Cash` `UPI` `Cheque`** on the first row, **`Bank` `Card`** on the second, each 52 tall. Two rows of comfortable targets beat one row of cramped ones, and this screen is filled in front of the person paying — a mis-tap here records the wrong mode on real money and puts a phantom entry in someone's cash reconciliation.
 - **Cash is first and visually identical to the others** — no emphasis, because emphasising cash would nudge behaviour in the one area the reconciliation exists to police. First because it is the one with a consequence, not because it is preferred.
-- **Reference appears for non-cash modes** only, and is required for cheque and bank.
-- **Proof photo** queues as a local URI and uploads after its parent (`dependsOn`).
+- **No reference field.** The proof photo is the evidence for every mode (decision 2026-09-15).
+- **Proof photo** uploads right after the payment is accepted, against the payment's id, with its own idempotency key.
 - **Choosing Cash raises one line of copy**: *"Cash goes on your handover today."* Not a warning — a reminder that connects two screens the rep would otherwise experience as unrelated.
 
 ### Motion
 
-Recording a payment: the company's balance on the previous screen updates optimistically before the sheet closes. This is the clearest demonstration of the derived-balance model in the whole product, and it should feel instant — the figure cross-fades to its new value in 140ms as the sheet dismisses.
+Recording a payment: the company's balance on the previous screen updates when the server accepts, as the sheet closes. This is the clearest demonstration of the derived-balance model in the whole product, and it should feel instant — the figure cross-fades to its new value in 140ms as the sheet dismisses.
 
 ---
 
@@ -212,9 +212,9 @@ Rep cash is rare — mostly bank transfer, UPI and cheque — and that rarity is
 
 ## S7. Profile
 
-Name, role, `TrackingHealthChip` (**reps are tracked too**), permission ladder, pending count, *Change password*, *Log out*.
+Name, role, `TrackingHealthChip` (**reps are tracked too**), permission ladder, *Change password*, *Log out*.
 
-Logout is the same gate as the technician's: blocked while anything is queued.
+Logout is immediate, like the technician's — nothing is queued on the phone.
 
 ### Not on this screen
 

@@ -1,5 +1,7 @@
 # Phase 2 — Dispatcher
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 **Size M · ~4 weeks · Risk: medium, concentrated in one screen**
 
 Three users, online-only, seated at a desk on office wifi, **working from a phone**. The failure mode is an explicit error state — never a queue, never a spinner that resolves into nothing.
@@ -482,6 +484,8 @@ Small screens; T1 republish. If the stack is editable for a dispatcher, the comp
 **Depends on:** all of Phase 2
 **Tier:** T0 per flag
 
+*Checklist rewritten for the online-only app on 2026-09-15; the run is still pending.*
+
 **Build** nothing. **Run it in the office and measure.**
 
 **1 week, 1 dispatcher, then 1 week all 3.**
@@ -494,14 +498,14 @@ Small screens; T1 republish. If the stack is editable for a dispatcher, the comp
 - [ ] **Job Logs filter task: median under 5 seconds**, measured with real dispatchers on their own phones
 - [ ] **Money-leak CI assertion green across every dispatcher endpoint**
 - [ ] Bulk reassign used at least once on real data without a support call
-- [ ] **Error states verified by pulling the office wifi mid-task** — a clear message, not a spinner
+- [ ] **Connection loss verified by pulling the office wifi mid-task** — the full *No connection* screen, and the half-typed dispatch form intact when it returns
 - [ ] **Assignment notifications delivered for ≥ 80% of real assignments within 60 seconds**, measured over the week — **and a technician confirms the app still worked on the day one was missed**
 
 That last clause is the one worth insisting on. An 80% delivery rate is only acceptable because the other 20% costs latency rather than work, and the only way to know that is true is to ask someone it happened to.
 
 **If it fails**
 
-**This is the cheapest phase to undo.** Dispatchers hold no device state: no SQLite, no outbox. T0 flag off, or T1/T2. Recovery is minutes and the old process resumes with the job data intact in the database, which is the whole reason parallel run keeps the old process as the record of truth.
+**This is the cheapest phase to undo.** Dispatchers hold no device state — no role does since 2026-09-15. T0 flag off, or T1/T2. Recovery is minutes and the old process resumes with the job data intact in the database, which is the whole reason parallel run keeps the old process as the record of truth.
 
 | Scenario | Tier | Action |
 |---|---|---|

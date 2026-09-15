@@ -37,7 +37,8 @@ Screens every role sees, plus the states every screen must define. Phase 0 unles
 
 - **Error:** banner above the fields, *"Username or password is wrong."* Never which one.
 - **Loading:** button to `loading`, fields locked. No full-screen overlay.
-- **Offline:** *"No connection — sign-in needs one."* This is the one place offline genuinely blocks.
+- **Offline:** *"No connection — sign-in needs one."* After sign-in the full-screen *No connection* gate takes over.
+- **Field role on web:** a technician or sales rep who signs in on web is refused after authentication — *"Use the ServGrid app on your Android phone."* — and the session is cleared.
 
 ### Motion
 
@@ -146,7 +147,7 @@ Empty is not always failure — *"Nothing needs attention"* on the owner's dashb
 
 ### Loading
 
-Skeletons at exact geometry, 200ms delay, 400ms minimum. **Never on offline-first screens** — the technician and rep read the local mirror; a skeleton there would be a lie about the architecture.
+Skeletons at exact geometry, 200ms delay, 400ms minimum. Every role, on a cold first load; the in-memory cache makes a revisit instant.
 
 ### Error
 
@@ -156,24 +157,19 @@ The API's `message` field is written for the technician and is shown **verbatim*
 
 ### Offline
 
-**Two different treatments, and conflating them is the mistake:**
+**One treatment for every role** (`docs/decisions/2026-09-15-online-only.md`): a full-screen *No connection — ServGrid needs the internet. You'll be right back where you were.* rendered **over** the authenticated stack. The stack stays mounted, so a half-typed complete sheet or payment is exactly as it was when the connection returns.
 
-| Role | Treatment |
-|---|---|
-| Technician, sales rep | **No chrome.** The mirror is the source of truth; a permanent "offline" badge trains people to ignore it. Only a *failed drain* raises a banner |
-| Dispatcher, owner | **Full-width danger banner.** Content dims, filters disable, actions disable. Stale data here produces confident wrong decisions |
+This replaced two treatments — no chrome for technicians and reps, who read an offline mirror, and a danger banner for dispatchers and the owner. With no mirror, data that stopped being live is dangerous for everyone.
 
-This is the visible face of `PLAN.md` §1's rule that offline need is independent of platform.
+### Sending
 
-### Stale
-
-The offline-first state (`03-COMPONENTS.md`). Dashed 2px `slate.400` left inset plus `Pending sync`. Not an error, not a spinner, not greyed — **the data is real**, the server just has not seen it yet.
+The dashed 2px `slate.400` inset, which used to mean *stale*, now means only *a write is on its way*: `JobCard` and the job detail header carry it with *Sending…* while a submit is in flight. There is no *Pending sync* — nothing is ever pending.
 
 ---
 
 ## X6. Navigation shell
 
-**Android:** bottom tabs from that role's group map (`PLAN-FRONTEND.md` §3) — **technician 4** (Dashboard · Jobs · Cash · Profile), **dispatcher 3** (Dashboard · Operations · Profile), **sales rep 4** (Dashboard · Sales · Cash · Profile), **owner 5**.
+**Android:** bottom tabs from that role's group map (`PLAN-FRONTEND.md` §3) — **technician 4** (Dashboard · Jobs · Cash · Profile), **dispatcher 3** (Dashboard · Operations · Profile), **sales rep 5** (Dashboard · Sales · Companies · Cash · Profile), **owner 5**.
 
 The map is per role, not the owner's map with rows hidden. Filtering one owner-shaped map is what leaves the technician's handover and the rep's contract list unreachable — both are permitted, both exist as routes, and neither has a tab that leads to them.
 
@@ -181,7 +177,7 @@ Active tab: **2px accent underline** above the label, sliding between tabs over 
 
 **Web, owner:** the same groups as a 240px left rail.
 
-The `PendingBadge` sits in the header for offline roles, on every screen.
+**Web sign-in** is for the owner and dispatchers; technicians and sales reps use the Android app. No role carries a pending badge — it went with the outbox (2026-09-15).
 
 ### Route guarding
 
@@ -211,11 +207,11 @@ The design system exists before any feature does, or every feature invents its o
 - Fonts loaded behind the splash gate
 - Full token set in `packages/shared/theme`
 - `Button`, `TextField`, `MoneyField`, `Sheet`, `Banner`, `Skeleton`, `Chip`, `EmptyState`, `ConfirmDialog`
-- The eight states, each with a rendered example
+- The seven states, each with a rendered example (the eighth, `stale`, retired 2026-09-15)
 - Motion tokens and the three springs
 - Haptic mapping
 - `NavShell` with the single platform branch and density provider
-- The three lint rules: no literal `#F2C200` outside `theme.ts`; no `job_completions` or `service_contracts` in dispatcher repository code; no `location_pings` or `location_requests` there either
+- The lint rules: no literal `#F2C200` outside `theme.ts`; no `job_completions` or `service_contracts` in dispatcher repository code; no `location_pings` or `location_requests` there either — and, since 2026-09-15, a fourth, `no-device-storage`, which allows device storage only in the token store and the GPS ping buffer
 - The nav-map / permission-matrix cross-check test — every route in a role's tab map is permitted, and every permitted route has a tab (`PLAN-FRONTEND.md` §3)
 
-**A rendered gallery of every component in every state** is the Phase 0 deliverable that makes the rest of this document enforceable. Without it, `stale` and `error` get invented per screen and the app looks like four different products by Phase 4.
+**A rendered gallery of every component in every state** is the Phase 0 deliverable that makes the rest of this document enforceable. Without it, `loading` and `error` get invented per screen and the app looks like four different products by Phase 4.

@@ -1,5 +1,7 @@
 # ServiceGrid UI Design Plan
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 **The position in one paragraph.** This app is a work instrument for a UPS/battery servicing
 business: every screen answers "what is true about the work right now" — what is synced, how old
 a figure is, what a press will do with no signal, whether a tap spends the customer's money.

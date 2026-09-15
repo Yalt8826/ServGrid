@@ -2,9 +2,9 @@
 
 Extends the inventory in `PLAN-FRONTEND.md` §8. Each component is specified as **anatomy → states → motion → never**.
 
-## The eight states
+## The seven states
 
-Most interfaces look dead because only the default state was drawn. Every interactive component in this app is specified in all eight, and the last two are the ones design systems usually omit and this app needs everywhere.
+Most interfaces look dead because only the default state was drawn. Every interactive component in this app is specified in all seven, and the last two are the ones design systems usually omit and this app needs everywhere.
 
 | State | Meaning |
 |---|---|
@@ -15,11 +15,10 @@ Most interfaces look dead because only the default state was drawn. Every intera
 | `loading` | Acting, not yet resolved |
 | `empty` | No content, with a next action |
 | `error` | Failed, with what to do |
-| **`stale`** | Showing local data the server has not confirmed |
 
-`stale` is the offline-first state. A technician looking at a job he completed underground is looking at truth that the server has not seen. It is not an error and not a loading state, and pretending otherwise is how offline apps lose people's trust.
+An eighth state, **`stale`** — local data the server had not confirmed, drawn as a dashed inset plus *Pending sync* — existed while technicians and reps worked offline. It was retired on 2026-09-15 (`docs/decisions/2026-09-15-online-only.md`): nothing is ever pending now.
 
-**Stale treatment, everywhere:** a 2px `slate.400` dashed left inset on the affected row, plus a `caption` reading `Pending sync`. Never a spinner. Never greyed out — the data is real.
+**The 2px `slate.400` dashed inset survives with one meaning only — a write on its way.** `JobCard` and the job detail header carry it, with *Sending…*, while a submit is in flight.
 
 ---
 
@@ -64,7 +63,7 @@ Most interfaces look dead because only the default state was drawn. Every intera
 
 **Anatomy.** Full-bleed, 4px leading rail in the semantic colour · icon 20 · message (`body`) · up to two text actions · optional dismiss.
 
-Used for the sync rejection (`PLAN.md` §6) and offline notices. Message text is the **server's `message` verbatim** — the API writes it for the technician holding the phone (`PLAN-BACKEND.md` §3.1).
+Used for a refused submit (`PLAN.md` §6) and a failed read. Message text is the **server's `message` verbatim** — the API writes it for the technician holding the phone (`PLAN-BACKEND.md` §3.1).
 
 **Motion.** Drops with weight, `spring.sheet`. `Warning` haptic. Does not auto-dismiss.
 
@@ -98,9 +97,9 @@ The most-seen object in the product and the primary signature.
 
 **Chips it may carry:** `OverdueChip` (outlined `feedback.danger`), `WarrantyChip` (muted), `ContractChip` (muted). Colours pinned in `PLAN-FRONTEND.md` §8 — **none of them yellow**, because the rail may already be `in_progress` yellow and two yellows adjacent cancel out.
 
-**States.** `pressed`: `bg.pressed`, 90ms, no scale. `stale`: dashed inset + `Pending sync` where the job number goes — **never a fabricated local number** (`PLAN.md` §6). `selected` (multi-select): scale 0.97, border `slate.900` 2px.
+**States.** `pressed`: `bg.pressed`, 90ms, no scale. `sending`: dashed inset + *Sending…* while a status change or completion is in flight — **never a fabricated local number**; numbers arrive in the server's response (`PLAN.md` §6). `selected` (multi-select): scale 0.97, border `slate.900` 2px.
 
-**Motion.** No entrance animation on load. Entrance only when arriving via sync: 140ms height + opacity. Status change: rail cross-fades over 520ms with the stepper.
+**Motion.** No entrance animation on load. Entrance only when a refetch delivers a new job: 140ms height + opacity. Status change: rail cross-fades over 520ms with the stepper.
 
 ### `JobRow` — `console` / `desk`
 
@@ -151,9 +150,9 @@ Collapsed by default under "Parts used". Repeating row: product picker · quanti
 
 **Never shows a subtotal.** Ever. A technician who sees a parts total will assume the app is computing the bill, and the amount he enters is unrelated (`PLAN-DATA-MODEL.md` §3.4). Sits **below** the amount field, never above.
 
-### `SyncBanner` + `PendingBadge`
+### `NoConnectionGate`
 
-`PendingBadge` lives in the header on every screen for offline roles. `mono` tabular so the count does not jitter. Drains with a tick per item, disappears with `spring.press` and a `Success` haptic (`02-MOTION.md` §5.3).
+Full-screen *No connection — ServGrid needs the internet. You'll be right back where you were.* over the authenticated stack, every role. **Rendered above the stack, never instead of it**, so a half-typed form is intact when the connection returns. Replaced `SyncBanner` + `PendingBadge` on 2026-09-15.
 
 ### `TrackingHealthChip`
 
@@ -189,4 +188,4 @@ None depends on a trend, so none can date. Distinctiveness comes from consistenc
 
 ## The non-adoption list
 
-Never, without a decision recorded in this file: blur or translucency · gradients · shadows on Android list items · shimmer · bouncy springs · filled destructive buttons · icon-only data-changing actions · floating labels · illustrated empty states · text under 13px · weight 300 · animated logos · pull-to-refresh platform spinners · skeletons on offline-first screens.
+Never, without a decision recorded in this file: blur or translucency · gradients · shadows on Android list items · shimmer · bouncy springs · filled destructive buttons · icon-only data-changing actions · floating labels · illustrated empty states · text under 13px · weight 300 · animated logos · pull-to-refresh platform spinners (tolerated until the UI overhaul).

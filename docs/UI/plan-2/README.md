@@ -9,7 +9,7 @@ Extends `docs/PLAN.md` §8 and §9 and `docs/PLAN-FRONTEND.md`. Nothing here ove
 | `00-PHILOSOPHY.md` | The design position, the reference points, the non-adoption list, and how components stay fresh |
 | `01-FOUNDATIONS.md` | Colour scale, contrast floors, type ramp, spacing, density modes, elevation, icons, number formats |
 | `02-MOTION.md` | Duration and easing tokens, three springs, the six signature moments, haptics, the performance budget |
-| `03-COMPONENTS.md` | The eight states, every primitive and domain component, the five signature "tells" |
+| `03-COMPONENTS.md` | The seven states, every primitive and domain component, the five signature "tells" |
 | `04-TECHNICIAN.md` | 7 screens — dashboard, jobs, detail, complete, cancel, handover, profile |
 | `05-DISPATCHER.md` | 6 screens — including Job Logs, the screen phone-first actually costs something |
 | `06-SALES-REP.md` | 7 screens — sales, payments, companies, contracts, handover |
@@ -22,7 +22,7 @@ Read `00` and `02` first. They contain the arguments; the rest is application.
 
 ## The position, in one paragraph
 
-**It should feel like well-made equipment, not like software.** The reference points are a Fluke multimeter, a UPS front panel and a carbon-copy job docket — instruments that are unambiguous in bad light, legible across a room, and satisfying the way a well-damped switch is satisfying. The central claim is that **smoothness is not animation; smoothness is the absence of waiting**, which the offline architecture already bought and the UI's job is to make visible. So motion is never decoration: it answers *where did this come from*, *what changed*, or *is my finger still driving this*, and anything doing none of those is deleted.
+**It should feel like well-made equipment, not like software.** The reference points are a Fluke multimeter, a UPS front panel and a carbon-copy job docket — instruments that are unambiguous in bad light, legible across a room, and satisfying the way a well-damped switch is satisfying. The central claim is that **smoothness is not animation; smoothness is the absence of waiting**, which the online architecture has to earn with an in-memory cache and honest busy states, and the UI's job is to make visible. So motion is never decoration: it answers *where did this come from*, *what changed*, or *is my finger still driving this*, and anything doing none of those is deleted.
 
 ---
 
@@ -44,7 +44,7 @@ Enough to feel crafted, few enough to stay honest.
 
 1. **Status stepper fill** — the hero, 520ms, the only orchestrated moment
 2. **Completion sheet rise** — from the button that opened it, stepper still visible above
-3. **Pending badge drain** — the visible proof that queued work left the device
+3. **Sending → accepted** — the visible proof that work reached the server (replaced the pending-badge drain, 2026-09-15)
 4. **Long-press pick-up** — haptic fires before the finger lifts
 5. **Assignment picker load bars** — the only other stagger in the product
 6. **Rejection banner drop** — the only assertive motion, because the alternative is a technician not noticing
@@ -69,7 +69,7 @@ None depends on a trend, so none can date.
 
 `PLAN.md` §9 restricts motion: *one orchestrated moment, skeletons rather than spinners, everything else answers a tap, no entrance animation on every card.* The brief for this set asked for something smooth, interactive and heavily animated.
 
-Those are reconcilable. **`PLAN.md` restricts orchestration, not responsiveness.** One multi-element staged hero animation — the stepper — stands. But an app where every tap answers with a spring, where sheets carry momentum from the finger that threw them, where a rejected sync lands with weight and a long-press physically picks a card up, is *more* animated than one with decorative fades everywhere, and every frame of it is doing work.
+Those are reconcilable. **`PLAN.md` restricts orchestration, not responsiveness.** One multi-element staged hero animation — the stepper — stands. But an app where every tap answers with a spring, where sheets carry momentum from the finger that threw them, where a refused submit lands with weight and a long-press physically picks a card up, is *more* animated than one with decorative fades everywhere, and every frame of it is doing work.
 
 The full argument is in `00-PHILOSOPHY.md` §6.
 
@@ -94,15 +94,15 @@ Non-negotiable, and each traceable to a decision already taken:
 
 | Phase | UI deliverable |
 |---|---|
-| 0 | Tokens, primitives, the eight states, motion tokens, `NavShell`, **a rendered component gallery** |
-| 1 | Technician — 7 screens, the stepper, the outbox UI, the permission ladder |
+| 0 | Tokens, primitives, the seven states, motion tokens, `NavShell`, **a rendered component gallery** |
+| 1 | Technician — 7 screens, the stepper, the permission ladder (built with an outbox UI, removed 2026-09-15) |
 | 2 | Dispatcher — 6 screens, Job Logs at `console` density, multi-select |
 | 2B | Contracts — chips, visit schedule, the reschedule path on the cancel sheet |
-| 3 | Sales rep — 7 screens, reusing the Phase 1 outbox unchanged |
+| 3 | Sales rep — 7 screens, online, with sale-line discounts and photo-only payment evidence |
 | 4 | Owner — both layouts, `DataTable`, the map, the cash queue |
 | 5 | Field validation — sunlight legibility, gloved tap accuracy, **dropped frames on the roster's slowest handset** |
 
-The Phase 0 component gallery is what makes the rest enforceable. Without it, `stale` and `error` get reinvented per screen and the app is four different products by Phase 4.
+The Phase 0 component gallery is what makes the rest enforceable. Without it, `loading` and `error` get reinvented per screen and the app is four different products by Phase 4.
 
 ---
 
@@ -132,6 +132,8 @@ The Phase 0 component gallery is what makes the rest enforceable. Without it, `s
 | `08-SHARED-SCREENS.md` | Tab counts corrected to 4 / 3 / 4 / 5. Consent gates the **location task, not the app**. Density row heights are `minHeight` |
 | `03-COMPONENTS.md` | `MoneyGate` takes a required `action` — defaulting to `read` would hide the amount field from the technician filling it in. The stepper has a `cancelled` rendering. Sheets leave the stepper visible, which is ~140pt, not 64 |
 | `01-FOUNDATIONS.md` | `overdue` removed from the status colour table — it is a filter, not a state, and listing it there is how it becomes a `StatusPill`. **All contrast figures recomputed**; new `slate.400` for placeholders and the stale inset; §1.6 states the two status rails that fail the 3:1 non-text floor and resolves them. `console` 44pt restated as an amendment with the row as the 56pt target |
+
+**Amended again by the online-only decision (2026-09-15).** No outbox, mirror, pending badge or `stale` state for any role; one full-screen *No connection* treatment everywhere; the sales rep has **five** tabs; payments are photo-only; sale lines carry list price and discount. The rows above predate that and are kept as the record of the gap pass.
 
 `UI/COMPARISON.md`'s audit of this set was applied at the same time — the contrast figures, the missing owner Dispatch and Customers specs, the `none` collection mode, and the `console` density amendment. Its verdict is worth keeping in view: **the plan with the stricter stated standard was the one that had not checked.** The figures now say *measured*, and the two status rails that fail the non-text floor are named in §1.6 rather than smoothed over.
 

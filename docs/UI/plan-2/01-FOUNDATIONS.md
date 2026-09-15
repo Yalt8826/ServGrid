@@ -84,7 +84,7 @@ Sunlight legibility is the constraint, not WCAG minimums — WCAG AA is a *desk*
 | Text on accent | 7:1 | slate.900 on #F2C200 — **9.79:1** |
 | Borders against surface | 3:1 | slate.200 — **1.28:1**. A divider, never an information carrier |
 
-**`slate.300` is 2.39:1 and it is now used for one thing only.** The earlier draft reported ≈2.9:1 — half a point optimistic — and used the token for disabled text, placeholders *and* the stale dashed inset. Two of those three are load-bearing: a placeholder tells you what a field wants, and the stale inset is how a technician knows the server has not seen his work. Neither survives direct sun at 2.39:1.
+**`slate.300` is 2.39:1 and it is now used for one thing only.** The earlier draft reported ≈2.9:1 — half a point optimistic — and used the token for disabled text, placeholders *and* the stale dashed inset. Two of those three are load-bearing: a placeholder tells you what a field wants, and the dashed inset is how a technician sees a write still on its way. Neither survives direct sun at 2.39:1.
 
 So they move to **`slate.400` `#7C8B9A`**, the lightest slate that clears 3:1 on both `surface` and `surfaceDense`. `slate.300` keeps disabled text alone, where WCAG explicitly exempts inactive controls and where low contrast is doing the communicating.
 

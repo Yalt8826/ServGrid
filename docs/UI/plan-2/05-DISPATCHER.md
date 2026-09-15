@@ -1,6 +1,6 @@
 # Dispatcher — Screen Specifications
 
-Density `console`. **Online-only** — no mirror, no outbox. The failure mode is an explicit error state, never a queue and never a spinner that resolves into nothing.
+Density `console`. **Online-only**, like every role since 2026-09-15. The failure mode is an explicit error state, never a queue and never a spinner that resolves into nothing.
 
 Three users, Phase 2. Seated, at a desk, on office wifi, working from a **phone**.
 
@@ -45,12 +45,12 @@ Three users, Phase 2. Seated, at a desk, on office wifi, working from a **phone*
 - A technician whose tracking is stale carries a warning inline. The dispatcher is the person who will actually notice.
 - **Needs attention**: overdue jobs, then unassigned, then **jobs still `assigned` past their scheduled time** — someone was due there and has not set off.
 
-**Not** "jobs rejected from a technician's outbox", which an earlier draft listed. Outbox rejections live on the handset; the server sees a batch operation refused, replies, and keeps no queue of its own. There is nothing for this section to read, and a section that renders empty because its data source does not exist is worse than one that was never designed. The dispatcher-visible half of the same problem is the job that was cancelled by the office and then completed offline — which shows up as an ordinary cancelled job with a technician's completion attempt in its `job_events` timeline, where it belongs.
+**Not** "jobs rejected from a technician's outbox", which an earlier draft listed. There is no outbox any more: a refused technician submit is answered on his own screen, at the moment he submits. The dispatcher-visible half of that problem is the job the office cancelled while the technician was on his way, which is simply a cancelled job.
 
 ### States
 
 - **Empty (nothing overdue):** the figure is `0` in `text.secondary`, not hidden. Absence of a problem is information.
-- **Offline:** full-width `feedback.danger` banner — *"No connection. This screen is not live."* Figures grey to `text.disabled`. **This is the one role where stale data is dangerous**, because dispatch decisions are made from it.
+- **Offline:** the full-screen *No connection* gate (`08-SHARED-SCREENS.md`) covers the dashboard, so **no dispatch decision is made from figures that stopped being live**.
 - **Error:** the failed section shows the error and a *Retry*; other sections keep working.
 
 ### Motion
@@ -121,7 +121,7 @@ A compact two-line row at **44pt** with the filter bar pinned, accepting a small
 
 - **Empty (filtered):** "No jobs match these filters." + *Clear filters*. The filter bar stays visible — the user needs to see what they set.
 - **Empty (unfiltered):** "No jobs yet."
-- **Offline:** danger banner, list dims to `text.disabled`, **filters disabled**. A filter applied to stale data produces a confident wrong answer.
+- **Offline:** the full-screen *No connection* gate. A filter applied to data that stopped being live produces a confident wrong answer, so none is shown.
 - **Loading:** skeleton rows after 200ms, exact row geometry.
 
 ### Motion
@@ -215,6 +215,6 @@ The dispatcher can move a visit's due date (`PATCH /v1/contracts/visits/:id`) �
 
 Self only. Name, username, *Change password*, *Log out*, app version.
 
-**No pending badge, no sync state, no tracking chip.** Dispatchers hold no device state and are not tracked; showing them a sync UI would imply an offline capability they do not have and should not rely on.
+**No tracking chip.** Dispatchers are not tracked.
 
 Logout is immediate — there is nothing queued to lose.

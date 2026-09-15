@@ -1,5 +1,7 @@
 # Phase 0 — Foundation
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 **Size M · ~3 weeks · Risk: low, except distribution**
 
 The only phase with a free rollback, because nothing is live yet. Use that: every schema correction in this phase is a text edit to a file that has not run. After Phase 0 deploys, the same correction is an expand/contract cycle with a backfill and a dual-write (`PLAN-EXECUTION.md` Part I §1).

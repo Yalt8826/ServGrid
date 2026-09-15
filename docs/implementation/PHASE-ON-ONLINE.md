@@ -195,7 +195,7 @@ TON.8 map tiles (blocked on the owner's MapTiler key)
 **Build** — every remaining offline description rewritten or marked superseded: `PLAN.md` (§5 role-change note), `PLAN-DATA-MODEL.md` §6, `PLAN-EXECUTION.md` (flags table, Phase 1 and 3 tests, exit criteria, rollback rows, risk register), `PLAN-GAPS.md` notes, `PLAN-FRONTEND.md` (nav map: rep **5** tabs; §9 screens), `UI/plan-2` (00, 02, 03 `SyncBanner`/`PendingBadge`, 04, 05, 06 — five tabs, photo-only payments, discounts — 07, 08 *Offline*), `PHASE-2B-CONTRACTS.md` (technician contract context via the work read), `PHASE-5-HARDENING.md`, and the field-run checklists T1.23, T2.11, T3.9, T4.13.
 
 **Done when**
-- [ ] `grep -ril "outbox\|offline-first\|mirror" docs/PLAN*.md docs/UI/plan-2 docs/implementation` returns only superseded notes and the decision record's references
+- [ ] `grep -ril "outbox\|offline-first\|mirror" docs/PLAN*.md docs/UI/plan-2 docs/implementation` returns only superseded notes and the decision record's references; historical build records (`PHASE-0`–`PHASE-3`, `PLAN-GAPS.md`, `UI/COMPARISON.md`, `UI/plan-1/`, the zcode prompt packs) carry a superseded banner instead of a line-by-line rewrite
 
 **Commits** `chore(start): TON.7 docs sweep` → `docs: plan documents follow the online-only decision`
 

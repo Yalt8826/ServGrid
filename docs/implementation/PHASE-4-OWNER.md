@@ -2,7 +2,7 @@
 
 **Size L · ~6 weeks · Risk: medium — two layouts and a fork in the road**
 
-One user. Online-only: no mirror, no outbox. At a desk with a laptop most of the time, on a phone the rest. **Not rushed. Wants to *verify* rather than operate** — the recurring question is "is this right, and if not, who do I ask?"
+One user. Online-only, like every role. At a desk with a laptop most of the time, on a phone the rest. **Not rushed. Wants to *verify* rather than operate** — the recurring question is "is this right, and if not, who do I ask?"
 
 **Entry — one blocking item, one already cleared:**
 
@@ -95,7 +95,7 @@ The fork is not a disaster — `packages/shared` already carries the types, sche
 
 **Default: the last 14 days ending *yesterday*, all flags, `missing_submission` sorted first regardless of date.**
 
-**Ending yesterday, because today's figures are not final.** `job_completions.business_date` is generated from the technician's clamped device time, so cash collected in a basement on Monday lands on **Monday**, whenever it syncs. A technician who declares at 19:10 and syncs on the drive in next morning produces, for a few hours, a Monday row with a declaration and no expected cash — flagged `no_expected_cash`, which reads exactly like a problem it is not.
+**Ending yesterday, because today's figures are not final.** `job_completions.business_date` is generated from the technician's clamped device time, so cash collected in a basement on Monday lands on **Monday**, whenever it reaches the server. A declaration made before the day's last completion was submitted produces, for a few hours, a Monday row with a declaration and no expected cash — flagged `no_expected_cash`, which reads exactly like a problem it is not.
 
 Today stays reachable, one tap away, captioned *"still syncing"*. **An owner who learns the flags lie on the current day learns to discount the flags**, and that costs more than a one-day delay ever will.
 
@@ -222,7 +222,7 @@ Complete the stub from T0.8. `PATCH /v1/employees/:id { isActive: false }` refus
 2. **Companies he owns.** Otherwise a rep's accounts become invisible to both reps at once
 3. **Cash reconciliations still `submitted` or `disputed`.** The one that is easy to omit and worst to omit — the first two are visible on screens the owner already looks at; an unconfirmed handover is a row in a queue he may not have reached. **Deactivating the person is how a real discrepancy becomes an unanswerable one**
 
-**A role change is gated the same way**, plus a fourth condition: a technician promoted to dispatcher loses offline capability at his next login, so **his outbox must be empty.**
+**A role change is gated the same way.** (A fourth condition — an empty outbox — was removed with the outbox on 2026-09-15; the new role applies at the next sign-in.)
 
 On success: revoke every refresh token, mark his devices inactive, and **exclude him from `v_employee_tracking_health`** so a deactivated account does not sit permanently amber in the owner's console. Completions, payments and pings are untouched — `is_active` was never a delete.
 
@@ -232,12 +232,12 @@ On success: revoke every refresh token, mark his devices inactive, and **exclude
 - Open jobs → 409 **listing them**; after reassignment → succeeds
 - Owned companies → 409 listing them; after reassignment to NULL → succeeds
 - **An unconfirmed cash reconciliation → 409**; after confirming → succeeds
-- A role change with a non-empty outbox → 409
+- A role change with no open work lands
 - On success: tokens revoked, devices inactive, **absent from the health view**
 - His historical completions and payments **still exist and still attribute to him**
 
 **Done when**
-- [ ] All four blocking conditions proven independently
+- [ ] All three blocking conditions proven independently
 - [ ] History proven intact after deactivation
 
 **If it fails**
@@ -595,6 +595,8 @@ These are the most descopable screens in the project. **Employee admin moves to 
 **Depends on:** all of Phase 4
 **Tier:** T0 per flag
 
+*Checklist rewritten for the online-only app on 2026-09-15; the run is still pending.*
+
 **Build** nothing. **Give the owner the app for two weeks and watch what he does not use.**
 
 **Two weeks, the owner.**
@@ -608,6 +610,7 @@ These are the most descopable screens in the project. **Employee admin moves to 
 - [ ] **No owner screen renders a card grid on desktop**
 - [ ] Owner completed one employee admin task — create, deactivate, password reset — **unaided**
 - [ ] **Web and Android show the same figures for the same day** — checked by hand once, deliberately
+- [ ] **Pulling the network on web and on Android shows the full *No connection* screen**, and a half-typed amendment is intact when it returns
 - [ ] **The owner amended at least one completion**, with the reason recorded, and the queue reflected it
 - [ ] The dashboard shows the four defined stats and two charts, **and the owner can say what each one means without being told**
 

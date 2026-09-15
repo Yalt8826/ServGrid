@@ -1,6 +1,6 @@
 # Technician — Screen Specifications
 
-Density `field`. Offline-first: every screen reads the local SQLite mirror, so **no screen here shows a loading spinner for its own content.** Eight users, Phase 1.
+Density `field`. Online (decision 2026-09-15): every screen reads `GET /v1/technician/work` through an in-memory cache, so **a revisit shows its content at once and refetches quietly**; only a cold first load waits. Eight users, Phase 1.
 
 Four tabs: Dashboard · Jobs · **Cash** · Profile. Cash gets a tab rather than a row inside Profile because it is touched once a day, at the end of a shift, by someone who wants to leave — and a skipped handover is the `missing_submission` row the owner's whole queue exists to catch (`PLAN.md` §8).
 
@@ -18,7 +18,7 @@ Four tabs: Dashboard · Jobs · **Cash** · Profile. Cash gets a tab rather than
 
 ```
 ┌────────────────────────────────────────┐
-│ Good morning, Ravi          ⟳ 3        │  header + PendingBadge
+│ Good morning, Ravi                     │  header
 ├────────────────────────────────────────┤
 │  6      2         1                    │  ← display 32 Condensed
 │  today  done      overdue              │     three figures, one row
@@ -44,14 +44,14 @@ Four tabs: Dashboard · Jobs · **Cash** · Profile. Cash gets a tab rather than
 - **Tracking health chip**, always visible. Red or amber is tappable into the permission ladder.
 - **NEXT** — the single next job as a full `JobCard` with two actions inline: *Navigate* (secondary) and *Start job* / *Arrive* (primary, the screen's one accent).
 - **LATER TODAY** — remaining jobs as compact rows, tappable.
-- Pull to refresh drains the outbox; the `PendingBadge` is the indicator (`02-MOTION.md` §6).
+- Pull to refresh refetches the work read (`02-MOTION.md` §6).
 
 ### States
 
 - **Empty (no jobs):** "No jobs assigned today." + secondary *Refresh*. No illustration.
-- **Offline:** no banner. The mirror is the source; a permanent "offline" chrome trains people to ignore it. Only a *failed drain* raises anything.
-- **Stale:** individual cards carry the dashed inset; the screen does not.
-- **Loading:** never. This is local data.
+- **Offline:** the full-screen *No connection* gate (`08-SHARED-SCREENS.md`), over the screen rather than instead of it.
+- **Sending:** the card whose status change is in flight carries the dashed inset and *Sending…*; the screen does not.
+- **Loading:** skeletons on a cold first load only; a revisit shows the cached read and refetches quietly.
 
 ### Motion
 
@@ -85,12 +85,12 @@ A search field appears in the header only when the tab holds more than 12 jobs �
 
 - **Empty, Today:** "Nothing scheduled today." + *Check upcoming*.
 - **Empty, Completed:** "Nothing completed yet today."
-- **Stale:** dashed inset, `Pending sync` in place of the number.
-- **Rejected:** the card keeps its **real status rail** and takes the `stale` dashed inset in `feedback.danger`, plus a one-line reason. Tapping opens the job with the full banner. The rail is not repainted red: `cancelled` is already `#B3261E`, so a red rail on a rejected card makes it read as a job the office killed — which is sometimes true and sometimes exactly the opposite, and the technician cannot tell which from a colour.
+- **Sending:** dashed inset and *Sending…* while a status change is in flight. The job number is always the server's.
+- **Refused:** the server's sentence shows on the screen that submitted — the sheet or the job detail — not on the card. The card keeps its **real status rail**; a job the office cancelled simply arrives cancelled on the next read.
 
 ### Motion
 
-Tabs: underline slides, content cross-fades 140ms. **No stagger, no entrance animation.** A card arriving from a sync animates in at 140ms — the only entrance on this screen, and it means "this is new".
+Tabs: underline slides, content cross-fades 140ms. **No stagger, no entrance animation.** A card arriving on a refetch animates in at 140ms — the only entrance on this screen, and it means "this is new".
 
 ### Not on this screen
 
@@ -102,7 +102,7 @@ No filter bar (that is the dispatcher's screen). No bulk actions. No map. No amo
 
 **Purpose.** Everything needed to do the job, and the controls to advance it.
 
-**Worst moment.** Basement, no signal, torch in the other hand, deciding whether this unit is under warranty.
+**Worst moment.** Basement, weak signal, torch in the other hand, deciding whether this unit is under warranty.
 
 ### Anatomy
 
@@ -140,8 +140,8 @@ No filter bar (that is the dispatcher's screen). No bulk actions. No map. No amo
 
 ### States
 
-- **Stale:** dashed inset on the header; stepper still advances locally.
-- **Rejected:** banner pinned under the header, server `message` verbatim, two actions — *Discard my copy* / *View the office version* (`PLAN-FRONTEND.md` §5).
+- **Sending:** dashed inset on the header and *Sending…* on the action while a status change is in flight; the stepper advances when the server accepts.
+- **Refused:** the server's `message` verbatim, pinned under the header, with one action — *Refresh* — that loads the office's version (`PLAN-FRONTEND.md` §5).
 - **Closed:** thumb bar collapses to a single `Completed 16:42` line. No revenue.
 
 ### Motion
@@ -227,7 +227,7 @@ The checkbox **defaults from the product's category**: on for `ups`, `battery` a
 
 ### Motion
 
-Rises from the button, `spring.sheet` 300ms, stepper visible above. Disclosures expand 220ms height+opacity. Segment select: `Selection` haptic, underline slides. Submit: button → `loading`, sheet dismisses at 220ms, `NotificationSuccess` when the outbox confirms — **not on tap**, because the honest signal is delivery, not intent.
+Rises from the button, `spring.sheet` 300ms, stepper visible above. Disclosures expand 220ms height+opacity. Segment select: `Selection` haptic, underline slides. Submit: button → `loading`; when the server accepts, `NotificationSuccess` and the sheet dismisses at 220ms — **not on tap**, because the honest signal is delivery, not intent. On failure the sheet stays open with everything typed and the server's sentence (or *not reached*) above the button.
 
 ### Never
 
@@ -308,13 +308,11 @@ Name, role, username · **`TrackingHealthChip`, prominent** · the permission la
 ⚠ Xiaomi autostart              Not confirmed   [ Fix ]
 ```
 
-Then: pending sync count · app version · device model · *Change password* · *Log out*.
+Then: app version · device model · *Change password* · *Log out*.
 
-### Logout is a gate
+### Logout
 
-Blocked while anything is queued or in flight. The button reports **"3 items not yet synced"** and offers *Retry now*. There is no confirm-and-lose path — the technician tapping it at the end of a shift is tired and about to hand the phone over (`PLAN-FRONTEND.md` §5).
-
-If only rejected items remain, logout proceeds and those rows are kept, keyed to him.
+Immediate. Nothing is queued on the phone, so there is nothing to lose (decision 2026-09-15). The ladder's battery and autostart answers live on the server (`GET /v1/devices/me`) and come back after a reinstall.
 
 ### Motion
 

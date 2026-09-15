@@ -251,7 +251,7 @@ If duplicates appear, the index is missing or was created non-partially. Do not 
 | Dispatcher | `v_contract_visits_dispatcher` | number, seq, visits, due date, billing, `attempt_count`. **No value** |
 | Owner | `service_contracts` | everything |
 
-**Contracts are not a separate synced collection** for the technician. His jobs carry `contract: { number, billing, visitsRemaining } | null` **inline** in the sync bootstrap and delta — he needs the context of the visit in front of him, never the contract as an entity, and a table he cannot act on has no business in his mirror.
+**Contracts are not a separate collection** for the technician. His jobs carry `contract: { number, billing, visitsRemaining } | null` **inline** in `GET /v1/technician/work` — he needs the context of the visit in front of him, never the contract as an entity, and a collection he cannot act on has no business in his work read.
 
 **`contract.money` exists for the same reason `job.money` does.** `contract_value` is revenue, and the dispatcher guarantee covers revenue **wherever it lives**, not only in `job_completions`. Granting `SELECT` on the contracts table would have reintroduced exactly the leak the schema exists to close — the same mistake in a new table.
 
@@ -267,12 +267,12 @@ If duplicates appear, the index is missing or was created non-partially. Do not 
 - Dispatcher's payload carries `attempt_count` and **no value**
 - A rep cannot `PATCH` a visit due date, his own contract's included
 
-`apps/api/test/integration/sync-contracts.test.ts`
-- Bootstrap for a technician contains **no contracts collection**; contract data is inline on jobs only
+`apps/api/test/integration/technician-work-contracts.test.ts`
+- The technician's work read contains **no contracts collection**; contract data is inline on jobs only
 
 **Done when**
 - [ ] Money-leak suite extended and green for `contract_value`
-- [ ] No contracts collection in the technician's mirror
+- [ ] No contracts collection in the technician's work read
 
 **If it fails**
 If `contract_value` reaches a dispatcher, the endpoint is selecting from `service_contracts` rather than `v_contract_visits_dispatcher`. This is the exact leak the second gap pass caught in design — the same mistake in a new table — so treat it as a design regression and fix the query source, not the response shape.

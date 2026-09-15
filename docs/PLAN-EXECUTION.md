@@ -60,7 +60,7 @@ Each flag names exactly one surface, so "turn it off" is never ambiguous:
 | Flag | Guards | Phase |
 |---|---|---|
 | `tech.jobs` | Technician job screens and completion | 1 |
-| `tech.offline` | SQLite mirror and outbox — off means online-only, queued items preserved | 1 |
+| ~~`tech.offline`~~ | ~~SQLite mirror and outbox~~ — **removed 2026-09-15** with the outbox (online-only decision) | 1 |
 | `tech.location` | Background tracking task and ping ingest | 1 |
 | `tech.notifications` | Assignment pushes and local notifications | 2 |
 | `dispatch.console` | Dispatcher dashboard, dispatch form, Job Logs | 2 |
@@ -191,8 +191,8 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 | Layer | Deliverable |
 |---|---|
 | Data | Migrations 006–010: `customer_products`, jobs (cards, completions, parts, cancellations, events), attachments, location **incl. `v_employee_tracking_health`**, cash |
-| API | Jobs module + status machine, completion (with the discount constraint), cancellation, `job_events`, **idempotency plugin**, sync bootstrap/delta/batch, location ingest with work-window validation, attachments, cash handover declaration |
-| App | Technician dashboard, job tabs, job detail, complete sheet, cancel sheet, cash handover, profile; **SQLite mirror**, **outbox + drain manager**, **location task + permission ladder**, tracking health chip |
+| API | Jobs module + status machine, completion (with the discount constraint), cancellation, `job_events`, **idempotency plugin**, technician work read (built as sync bootstrap/delta/batch; replaced 2026-09-15), location ingest with work-window validation, attachments, cash handover declaration |
+| App | Technician dashboard, job tabs, job detail, complete sheet, cancel sheet, cash handover, profile; online reads and intent-keyed writes (built as a SQLite mirror and outbox; removed 2026-09-15), **location task + permission ladder**, tracking health chip |
 | Side quest | **Dispatcher Job Logs prototype at real volume** (see Phase 2 entry) |
 
 **Entry** — Phase 0 exit met. At least one handset from each OEM in the staff roster physically available, **and borrowed long enough to capture the autostart walkthrough screenshots** — those cannot be written from documentation, and they block the last step of the permission ladder (`PLAN-FRONTEND.md` open item 4). Owner has answered: does a technician see amounts in his own completion history? (`PLAN-BACKEND.md` open item 2 — proposed: no.)
@@ -201,27 +201,27 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 
 | Level | What | Gate |
 |---|---|---|
-| Unit | Outbox state machine; backoff schedule; **idempotency key stability across retries** | key never regenerated — this is the single easiest mistake and it defeats the whole server guard |
+| Unit | Intent writer; **idempotency key stability across retries** | key never regenerated — this is the single easiest mistake and it defeats the whole server guard |
 | Integration | Status machine, every legal and illegal transition | all enumerated |
 | Integration | Discount constraint: shortfall without reason rejected; warranty job (`cost 0, mode none`) accepted | both |
 | Integration | `next_in_sequence` under 50 concurrent allocations | zero duplicates |
 | Integration | Fiscal-year rollover creates a new sequence scope implicitly (`PLAN-DATA-MODEL.md` open item 5) | passes |
 | Integration | Idempotency: replay returns identical response; differing body → 422; concurrent in-flight → 409 | all three |
-| Integration | Expired access token + full outbox → refresh once, retry once, **nothing discarded** (`PLAN-BACKEND.md` open item 1) | queue intact |
-| Integration | Sync batch: `dependsOn` short-circuit, rejection isolation, cursor monotonicity | all |
+| Integration | Expired access token on submit → refresh once, retry once with the same key, **nothing typed discarded** | form intact |
+| Integration | Technician work read: own jobs only, contract inline, flag gate | all |
 | Integration | Ping ingest: out-of-window rejected with HTTP 200; duplicate `(employee, recorded_at)` absorbed | both |
 | Integration | Completion amendment: before confirm succeeds; after confirm → 409 naming the reconciliation; reopen then amend succeeds; event trail carries before and after | all four |
 | Integration | Cash handover keyed on `employee_id`, unique per `(employee, date)`; `businessDate` refused in the future and beyond 7 days back | passes |
 | Integration | Declaration amended while `submitted` succeeds; after `confirmed` or `disputed` → 409 | both |
-| Integration | **Scope exit**: a job reassigned away from a technician arrives in his next delta as an `out_of_scope` tombstone, and his queued completion for it is **not** deleted | both halves |
+| Integration | **Scope exit**: a job reassigned away from a technician is absent from his next work read | passes |
 | Integration | `v_employee_tracking_health` exists after migration 009 and `GET /v1/location/health/me` returns the actor's own row and nobody else's | passes |
-| E2E | **Cold start with the radio off**: expired access token, full outbox → app renders the mirror, nobody is logged out, no blocking refresh | green on device |
-| E2E | Completion with two photos → JSON batch pass, then binary pass; a rejected parent leaves its photos unsent rather than orphaned on the server | green |
+| E2E | **Cold start with the radio off**: stored session, expired access token → the *No connection* screen, nobody is logged out, the app resumes when signal returns | green on device |
+| E2E | Completion with two photos → completion accepted, then each photo uploads with its own key; a refused completion sends no photos | green |
 | Integration | Parts recorded on a completion **do not alter `cost`**; a completion with parts and one without produce identical money rows | passes |
 | Unit | Complete sheet: in-warranty charge raises exactly one confirmation; discount discloses a mandatory reason | both |
-| E2E (Maestro) | Airplane mode → complete a job → reconnect → job number arrives, badge clears | green on device |
-| E2E | Complete a job offline that the office cancelled → reconnect → `JOB_ALREADY_CLOSED` banner, local record retained | green |
-| E2E | **Logout with queued items is blocked**; logout with only rejected items succeeds and those rows return on next login for the same employee — and are invisible to a different one | green on device |
+| E2E (Maestro) | Airplane mode mid-sheet → *No connection* screen → reconnect → the sheet is intact and submits once | green on device |
+| E2E | Submit a completion for a job the office cancelled → `JOB_ALREADY_CLOSED` sentence on the sheet, typed input retained | green |
+| E2E | **Logout is immediate** — nothing is queued — and the next person to sign in on the handset sees only his own work | green on device |
 | Device | Overnight background survival, ≥1 handset per OEM in the roster | recorded in the matrix |
 | Soak | 72h continuous tracking, 2 devices | ping delivery + battery cost measured |
 | Field | 2 technicians, 2 weeks, real jobs, parallel run | see exit criteria |
@@ -229,13 +229,13 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 **Exit criteria** — measured over the final parallel-run week, numbers written down:
 
 - [ ] **Ping delivery ≥ 90%** of expected in-window pings on the two field handsets
-- [ ] **Outbox rejection rate < 2%**, excluding legitimate conflicts (office cancellations)
+- [ ] **Submit failure rate < 2%**, excluding legitimate conflicts (office cancellations)
 - [ ] **Zero duplicate job cards** attributable to replay
 - [ ] **Zero completions** recorded with an unexplained shortfall — the constraint held in the field, not just in tests
 - [ ] Both technicians completed a full day's jobs **without falling back to the old process**
 - [ ] Basement/dead-zone recovery observed at least once in the wild: a gap that filled in on reconnect rather than staying a gap
 - [ ] Health chip showed a **true red** at least once and the technician acted on it — a chip that has only ever been green is untested
-- [ ] **No queued work was lost across a logout** during the parallel run — including at least one deliberate end-of-shift handset handover
+- [ ] **No submitted work was silently lost** during the parallel run — every failed submit was seen and retried or recorded, including across at least one deliberate end-of-shift handset handover
 - [ ] Parts were recorded on at least some real completions, and **no technician asked why the amount did not change** — if anyone did, the sheet implies a bill it does not produce
 
 **Rollback**
@@ -243,7 +243,7 @@ The largest phase and the one that decides the project. Idempotency, the sync pr
 | Scenario | Tier | Action |
 |---|---|---|
 | A technician screen is wrong | T0 | flag `tech.jobs` off for that person |
-| Outbox misbehaving | T0 | flag `tech.offline` off — app becomes online-only, queued items preserved and drained on re-enable |
+| Submits failing in the field | T0 | `tech.jobs` off for that person; the old process resumes, and nothing is stored on the phone to recover |
 | Location draining battery or spamming | T0 | flag `tech.location` off; server stops accepting, device stops the task on next foreground |
 | Logic bug in the app | T1 | republish previous EAS update, ~5 min |
 | API bug | T2 | previous image, ~2 min |
@@ -256,7 +256,7 @@ Phase 1's tables are additive. A full rollback to Phase 0 leaves them in place, 
 
 If OEM background-killing makes tracking unusable on the majority of staff handsets after genuine mitigation effort: **ship the technician app without continuous background tracking.** Keep on-demand *Locate now*, add a manual "I'm on site" check-in on the job detail screen, and move continuous tracking to a Phase 5 spike.
 
-This is a real option, not a consolation. Jobs, offline completion, cash handover and the product stack are the majority of the app's value, and none of them depend on a ping every 15 minutes. Deciding this in advance stops tracking from holding the other 80% hostage.
+This is a real option, not a consolation. Jobs, completion, cash handover and the product stack are the majority of the app's value, and none of them depend on a ping every 15 minutes. Deciding this in advance stops tracking from holding the other 80% hostage.
 
 ---
 
@@ -307,7 +307,7 @@ Also decided before starting: what the local notification says when work is *tak
 - [ ] Error states verified by pulling the office wifi mid-task — a clear message, not a spinner
 - [ ] **Assignment notifications delivered for ≥ 80% of real assignments within 60 seconds**, measured over the parallel-run week — and a technician confirms the app still worked on the day one was missed
 
-**Rollback** — the cheapest phase to undo. Dispatchers hold no device state: no SQLite, no outbox. T0 flag off, or T1/T2. Recovery is minutes and the old process resumes with the job data intact in the database.
+**Rollback** — the cheapest phase to undo. Dispatchers hold no device state — since 2026-09-15 no role does. T0 flag off, or T1/T2. Recovery is minutes and the old process resumes with the job data intact in the database.
 
 Notifications get their own flag (`tech.notifications`) so they can be turned off without touching dispatch. That separation matters because the two failure modes are unrelated: a dispatcher screen being wrong and a push spamming a technician at 22:00 need different switches, and the second is the one that will be wanted in a hurry.
 
@@ -400,11 +400,11 @@ This is cheap to undo precisely because a visit becomes an ordinary job card. Th
 | API | Companies **with rep ownership**, owner-only ownership reassignment, sales cards + items, payments, `v_company_balances`, company ledger |
 | App | Sales dashboard, sales cards with line items, Pending/Collected payment tabs, proof photo, company list + ledger, **rep cash handover** |
 
-**Entry** — Phase 1 exit met (the outbox must be proven before a second consumer). Decisions taken:
+**Entry** — Phase 1 exit met. Decisions taken:
 
 1. Do parts consumed on a job need modelling? (`PLAN-DATA-MODEL.md` open item 1) — should already be answered at Phase 2B entry; confirm it did not change.
 2. **Is stock/inventory genuinely out of scope?** (`PLAN-DATA-MODEL.md` open item 3) Sales snapshot prices but decrement nothing. If the owner expects stock levels, that is a new module, not a column — and this is the last phase where it can be added without reworking the sales model.
-3. Does any sales operation need a multi-parent `dependsOn` in the outbox? (`PLAN-BACKEND.md` open item 3) Currently single-parent, no known case; a payment with a proof photo is still a single chain.
+3. ~~Does any sales operation need a multi-parent `dependsOn` in the outbox?~~ Moot since 2026-09-15: a payment posts, then its proof photo uploads against the returned id.
 4. **Which companies belong to which rep, as a starting allocation.** Account ownership is now a column, and the reps have to agree on the split before the phase goes live. House accounts — `owner_rep_id` NULL — are the answer for anything genuinely shared, and are also how leave gets covered.
 
 **Tests**
@@ -416,18 +416,18 @@ This is cheap to undo precisely because a visit becomes an ordinary job card. Th
 | Integration | Void requires a reason; voided sale leaves the balance correct | passes |
 | Integration | On-account payment (`sales_card_id` NULL) lands on the company balance | passes |
 | Integration | Overpayment produces a negative balance and the UI renders it | passes |
-| **Regression** | **The Phase 1 outbox test suite passes unchanged, with no new code paths added to the drain** | the phase's structural gate |
+| ~~Regression~~ | ~~The Phase 1 outbox test suite passes unchanged~~ — retired with the outbox (2026-09-15); the intent-writer tests cover every rep write | — |
 | Integration | A rep sees his accounts plus house accounts, and **not** the other rep's — every company endpoint, both reps | full matrix |
 | Integration | A rep cannot reassign an account, his own or anyone's; the owner can, including to NULL | passes |
 | Integration | A cash payment recorded by a rep appears in `v_employee_expected_cash` for **that rep's** day | passes |
-| Integration | Duplicate company created offline → `DUPLICATE_ENTITY` with the existing row named, dependent outbox rows rewritable | passes |
-| E2E | Record a payment offline with a proof photo → reconnect → photo uploads after its parent | green |
+| Integration | Duplicate company → `DUPLICATE_ENTITY` with the existing row named, shown on the form | passes |
+| E2E | Record a payment with a proof photo → the payment is accepted, then the photo uploads against it; a dropped connection keeps the form and retries with the same key | green |
 | Field | 1 full month-end cycle | see exit |
 
 **Exit criteria**
 
 - [ ] Month-end balances match the owner's manual figures **to the rupee**, across every company
-- [ ] The outbox required **zero modification** to serve sales reps. If it did need changes, the Phase 1 abstraction leaked — record what and why, because the same leak will reappear
+- [ ] **No rep submit was silently lost** — every failed sale or payment was seen and retried or recorded. (Replaces "the outbox required zero modification", superseded 2026-09-15.)
 - [ ] Both reps recorded a full month of sales and collections in-app
 - [ ] At least one void exercised on real data, balance verified afterwards
 - [ ] Neither rep saw the other's accounts, and neither reported the split getting in their way — if it did, house accounts are the release valve, not a code change
@@ -437,7 +437,7 @@ This is cheap to undo precisely because a visit becomes an ordinary job card. Th
 
 Sales tables are additive; a rollback to Phase 2 leaves them unwritten.
 
-**Descope** — if the outbox does not generalise cleanly, **ship sales reps online-only**, like dispatchers, with clear error states. Reps are meaningfully less offline than technicians. Losing rep offline support costs some field convenience; forking the outbox into two divergent implementations costs correctness in the part of the system that handles money.
+**Descope** — ~~if the outbox does not generalise cleanly, ship sales reps online-only~~. Taken for every role on 2026-09-15 (`docs/decisions/2026-09-15-online-only.md`).
 
 ---
 
@@ -469,7 +469,7 @@ And one assessment, made at phase start, not mid-phase: **does React Native Web 
 | SQL fixture | A rep-day with a cash payment and no declaration also flags `missing_submission` | the payments side is exercised, not just completions |
 | Integration | Reassigned job's cash attributes to `completed_by`, not `assigned_to` | passes |
 | Integration | Deactivating an employee with open jobs → 409 listing them; after reassignment → succeeds, tokens revoked, devices inactive, out of the health view | all |
-| Integration | Deactivation refused while he holds an unconfirmed or disputed cash reconciliation; a **role change** refused under the same conditions plus a non-empty outbox | both |
+| Integration | Deactivation refused while he holds an unconfirmed or disputed cash reconciliation; a **role change** refused under the same conditions | both |
 | SQL fixture | The queue's default range ends **yesterday**; today is reachable and captioned as still syncing | passes |
 | Integration | Amend after confirm → 409; reopen → amend succeeds; queue reflects the new figure | full cycle |
 | Integration | *Locate now* end-to-end on a real handset, including the **unanswered** path | both paths |
@@ -559,7 +559,7 @@ The last column is dropped frames scrolling 200 Job Logs rows (`UI/plan-2/02-MOT
 | Tracking viable on majority handsets | Phase 1 exit | Fails → descope to on-demand + manual check-in |
 | Contract shape: customer or company; skipped-visit rule | **Phase 2B start** | Restructuring after visits exist means rewriting generated history |
 | Rep account allocation agreed | Phase 3 start | Ownership is a column; the split is a business decision |
-| Outbox generalises unchanged | Phase 3 exit | Fails → sales reps go online-only |
+| ~~Outbox generalises unchanged~~ | — | Moot: every role online since 2026-09-15 |
 | Map tile source decided | Phase 4 start | |
 | RNW carries DataTable + rail | Phase 4 day 3 | Fails → fork thin React web, +2 weeks |
 | Full OEM matrix filled | Phase 5 exit | |
@@ -579,7 +579,7 @@ Each risk has a **trigger** — the observable that says it has arrived — beca
 | Photo storage growth | Bucket > 50 GB | Retention policy, downscale more aggressively |
 | Single-VPS failure | Any unplanned outage | Documented restore path; accepted risk at 14 users, revisit if it happens twice |
 | **Contract scope was larger than the plan knew** | A second business capability turns out to be missing during Phase 2B | The AMC gap was found by reading the plans against the working day, not against each other. If one such gap existed, a second may. Re-run that reading before Phase 3 rather than after |
-| Notification fatigue | Any technician silences the app, or asks to | The window rule and the urgent-only exception are the mitigations. A silenced app still syncs on foreground, so the failure is soft — but it is invisible, which is the pattern this project treats as the enemy |
+| Notification fatigue | Any technician silences the app, or asks to | The window rule and the urgent-only exception are the mitigations. A silenced app still refetches on foreground, so the failure is soft — but it is invisible, which is the pattern this project treats as the enemy |
 | Contract jobs acquire special handling | Any code path branches on "is this a contract visit" beyond a display chip | Push back in review. The T0 rollback for Phase 2B depends entirely on a generated visit being an ordinary job |
 
 ### Timeline
@@ -611,7 +611,7 @@ The whole thing is done when, for one full month:
 - A backup has been restored successfully at least once
 - No dispatcher has ever seen a revenue figure — **from `job_completions` or from `service_contracts`** — verifiable from the response-schema assertions in CI, not from anyone's recollection
 - AMC visits are raised, assigned and closed without anyone tracking them outside the app
-- No queued field work has been lost: not to a logout, not to a shared handset, not to a rejected sync
+- No submitted field work has been silently lost: not to a dropped connection, not to a shared handset, not to a refused submit
 
 ---
 
