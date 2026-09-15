@@ -9,6 +9,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import type { ReactNode } from 'react';
+import { NoConnectionGate } from '../../src/components/NoConnectionGate';
 import { NavShell } from '../../src/navigation/NavShell';
 import { RoleGate } from '../../src/navigation/RoleGate';
 import { api } from '../../src/lib/api';
@@ -37,6 +38,9 @@ export default function AppLayout() {
        * (inert) counterpart on web, where no offline role exists.
        */}
       <MirrorProvider send={api.request} triggers={systemTriggers}>
+        {/* Online-only (PLAN-FRONTEND.md §5): a lost connection covers
+            everything below without unmounting it. */}
+        <NoConnectionGate>
         <RoleGate>
           <NavShell>
           <Stack screenOptions={{ headerShown: false }}>
@@ -81,6 +85,7 @@ export default function AppLayout() {
           </Stack>
           </NavShell>
         </RoleGate>
+        </NoConnectionGate>
       </MirrorProvider>
     </QueryProvider>
   );

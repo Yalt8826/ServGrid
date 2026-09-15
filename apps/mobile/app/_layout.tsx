@@ -12,6 +12,7 @@ import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import { api } from '../src/lib/api';
+import { fieldRoleRefusedHere } from '../src/screens/LoginScreen';
 import { armLocationTracking } from '../src/location/trackingGate';
 import { initPush } from '../src/push/notifications';
 import { acquirePushToken, registerPendingPushToken } from '../src/push/push';
@@ -48,6 +49,13 @@ export default function RootLayout() {
       .catch(() => ({ authenticated: false, actor: null }))
       .then((outcome) => {
         if (!alive) return;
+        if (outcome.authenticated && outcome.actor !== null && fieldRoleRefusedHere(outcome.actor.role) !== null) {
+          // A field role's stored session on the web build (PLAN-FRONTEND.md
+          // §5.1): drop it and show the login, which explains why.
+          void api.logout().catch(() => {});
+          useSessionStore.getState().setAnonymous();
+          return;
+        }
         if (outcome.authenticated && outcome.actor !== null) {
           configureQueryClient(outcome.actor.role);
           useSessionStore.getState().setAuthenticated(outcome.actor);

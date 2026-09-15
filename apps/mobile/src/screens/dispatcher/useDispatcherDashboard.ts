@@ -27,7 +27,6 @@
  */
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import * as Network from 'expo-network';
 
 import type {
   AuthMeResponse,
@@ -157,37 +156,12 @@ export function sectionsOf(
 }
 
 /**
- * Reachability for the offline banner. `isInternetReachable !== false`
- * fails open: an unknown answer (airplane-mode cold start, a runtime
- * without the listener) stays online, and a genuinely failed fetch
- * raises its own section's error — dimming live figures on a guess is
- * the mistake §D1 names, in the one role where staleness is dangerous.
+ * Reachability now lives in `lib/network.ts` — every role reads it since
+ * the app went online-only (2026-09-15). Re-exported for the console
+ * hooks that already import it from here.
  */
-export function useIsOnline(): boolean {
-  const [online, setOnline] = useState(true);
-  useEffect(() => {
-    let alive = true;
-    void Network.getNetworkStateAsync()
-      .then((state) => {
-        if (alive) setOnline(state.isInternetReachable !== false);
-      })
-      .catch(() => {});
-    try {
-      const subscription = Network.addNetworkStateListener((state) => {
-        setOnline(state.isInternetReachable !== false);
-      });
-      return () => {
-        alive = false;
-        subscription.remove();
-      };
-    } catch {
-      return () => {
-        alive = false;
-      };
-    }
-  }, []);
-  return online;
-}
+import { useIsOnline } from '../../lib/network';
+export { useIsOnline };
 
 export interface DispatcherScreenFlags {
   flagsReady: boolean;
