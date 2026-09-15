@@ -70,7 +70,9 @@ export interface SaleFormDeps {
       productName: string;
       productSku?: string;
       quantity: number;
-      unitPrice: string;
+      unitPrice?: string;
+      listPrice?: string;
+      discountPct?: string;
       serialNumbers?: string[];
     }>;
   }) => Promise<{ id: string }>;
@@ -129,11 +131,14 @@ export function isValidDiscount(raw: string): boolean {
  * the price the server stores. The rep never types a unit price. */
 export function discountedUnitPriceOf(listPrice: string, discountPct: string): string {
   if (!isValidUnitPrice(listPrice) || !isValidDiscount(discountPct) || discountPct === '') return listPrice;
-  const paise = Math.round(Number(listPrice) * (100 - Number(discountPct)));
-  const abs = Math.abs(paise);
-  const int = String(Math.floor(abs / 100));
-  const dec = String(abs % 100).padStart(2, '0');
-  return `${int}.${dec}`;
+  // Exact integer paise, half-up — the server's arithmetic (sales service,
+  // migration 019), so the price shown while typing is the price stored.
+  const hundredths = (value: string): bigint => {
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole!) * 100n + BigInt(`${fraction}00`.slice(0, 2));
+  };
+  const paise = (hundredths(listPrice) * (10000n - hundredths(discountPct)) + 5000n) / 10000n;
+  return `${paise / 100n}.${(paise % 100n).toString().padStart(2, '0')}`;
 }
 
 /** A line is complete when its product, quantity and discount are real. */
@@ -151,14 +156,16 @@ export function formComplete(companyId: string | null, lines: readonly SaleFormL
   return companyId !== null && lines.length > 0 && lines.every(lineComplete);
 }
 
-/** The wire items — the discounted unit price is what the server stores;
- * the list price lives only in this line's snapshot caption. */
+/** The wire items — each line sends its list price and discount, and the
+ * server computes and stores the unit price beside them (migration 019). */
 export function itemsOf(lines: readonly SaleFormLine[]): Array<{
   productId?: string;
   productName: string;
   productSku?: string;
   quantity: number;
-  unitPrice: string;
+  unitPrice?: string;
+  listPrice?: string;
+  discountPct?: string;
   serialNumbers?: string[];
 }> {
   return lines.map((line) => {
@@ -171,7 +178,8 @@ export function itemsOf(lines: readonly SaleFormLine[]): Array<{
       productName: line.productName,
       ...(line.productSku !== null ? { productSku: line.productSku } : {}),
       quantity: Number(line.quantity),
-      unitPrice: discountedUnitPriceOf(line.unitPrice, line.discountPct),
+      listPrice: line.unitPrice,
+      discountPct: line.discountPct === '' ? '0' : line.discountPct,
       ...(serials.length > 0 ? { serialNumbers: serials } : {}),
     };
   });

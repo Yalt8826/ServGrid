@@ -49,6 +49,8 @@ export interface SaleItemRow {
   product_sku: string | null;
   quantity: string;
   unit_price: string;
+  list_price: string | null;
+  discount_pct: string | null;
   line_total: string;
   serial_numbers: string[] | null;
 }
@@ -66,6 +68,7 @@ export async function findSale(db: Db, saleId: string): Promise<(SaleRow & { ite
   const items = await db.query<SaleItemRow>(
     `SELECT line_no, product_id, product_name, product_sku,
             quantity::text AS quantity, unit_price::text AS unit_price,
+            list_price::text AS list_price, discount_pct::text AS discount_pct,
             line_total::text AS line_total, serial_numbers
      FROM sales_card_items
      WHERE sales_card_id = $1
@@ -97,17 +100,23 @@ export async function insertSale(
  * The lines, written in payload order. The SNAPSHOT columns are written
  * exactly as the payload carried them — the server never re-derives a
  * line's name or price from `products`, because the snapshot records what
- * was actually agreed (§3.5). `line_total` is the DB's generated column;
- * nothing here computes money.
+ * was actually agreed (§3.5). The service resolves each line's unit price
+ * first (a discounted line's price is computed from its list price,
+ * migration 019); `line_total` is the DB's generated column.
  */
-export async function insertSaleItems(db: Db, saleId: string, items: SaleItemInput[]): Promise<void> {
+export async function insertSaleItems(
+  db: Db,
+  saleId: string,
+  items: Array<SaleItemInput & { unitPrice: string }>,
+): Promise<void> {
   let line = 0;
   for (const item of items) {
     line += 1;
     await db.query(
       `INSERT INTO sales_card_items
-         (sales_card_id, line_no, product_id, product_name, product_sku, quantity, unit_price, serial_numbers)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         (sales_card_id, line_no, product_id, product_name, product_sku, quantity, unit_price,
+          list_price, discount_pct, serial_numbers)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         saleId,
         line,
@@ -116,6 +125,8 @@ export async function insertSaleItems(db: Db, saleId: string, items: SaleItemInp
         item.productSku ?? null,
         item.quantity,
         item.unitPrice,
+        item.listPrice ?? null,
+        item.discountPct ?? null,
         item.serialNumbers ?? null,
       ],
     );
@@ -269,6 +280,7 @@ async function withItems<T extends SaleRow>(db: Db, rows: T[]): Promise<Array<T 
   const items = await db.query<SaleItemRow & { sales_card_id: string }>(
     `SELECT sales_card_id, line_no, product_id, product_name, product_sku,
             quantity::text AS quantity, unit_price::text AS unit_price,
+            list_price::text AS list_price, discount_pct::text AS discount_pct,
             line_total::text AS line_total, serial_numbers
      FROM sales_card_items
      WHERE sales_card_id = ANY($1::uuid[])

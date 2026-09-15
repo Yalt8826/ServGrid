@@ -38,6 +38,7 @@ Migrations are numbered and forward-only. This ordering respects FK dependencies
 | 016 | `flag_overrides` | `employee_flag_overrides` (§3.1) | 1 |
 | 017 | `sales` | `sales_cards`, `sales_card_items`, `payments` | 3 |
 | 018 | `views_money` | `v_sales_card_totals`, `v_company_balances`, `v_employee_expected_cash`, `v_cash_reconciliation_queue` | 3 |
+| 019 | `sale_discounts` | `sales_card_items.list_price`, `discount_pct` and the CHECK that the discount explains `unit_price` | ON |
 
 Migrations 006–010 land in Phase 1 even though only the technician app consumes them, because the technician app is the thing that exercises offline sync and location while scope is still small.
 

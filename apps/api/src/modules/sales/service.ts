@@ -1,3 +1,4 @@
+import type { SaleItemInput } from '@servgrid/shared';
 import {
   type SaleCreate,
   type SaleItem,
@@ -62,6 +63,47 @@ export interface Actor {
   role: Role;
 }
 
+const DISCOUNT_DISAGREES_MESSAGE =
+  'The price does not match the list price less the discount — refresh the sale and try again.';
+
+/** A validated decimal string (at most two decimals) as integer hundredths. */
+function toHundredths(value: string): bigint {
+  const [whole, fraction = ''] = value.split('.');
+  return BigInt(whole!) * 100n + BigInt(`${fraction}00`.slice(0, 2));
+}
+
+/**
+ * list × (100 − pct) / 100, to the paisa, half-up — exact integer arithmetic,
+ * the same answer Postgres's round() gives migration 019's CHECK on these
+ * non-negative numbers. A float here would be the one place a price drifts.
+ */
+export function discountedUnitPrice(listPrice: string, discountPct: string): string {
+  const paise = (toHundredths(listPrice) * (10000n - toHundredths(discountPct)) + 5000n) / 10000n;
+  return `${paise / 100n}.${(paise % 100n).toString().padStart(2, '0')}`;
+}
+
+/**
+ * Every line's stored unit price (decision 7, 2026-09-15). A discounted line
+ * gets the price its list price and percentage produce; a unitPrice the
+ * client also sent must agree to the paisa, or nothing is stored. A line
+ * typed at a price keeps it, with no discount recorded.
+ */
+function resolveSaleItems(items: SaleItemInput[]): Array<SaleItemInput & { unitPrice: string }> {
+  return items.map((item) => {
+    if (item.listPrice === undefined || item.discountPct === undefined) {
+      return { ...item, unitPrice: item.unitPrice! };
+    }
+    const unitPrice = discountedUnitPrice(item.listPrice, item.discountPct);
+    if (item.unitPrice !== undefined && toHundredths(item.unitPrice) !== toHundredths(unitPrice)) {
+      throw new AppError('VALIDATION_FAILED', DISCOUNT_DISAGREES_MESSAGE, {
+        productName: item.productName,
+        expectedUnitPrice: unitPrice,
+      });
+    }
+    return { ...item, unitPrice };
+  });
+}
+
 function toSaleItem(item: repo.SaleItemRow): SaleItem {
   return {
     lineNo: item.line_no,
@@ -70,6 +112,8 @@ function toSaleItem(item: repo.SaleItemRow): SaleItem {
     productSku: item.product_sku,
     quantity: item.quantity,
     unitPrice: item.unit_price,
+    listPrice: item.list_price,
+    discountPct: item.discount_pct,
     lineTotal: item.line_total,
     serialNumbers: item.serial_numbers ?? [],
   };
@@ -180,7 +224,7 @@ export function createSalesService() {
         saleDate: input.saleDate,
         notes: input.notes ?? null,
       });
-      await repo.insertSaleItems(client, id, input.items);
+      await repo.insertSaleItems(client, id, resolveSaleItems(input.items));
       const row = await repo.findSale(client, id);
       if (row === null) {
         throw new AppError('INTERNAL', 'The sale could not be read back — nothing was lost, try again.');
@@ -218,7 +262,7 @@ export function createSalesService() {
       await repo.updateSaleFields(client, saleId, patchFields);
       if (fields.items !== undefined) {
         await repo.deleteSaleItems(client, saleId);
-        await repo.insertSaleItems(client, saleId, fields.items);
+        await repo.insertSaleItems(client, saleId, resolveSaleItems(fields.items));
       }
       const row = await repo.findSale(client, saleId);
       if (row === null) {

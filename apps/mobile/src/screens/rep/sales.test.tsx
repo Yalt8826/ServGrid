@@ -181,7 +181,7 @@ describe('SaleFormScreen — create (§S2)', () => {
     expect(createDraft.mock.calls[0]![0]).toMatchObject({
       companyId: COMPANY_ID,
       saleDate: TODAY,
-      items: [{ productId: 'pr0000000-0000-4000-8000-000000000001', productName: 'UPS 850VA Luminous', quantity: 1, unitPrice: '8400' }],
+      items: [{ productId: 'pr0000000-0000-4000-8000-000000000001', productName: 'UPS 850VA Luminous', quantity: 1, listPrice: '8400', discountPct: '0' }],
     });
     expect(confirmSale).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalledWith('s1000000-0000-4000-8000-000000000009', false);

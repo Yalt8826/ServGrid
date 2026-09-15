@@ -338,6 +338,69 @@ describe('migration 017 — line_total is generated, not writable (§3.5)', () =
   });
 });
 
+describe('migration 019 — a discount is kept beside the price it explains (TON.6)', () => {
+  let cardId = '';
+
+  beforeAll(async () => {
+    cardId = await insertSale({
+      status: 'confirmed',
+      saleNumber: 'SC-2627-00019',
+      confirmedAt: '2026-09-15T10:00:00+05:30',
+    });
+  });
+
+  it('keeps a list price and a percentage whose price they explain', async () => {
+    await db.query(
+      `INSERT INTO sales_card_items (sales_card_id, line_no, product_name, quantity, unit_price, list_price, discount_pct)
+       VALUES ($1, 1, 'Luminous 850VA', 1, 874.99, 999.99, 12.5)`,
+      [cardId],
+    );
+    const r = await db.query<{ list_price: string; discount_pct: string; line_total: string }>(
+      `SELECT list_price::text AS list_price, discount_pct::text AS discount_pct, line_total::text AS line_total
+       FROM sales_card_items WHERE sales_card_id = $1 AND line_no = 1`,
+      [cardId],
+    );
+    expect(r.rows[0]).toEqual({ list_price: '999.99', discount_pct: '12.50', line_total: '874.99' });
+  });
+
+  it('a line at a typed price is still valid — both columns NULL', async () => {
+    await db.query(
+      `INSERT INTO sales_card_items (sales_card_id, line_no, product_name, quantity, unit_price)
+       VALUES ($1, 2, 'Typed price', 1, 500.00)`,
+      [cardId],
+    );
+  });
+
+  it('refuses half a pair, a discount over 100%, and a price the discount does not explain', async () => {
+    const half = await errorOf(
+      db.query(
+        `INSERT INTO sales_card_items (sales_card_id, line_no, product_name, quantity, unit_price, list_price, discount_pct)
+         VALUES ($1, 3, 'Half a pair', 1, 500.00, 500.00, NULL)`,
+        [cardId],
+      ),
+    );
+    expect(half.constraint).toBe('sales_card_items_discount_paired');
+
+    const over = await errorOf(
+      db.query(
+        `INSERT INTO sales_card_items (sales_card_id, line_no, product_name, quantity, unit_price, list_price, discount_pct)
+         VALUES ($1, 4, 'Over 100', 1, 0.00, 0.00, 101)`,
+        [cardId],
+      ),
+    );
+    expect(over.constraint).toBe('sales_card_items_discount_pct_range');
+
+    const unexplained = await errorOf(
+      db.query(
+        `INSERT INTO sales_card_items (sales_card_id, line_no, product_name, quantity, unit_price, list_price, discount_pct)
+         VALUES ($1, 5, 'Unexplained', 1, 450.00, 500.00, 12.5)`,
+        [cardId],
+      ),
+    );
+    expect(unexplained.constraint).toBe('sales_card_items_discount_explains_price');
+  });
+});
+
 describe('migration 017 — payments: a payment of nothing is not a payment (§3.5)', () => {
   it('rejects amount = 0', async () => {
     const err = await errorOf(insertPayment({ amount: '0.00' }));

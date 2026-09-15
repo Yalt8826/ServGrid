@@ -1372,11 +1372,18 @@ export type SaleStatus = z.infer<typeof saleStatusSchema>;
  * picker on the device copies `productName`/`productSku`/`unitPrice` off the
  * product at add time, and the server stores what it received — a repricing
  * next quarter must not rewrite this sale (§3.5), so the server never
- * re-derives a line's name or price from `products`. `unitPrice` is editable
- * per line because a negotiated price is normal; `productId` is optional
- * (third-party kit) and kept for reporting joins only — it is never read for
- * display.
+ * re-derives a line's name or price from `products`. A discounted line
+ * sends `listPrice` and `discountPct` and the server computes `unitPrice`
+ * (migration 019); a line typed at a price sends `unitPrice` alone.
+ * `productId` is optional (third-party kit) and kept for reporting joins
+ * only — it is never read for display.
  */
+/** A percentage off list, 0–100 with up to two decimals, as a decimal string. */
+const percentString = z
+  .string()
+  .regex(/^\d{1,3}(\.\d{1,2})?$/, 'A discount is a percentage with at most two decimals.')
+  .refine((value) => Number(value) <= 100, 'A discount cannot be more than 100%.');
+
 export const saleItemInputSchema = z
   .object({
     productId: uuid.optional(),
@@ -1384,11 +1391,27 @@ export const saleItemInputSchema = z
     productSku: z.string().max(100).optional(),
     /** numeric(10,2) with CHECK (quantity > 0) — the DB is the backstop. */
     quantity: z.number().min(0.01).max(99_999_999.99),
-    /** numeric(12,2) with CHECK (unit_price >= 0) — a discount is a smaller positive price. */
-    unitPrice: moneyString,
+    /**
+     * numeric(12,2) with CHECK (unit_price >= 0). Required for a line typed
+     * at a price; optional beside `listPrice` + `discountPct`, where the
+     * server computes it and refuses a unitPrice that disagrees.
+     */
+    unitPrice: moneyString.optional(),
+    /** The list price the discount came off (migration 019). Travels with `discountPct`. */
+    listPrice: moneyString.optional(),
+    /** Percent off `listPrice`, '0' for none (migration 019). Travels with `listPrice`. */
+    discountPct: percentString.optional(),
     serialNumbers: z.array(z.string().min(1).max(200)).max(50).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((line, ctx) => {
+    if ((line.listPrice === undefined) !== (line.discountPct === undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'A list price and its discount travel together.' });
+    }
+    if (line.unitPrice === undefined && line.listPrice === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Each line needs a price.' });
+    }
+  });
 export type SaleItemInput = z.infer<typeof saleItemInputSchema>;
 
 /** POST /v1/sales (§11) — a draft; the number comes at confirm, so the payload carries none. */
@@ -1436,6 +1459,9 @@ export const SaleItemSchema = z
     /** Money and quantities cross the wire as decimal strings (numeric columns). */
     quantity: moneyString,
     unitPrice: moneyString,
+    /** Migration 019 — null for a typed price, or a line recorded before discounts were kept. */
+    listPrice: moneyString.nullable(),
+    discountPct: z.string().nullable(),
     lineTotal: moneyString,
     serialNumbers: z.array(z.string()),
   })

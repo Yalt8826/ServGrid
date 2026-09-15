@@ -212,6 +212,9 @@ export interface SalesCardItem {
   productSku: string | null;
   quantity: number;
   unitPrice: string;
+  /** Migration 019: the list price and percent off it — null for a typed price. */
+  listPrice: string | null;
+  discountPct: string | null;
   /** Generated: round(quantity * unit_price, 2). */
   lineTotal: string;
   serialNumbers: string[];

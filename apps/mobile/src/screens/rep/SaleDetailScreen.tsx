@@ -27,6 +27,13 @@ export interface SaleDetailScreenProps {
   testID?: string;
 }
 
+/** " · list ₹8,400 · 10% off" when the line kept its discount (migration 019);
+ * nothing for a typed price or a line recorded before discounts were kept. */
+export function discountNoteOf(item: { listPrice: string | null; discountPct: string | null }): string {
+  if (item.listPrice === null || item.discountPct === null || Number(item.discountPct) === 0) return '';
+  return ` · list ₹${formatMoneyEnIN(item.listPrice)} · ${Number(item.discountPct)}% off`;
+}
+
 export function SaleDetailScreen(props: SaleDetailScreenProps): React.ReactNode {
   if (props.loading) {
     return (
@@ -75,7 +82,7 @@ export function SaleDetailScreen(props: SaleDetailScreenProps): React.ReactNode 
             <Text style={styles.amount}>{`₹${formatMoneyEnIN(item.lineTotal)}`}</Text>
           </View>
           <Text style={styles.secondary}>
-            {`${item.productSku ? `${item.productSku} · ` : ''}${item.quantity} × ₹${formatMoneyEnIN(item.unitPrice)}`}
+            {`${item.productSku ? `${item.productSku} · ` : ''}${item.quantity} × ₹${formatMoneyEnIN(item.unitPrice)}${discountNoteOf(item)}`}
           </Text>
           {item.serialNumbers.length > 0 ? (
             <Text style={styles.secondary}>{`Serials: ${item.serialNumbers.join(', ')}`}</Text>
