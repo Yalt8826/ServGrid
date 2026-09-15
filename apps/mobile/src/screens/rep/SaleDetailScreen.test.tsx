@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { allText, create, toJson } from '../../components/ui/testing';
-import { SaleDetailScreen } from './SaleDetailScreen';
+import { discountNoteOf, SaleDetailScreen } from './SaleDetailScreen';
 import type { SaleRecord } from '@servgrid/shared';
 
 const SALE: SaleRecord = {
@@ -24,6 +24,8 @@ const SALE: SaleRecord = {
       productSku: 'UPS-APC-BX1100',
       quantity: '1',
       unitPrice: '7560.00',
+      listPrice: '8400.00',
+      discountPct: '10.00',
       lineTotal: '7560.00',
       serialNumbers: ['SN12345'],
     },
@@ -52,5 +54,16 @@ describe('SaleDetailScreen (§S2 read side)', () => {
       <SaleDetailScreen sale={null} companyName={null} loading={false} error={null} onRetry={() => {}} />,
     );
     expect(allText(toJson(r)).join('\n')).toContain("We couldn't find that sale");
+  });
+});
+
+describe('discountNoteOf — the discount a rep gave stays visible (TON.6)', () => {
+  it('names the list price and the percentage when the line kept them', () => {
+    expect(discountNoteOf({ listPrice: '8400.00', discountPct: '10.00' })).toBe(' · list ₹8,400 · 10% off');
+  });
+
+  it('says nothing for a typed price, a zero discount, or a line recorded before discounts were kept', () => {
+    expect(discountNoteOf({ listPrice: null, discountPct: null })).toBe('');
+    expect(discountNoteOf({ listPrice: '500.00', discountPct: '0.00' })).toBe('');
   });
 });

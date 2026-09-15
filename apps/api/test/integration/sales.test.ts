@@ -478,6 +478,44 @@ describe('the snapshot is stored, never re-derived', () => {
   });
 });
 
+describe('a discount is recorded, and the server computes the price (TON.6)', () => {
+  it('list price and percentage are stored beside the price the server computed', async () => {
+    const sale = await createSaleOk(REP_A, {
+      companyId,
+      saleDate: '2026-09-15',
+      items: [{ productId: product.id, productName: product.name, productSku: product.sku, quantity: 2, listPrice: '999.99', discountPct: '12.5' }],
+    });
+    expect(sale.items[0]).toMatchObject({ listPrice: '999.99', discountPct: '12.50', unitPrice: '874.99', lineTotal: '1749.98' });
+  });
+
+  it('a unitPrice that disagrees with the discount is refused 422', async () => {
+    const res = await createSale(REP_A, {
+      companyId,
+      saleDate: '2026-09-15',
+      items: [{ productName: 'Mismatch', quantity: 1, listPrice: '500.00', discountPct: '10', unitPrice: '400.00' }],
+    });
+    expect(res.statusCode, res.body).toBe(422);
+  });
+
+  it('a line at a typed price keeps working, with no discount recorded', async () => {
+    const sale = await createSaleOk(REP_A, {
+      companyId,
+      saleDate: '2026-09-15',
+      items: [{ productName: 'Installation', quantity: 1, unitPrice: '500.00' }],
+    });
+    expect(sale.items[0]).toMatchObject({ unitPrice: '500.00', listPrice: null, discountPct: null });
+  });
+
+  it('half a pair is refused at the door', async () => {
+    const res = await createSale(REP_A, {
+      companyId,
+      saleDate: '2026-09-15',
+      items: [{ productName: 'Half a pair', quantity: 1, listPrice: '500.00' }],
+    });
+    expect(res.statusCode, res.body).toBe(422);
+  });
+});
+
 describe('scoping and the doors', () => {
   it("the rep's list is his own cards — REP_B never sees REP_A's", async () => {
     const aIds = new Set((await listSales(REP_A)).map((s) => s.id));
