@@ -138,100 +138,50 @@ Products and services live under Profile because they are settings — the owner
 
 ## 4. State architecture
 
-Five layers, deliberately distinct:
+**Online-only, every role** (decided 2026-09-15, `docs/decisions/2026-09-15-online-only.md`). Three layers:
 
 | Layer | Tool | Holds | Lifetime |
 |---|---|---|---|
 | Session | Zustand + `expo-secure-store` (native) / `localStorage` (web) | tokens, actor, role, consent state | until logout |
-| Server cache | TanStack Query v5 | every API read | memory + SQLite persister |
-| Local mirror | `expo-sqlite` | the role's working set | until logout |
-| Outbox | `expo-sqlite` table + drain manager | pending mutations, scoped by `employee_id` | until drained; rejected rows survive logout (§5) |
-| UI | component state / route params | filters, sheet state, drafts | screen |
+| Server cache | TanStack Query v5, **memory only** | every API read | the app process — never persisted |
+| UI | component state / route params | filters, sheet state, typed form input | screen |
 
 **Secure storage has no web implementation.** `expo-secure-store` is native-only, and the owner's desktop build is the one surface that needs a token store without it. It is a `.native.ts` / `.web.ts` pair behind one `tokenStore` interface, exactly like the location module in §6 — Keychain/Keystore on Android, `localStorage` on web. This is a real seam, not a detail: an agent who writes `SecureStore.getItemAsync` in shared code gets a web build that silently cannot log in, and the symptom is a login that appears to succeed and then bounces back to the login screen on every reload. Web is the owner's laptop on a trusted machine, and a 15-minute access token with a rotating refresh token is the mitigation; if that is judged insufficient later, the fix is an httpOnly cookie and a session endpoint, which is a server change, not a client one.
 
-**Dispatchers and owners get layers 1, 2 and 5 only.** No SQLite, no outbox, no persister. They are on office wifi; their failure mode is a clear error state, not a queue. This is enforced by a capability flag on the role — `roleCapabilities[role].offline` — checked once at provider setup, so the SQLite module is never even initialised for them.
+**Nothing else is written to the device.** Two named exceptions: the session token above, and the GPS ping buffer (§6) — a small SQLite table of pings not yet sent. No mirror, no outbox, no query persister, no AsyncStorage. The `no-device-storage` lint rule fails the build when any other module imports a storage API.
 
-**TanStack Query configuration.** `staleTime` 30s for lists, 0 for a job detail being actively worked. Offline roles use `networkMode: 'offlineFirst'` with the SQLite persister; online roles use `'online'` so a failed fetch surfaces immediately instead of hanging on a hopeful retry.
+**TanStack Query configuration.** `networkMode: 'online'` for every role, so a failed fetch surfaces immediately. `staleTime` 30s for lists, 0 for a job detail being actively worked. Queries refetch on app foreground and on a push wake. `gcTime` 30 minutes — in memory.
 
 ---
 
-## 5. Offline outbox
+## 5. Connection loss
 
-Local table:
+**No connection is a full screen, for every role.** `NoConnectionGate` wraps the authenticated stack. When NetInfo reports no connection it covers the app with *"No connection — ServGrid needs the internet. You'll be right back where you were."* It is an overlay rendered above the stack, never instead of it: the screens underneath stay mounted, so a half-typed completion, sale or payment is exactly as it was when the connection returns. A gate that unmounted its children would throw that input away.
 
-```
-outbox(
-  id, created_at, seq,
-  employee_id,                  -- whose work this is; a handset may be shared
-  method, path, body_json,
-  idempotency_key,              -- generated at enqueue, never regenerated
-  entity_type, entity_local_id,
-  depends_on,                   -- outbox.id
-  status,                       -- queued | inflight | done | rejected | failed
-  attempts, next_attempt_at,
-  error_code, error_message
-)
-```
+**A submit never silently loses work.** Every mutation:
 
-**Enqueue is synchronous with the optimistic write.** The user acts → the local mirror updates → the row enqueues → the UI already shows the new state. Nothing in the UI blocks on the network, per `PLAN.md` §6.
+- carries an `Idempotency-Key` minted **once per submit intent** — when the sheet or form opens — reused for every retry of that intent, and cleared only on success. Regenerating it per request is the single easiest mistake here: three taps on a frozen frame become three payments (this happened on a handset in Phase 3);
+- on failure keeps every typed field, shows the server's `message` verbatim or *"Couldn't reach the server — nothing was saved yet. Try again."*, and re-enables submit;
+- on an ambiguous failure — a timeout after the request left — retries with the same key, so the server replays what it already saved instead of saving it twice.
 
-`idempotency_key` is generated **once, at enqueue**, and reused across every retry. Regenerating on retry would defeat the entire server-side guard, and it is the single easiest mistake to make here.
+The typed input lives in memory only. Closing the app discards it; the owner accepted that trade in exchange for nothing being stored on the device.
 
-**Drain triggers** — reconnect (`expo-network` / NetInfo), app foreground (`AppState`), a 60-second timer while active, and manual pull-to-refresh. The drain posts up to 50 ordered operations to `/v1/sync/batch`, then immediately calls `/v1/sync/delta` with the returned cursor so server-assigned job numbers land in the same cycle.
+**Refusals arrive at submit time.** A completion on a job the office cancelled returns `409 JOB_ALREADY_CLOSED` while the technician is still looking at the sheet, and the sheet shows the sentence. A duplicate company returns `DUPLICATE_ENTITY` with the existing row, and the form offers to open it.
 
-**Per-outcome handling:**
+**Server-assigned numbers** arrive in the submit's response. There is no "Pending sync" chip, because nothing is ever pending.
 
-| Server outcome | Client action |
-|---|---|
-| `applied` | mark `done`, reconcile the local row from the response |
-| `duplicate` | mark `done` — a replay is a success |
-| `skipped` | leave `queued`; its parent was rejected, resolve that first |
-| `rejected` (4xx) | mark `rejected`, **keep the local record**, raise a banner |
-| network error | `attempts++`, exponential backoff `2^n` capped at 5 min, stay `queued` |
-| `401` | refresh once, retry once; if refresh fails, pause the drain and prompt re-login — **never discard queued items** |
+**Photos** are captured to the camera's temporary file, uploaded immediately after their parent record is created (`POST /v1/attachments`, own idempotency key), and the temporary file is deleted once the upload succeeds. A failed upload keeps the photo on screen with *Retry*; retrying never re-creates the parent, because the parent's key already succeeded.
 
-**Rejection UX.** A plain banner using the server's `message` verbatim: *"This job was cancelled by the office at 14:32."* Two actions — **Discard my copy** and **View the office version**. No silent overwrite in either direction, no auto-merge, no dialog the technician has to decode while standing in someone's basement.
+**A push wake refetches.** The data-only FCM message invalidates the role's job queries; the local notification is composed from the rows just fetched, never from the payload.
 
-**Logout never discards queued work.** §4 gives the mirror a lifetime of "until logout" and the outbox "until drained", and on a shared handset at the end of a shift those two rules disagree about a day's work. The resolution:
+### 5.1 Cold start
 
-- **Logout is blocked while any row is `queued` or `inflight`.** The button reports "3 items not yet synced" and offers *Retry now*. It is not a dialog to dismiss — there is no confirm-and-lose path, because the technician tapping it is tired and wants to hand the phone over.
-- If only `rejected` or `failed` rows remain, logout proceeds and **those rows are kept**, not wiped. They are already surfaced in a banner the technician has seen; discarding them silently would be the one thing this design refuses everywhere else.
-- The mirror is cleared on user switch. The outbox is **filtered by `employee_id`**, not cleared — so a preserved rejection reappears for the right person when he next logs in on that handset, and never leaks into the next user's session.
-
-That last point is why `employee_id` is on the table. Without it, "keep the rejected rows" and "clear the previous user's data" are the same operation pulling in opposite directions.
-
-The rule is the same one that governs a 401 mid-drain (`PLAN-BACKEND.md` §4): **no path in this app silently discards a technician's work.** Logout is that rule at a different door.
-
-**Duplicate on an offline create.** Two reps create the same company offline; the second is rejected on sync with `DUPLICATE_ENTITY`, and the queued sale behind it now points at nothing. The banner names the existing row and offers **Use the existing company**, which rewrites the dependent outbox rows to the server's id — the rep does not re-enter the sale. Rare, and specified precisely because rare failures are the ones nobody recognises in the moment.
-
-**Pending badge.** A persistent count in the header, visible on every screen for offline roles. `PLAN.md` §6 asks for it so the technician can see work is queued rather than lost, and it is also the fastest field diagnostic there is: a badge that only goes up is a sync failure, visible without anyone opening a log.
-
-**Server-assigned numbers.** Until sync returns one, the card shows a "Pending sync" chip where the job number goes. Never a fake local number — a technician reading out "JC-2627-00042" that does not exist is worse than having no number to read.
-
-**Photos** queue as local file URIs. The file stays in the app's document directory until the attachment upload succeeds, then is released. The outbox row for a photo `dependsOn` its parent completion, so an attachment never arrives for a job the server rejected.
-
-**Photos do not travel in the batch, and the drain has to know that.** `POST /v1/sync/batch` carries a JSON envelope; an attachment is a multipart upload to `POST /v1/attachments`. One outbox table, two transports — which is easy to miss because every other row in the queue is JSON, and the failure mode is an agent writing a drain that base64s a 2 MB photo into a batch body.
-
-The drain therefore runs in two passes per cycle:
-
-1. **JSON pass.** Up to 50 ordered non-attachment operations to `/v1/sync/batch`. Results applied as in the table above.
-2. **Binary pass.** Each attachment row whose `depends_on` is now `done` uploads individually to `/v1/attachments`, sequentially, one request each, carrying its own `Idempotency-Key`. An attachment whose parent is `rejected` or still `queued` is skipped this cycle — the same `dependsOn` rule, enforced across the two passes rather than within one.
-
-Order matters between the passes, not inside the binary one: photos are independent of each other. Sequential rather than parallel because these upload from a van on 2G, and three concurrent 2 MB requests on a bad link fail slower than three sequential ones.
-
-**The delta call happens after both passes**, so the cursor reflects the attachments too and the job's photo count is right the first time the technician looks.
-
-### 5.1 Cold start with no signal
-
-The app must open, authenticate against what it already has, and render the mirror **with no network at all**. This is not an edge case: the first thing a technician does some mornings is open the app in a basement or a lift lobby, and the access token expired hours ago.
-
-- **Session bootstrap never blocks on the network.** The stored actor, role and refresh token are read from secure storage and the app routes to the role's landing screen immediately. No refresh call is awaited before first render.
-- **An expired access token is not a logged-out state.** It is refreshed lazily — on the first request that needs it, which for an offline-first role may be hours later. Until then every screen reads the mirror and every action enqueues.
-- **Only a `TOKEN_REUSED` or an explicit `401` on a *successful* refresh round trip logs anyone out.** A refresh that fails because there is no connection is a retry, not a rejection. Getting this backwards logs a technician out in a basement with a full outbox, which is the single worst thing this client can do.
+- **Session bootstrap never blocks on the network.** The stored actor, role and refresh token are read from the token store and the app routes to the role's landing screen immediately.
+- **With no connection the gate shows over the landing screen.** Nobody is logged out. An expired access token is refreshed lazily on the first request once the connection is back.
+- **Only a `TOKEN_REUSED` or an explicit `401` on a *completed* refresh round trip logs anyone out.** A refresh that fails because there is no connection is a retry, not a rejection.
 - **Fonts and tokens are bundled, not fetched.** The splash gate waits on `expo-font` loading local assets and nothing else.
 
-Cold start to a rendered, usable screen with the radio off is the target, and it is worth an explicit test rather than an assumption — `PLAN-EXECUTION.md` Phase 1 carries it.
+**Field staff are Android only.** On web, a successful login as `technician` or `sales_rep` is refused with *"Use the ServGrid app on your Android phone."* and the session is cleared. The server's permissions are unchanged; this is a product boundary, not a security one.
 
 ---
 

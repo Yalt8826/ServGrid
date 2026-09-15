@@ -356,60 +356,26 @@ Products and services are read by everyone — the completion form and the sales
 
 ---
 
-## 7. Sync protocol
+## 7. Online reads and writes
 
-Three endpoints. Technician and sales rep only; dispatcher and owner use the normal REST surface online.
+**Decided 2026-09-15:** there is no offline sync (`docs/decisions/2026-09-15-online-only.md`). `GET /v1/sync/bootstrap`, `GET /v1/sync/delta` and `POST /v1/sync/batch` are removed, and so is the `tech.offline` flag. Every role reads and writes the ordinary REST surface, online.
 
-**`GET /v1/sync/bootstrap`** — the full role-scoped working set for a cold start: the actor's open and recently-closed jobs, the customers those jobs touch and their product stacks, active products and services, and (for a rep) **the companies he owns plus the house accounts**, with balances. Returns `{ data: {...}, cursor: "<iso8601>" }`. Bounded by design — a technician's set is tens of rows, not the whole database.
+**`GET /v1/technician/work`** — the technician's working set in one read: his open and recently closed jobs, the customers those jobs touch with their active product stacks, and active products and services. Technician only, gated `tech.jobs`, bounded by design — tens of rows, not the database. No cursor.
 
-A technician's jobs carry `contract: { number, billing, visitsRemaining } | null` inline. Contracts are not a separate synced collection: the technician needs the context of the visit in front of him, never the contract as an entity, and a table he cannot act on has no business in his mirror.
+A technician's jobs carry `contract: { number, billing, visitsRemaining } | null` inline. Contracts are not a separate collection for him: he needs the context of the visit in front of him, never the contract as an entity.
 
-**`GET /v1/sync/delta?cursor=`** — everything in that same scope with `updated_at > cursor`, plus tombstones, plus a new cursor. Server caps the page and returns `hasMore` so a client that has been offline a fortnight pages rather than times out.
+**Scope exit needs no tombstones any more.** A job reassigned from Ravi to Anitha is simply absent from Ravi's next read. The delta protocol needed a second query to tell his mirror to forget it; with no mirror there is nothing to forget.
 
-The cursor is the server's `updated_at`, never the device clock. A device with a skewed clock must not be able to skip records.
+**`GET /v1/jobs/:id/events`** is open to the technician for **his own** jobs, in the dispatcher's money-free shape — his `job.money` read cell is `none`. It replaces the timeline the app used to fold out of its own outbox.
 
-**Tombstones cover two cases, and the second is the one that bites.** The obvious one is deletion — a row now `is_active = false`. The other is **scope exit**: a row that is still perfectly alive but has stopped being this actor's business.
+**Writes are the ordinary routes, called directly** — `POST /v1/jobs/:id/status`, `/complete`, `/cancel`, `POST /v1/sales`, `/v1/payments`, `/v1/companies`, `/v1/attachments`, `/v1/cash/handovers`. Each keeps:
 
-```jsonc
-"tombstones": [
-  { "entity": "job",     "id": "…", "reason": "deleted" },
-  { "entity": "job",     "id": "…", "reason": "out_of_scope" },
-  { "entity": "company", "id": "…", "reason": "out_of_scope" }
-]
-```
+- **the idempotency plugin** (§3.2). The client mints the key once per submit intent and reuses it on retry, so a timeout-then-retry replays instead of duplicating;
+- **server-side validation of status transitions** — a completion on a job the office cancelled is `409 JOB_ALREADY_CLOSED`, now answered at submit time;
+- **`If-Match` versions** where the route takes them;
+- **`DUPLICATE_ENTITY` with `details.existing`** on a unique-name collision, so the form can offer the existing row.
 
-A job reassigned from Ravi to Anitha is not deleted and not inactive; it is simply no longer in Ravi's scope. A delta query that filters by scope *before* comparing cursors therefore returns nothing about it, and Ravi's mirror keeps a job that is not his — on his dashboard, in his "6 today" figure, and openable, with a *Start job* button that will 403 when he taps it in front of a customer. Nothing errors. The row just never leaves.
-
-So the delta query runs **twice**: once for rows in scope with `updated_at > cursor`, and once for rows the actor previously held that are no longer in scope. The second needs the server to know what he held, which is `assigned_to <> :actor` over jobs he could have seen — bounded by the same window the bootstrap uses, so it is a small query, not a diff of the world. The client deletes those rows from the mirror and drops them from any list.
-
-**A tombstone never deletes an outbox row.** If Ravi completed the job underground and it was reassigned while he was down there, his completion is still queued and still his work; the mirror loses the job, the outbox keeps the operation, and the server decides on drain — which is `409 JOB_ALREADY_CLOSED` or an accepted completion depending on what actually happened. **The rule from `PLAN.md` §6 holds at this door too: no path in this app silently discards a technician's work.**
-
-Same shape for a rep when the owner reassigns a company: the account leaves his list, his queued payment against it does not.
-
-**`POST /v1/sync/batch`** — the outbox drain.
-
-```jsonc
-{ "operations": [
-  { "localId": "l_01",  "idempotencyKey": "…", "method": "POST",
-    "path": "/v1/jobs/{id}/status", "body": { "to": "in_progress", "occurredAt": "…" } },
-  { "localId": "l_02",  "dependsOn": "l_01", "idempotencyKey": "…", "method": "POST",
-    "path": "/v1/jobs/{id}/complete", "body": { … } }
-] }
-```
-
-Semantics, each chosen against a specific failure:
-
-- **Ordered, not atomic.** Operations apply in array order, each in its own transaction. One rejection must not roll back a day's other work.
-- **`dependsOn` short-circuits.** If `l_01` is rejected, `l_02` is returned `skipped` without being attempted. Without this, a rejected status change is followed by a completion that fails for a confusing second reason.
-- **Per-operation results.** `{ localId, outcome: 'applied' | 'duplicate' | 'rejected' | 'skipped', status, body?, error? }`. `duplicate` is a success — it means the idempotency layer replayed, and the client should mark the item done.
-- **Batch cap 50.** Larger queues page.
-- **Always HTTP 200** if the envelope parsed. A 4xx on the batch itself means the envelope was malformed, which is a client bug; individual failures live in the results array.
-
-**A unique violation on an offline create is a first-class outcome, not a 500.** Two reps create the same company offline; the case-insensitive unique name rejects the second on sync, and its queued sale now points at an entity that does not exist. The operation returns `rejected` with `DUPLICATE_ENTITY` and `details.existing` carrying the server's row — id, name, and enough to identify it — so the client can offer *Use the existing company* and rewrite the dependent outbox rows to that id rather than making the rep re-enter the sale.
-
-Rep account ownership (§5) makes this rare, since two reps rarely create the same account. Rare is the reason to specify it: a path that fires once a quarter is one nobody will recognise when it does.
-
-The client drains, then immediately calls `delta` with the cursor from the batch response, so the local mirror reflects server-assigned job numbers and any server-side changes in one round trip.
+Attachments still upload as multipart to `POST /v1/attachments`, one request per photo, **after** the parent record's create has succeeded.
 
 ---
 
