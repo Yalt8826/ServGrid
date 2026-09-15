@@ -71,12 +71,12 @@ TON.8 map tiles (blocked on the owner's MapTiler key)
 **Tier:** **T3** (removes native storage modules — one APK for the whole phase)
 
 **Build**
-- `src/lib/network.ts` — `useIsOnline()` moved here from the dispatcher dashboard hook; every caller imports it.
+- `src/lib/network.ts` — `useIsOnline()` moved here from the dispatcher dashboard hook (re-exported there for its existing callers).
 - `src/components/NoConnectionGate.tsx` — wraps the authenticated stack in `(app)/_layout.tsx`. Offline → a full-screen *"No connection — ServGrid needs the internet. You'll be right back where you were."* rendered **over** the stack, which stays mounted so typed input survives. Web included.
-- `ROLE_CAPABILITIES` loses `offline`; every role's query client runs `networkMode: 'online'`, memory only.
-- Delete `src/db/`, `src/sync/` and their tests; remove `MirrorProvider` from the layout and `PendingBadge` from `NavShell`.
-- Login on **web** refuses `technician` and `sales_rep` after authentication succeeds: *"Use the ServGrid app on your Android phone."* and clears the session.
-- First launch of the new build deletes the old mirror database file and every `servgrid.*` AsyncStorage key (one-time, idempotent).
+- Every role's query client runs `networkMode: 'online'`, memory only.
+- Login on **web** refuses `technician` and `sales_rep` after authentication succeeds: *"Use the ServGrid app on your Android phone."* and clears the session; a stored field-role session on web is dropped at start-up.
+
+**Moved to TON.3 while building** (so every merge stays green): deleting `src/db/` and `src/sync/`, `ROLE_CAPABILITIES.offline`, removing `MirrorProvider`/`PendingBadge`, and the one-time cleanup of the old mirror database and `servgrid.*` AsyncStorage keys. The technician screens still read the mirror until TON.3 replaces them, so removing it here would break them between the two merges.
 
 **Tests**
 - `NoConnectionGate.test.tsx` — offline renders the screen for each role; **a child's typed state survives offline → online** (the child component is the same instance)

@@ -11,7 +11,7 @@
  * was wrong; the lockout names the actual minutes; and no animation on
  * arrival — the app opens and is usable.
  */
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 
 import { LAYOUT, SEMANTIC, SPACE } from '@servgrid/shared';
@@ -34,6 +34,24 @@ export function nextRouteFor(result: LoginResponse): PostLoginRoute {
   const tracked = result.employee.role === 'technician' || result.employee.role === 'sales_rep';
   if (tracked && result.consent.required) return 'consent';
   return 'landing';
+}
+
+/** Field staff are Android only (PLAN-FRONTEND.md §5.1): background GPS exists only there. */
+export const FIELD_ROLE_ON_WEB = 'Use the ServGrid app on your Android phone.';
+
+/**
+ * The web build is for the owner and dispatchers. A technician or sales rep
+ * who signs in on web gets the sentence instead of a session. A product
+ * boundary, not a security one — the server's permissions are unchanged.
+ */
+export function webRefusalFor(role: LoginResponse['employee']['role'], platform: string): string | null {
+  return platform === 'web' && (role === 'technician' || role === 'sales_rep') ? FIELD_ROLE_ON_WEB : null;
+}
+
+/** `webRefusalFor` on the platform this bundle runs on — route files stay
+ * platform-free (NavShell.test: the one layout branch lives in NavShell). */
+export function fieldRoleRefusedHere(role: LoginResponse['employee']['role']): string | null {
+  return webRefusalFor(role, Platform.OS);
 }
 
 const WRONG_CREDENTIALS = 'Username or password is wrong.';
@@ -60,9 +78,18 @@ export interface LoginScreenProps {
   signIn: (username: string, password: string) => Promise<ApiResult<LoginResponse>>;
   /** Called once with the parsed response and the password just used. */
   onAuthenticated: (result: LoginResponse, password: string) => void;
+  /** `Platform.OS` by default; injected by tests. */
+  platform?: string;
+  /** Throws away a session the platform refuses (field staff on web). */
+  discardSession?: () => Promise<void>;
 }
 
-export function LoginScreen({ signIn, onAuthenticated }: LoginScreenProps): React.ReactNode {
+export function LoginScreen({
+  signIn,
+  onAuthenticated,
+  platform = Platform.OS,
+  discardSession,
+}: LoginScreenProps): React.ReactNode {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   // §X1: visible by default. The toggle masks it; the default is the
@@ -80,6 +107,12 @@ export function LoginScreen({ signIn, onAuthenticated }: LoginScreenProps): Reac
     try {
       const result = await signIn(username, password);
       if (result.ok && result.data !== null) {
+        const refusal = webRefusalFor(result.data.employee.role, platform);
+        if (refusal !== null) {
+          await discardSession?.().catch(() => {});
+          setBanner(refusal);
+          return;
+        }
         onAuthenticated(result.data, password);
       } else {
         setBanner(loginErrorBanner(result));

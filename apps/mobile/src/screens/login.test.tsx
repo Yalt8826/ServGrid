@@ -12,7 +12,7 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 
 import type { ApiResult, LoginResponse } from '../lib/apiClient';
 import { allText, create, findAllByTestID, findByTestID, firstDescendantOfType, toJson, type Node } from '../components/ui/testing';
-import { LoginScreen, loginErrorBanner, nextRouteFor } from './LoginScreen';
+import { FIELD_ROLE_ON_WEB, LoginScreen, loginErrorBanner, nextRouteFor, webRefusalFor } from './LoginScreen';
 
 const OK_RESULT: ApiResult<LoginResponse> = {
   ok: true,
@@ -154,6 +154,58 @@ describe('LoginScreen (§X1)', () => {
 
     expect(onAuthenticated).toHaveBeenCalledTimes(1);
     expect(onAuthenticated).toHaveBeenCalledWith(OK_RESULT.data, 'from-the-paper');
+  });
+});
+
+describe('field staff are Android only (PLAN-FRONTEND.md §5.1)', () => {
+  function resultAs(role: LoginResponse['employee']['role']): ApiResult<LoginResponse> {
+    return { ...OK_RESULT, data: { ...OK_RESULT.data!, employee: { ...OK_RESULT.data!.employee, role } } };
+  }
+
+  async function signInAs(role: LoginResponse['employee']['role'], platform: string) {
+    const onAuthenticated = vi.fn();
+    const discardSession = vi.fn(() => Promise.resolve());
+    const r = await create(
+      <LoginScreen
+        signIn={() => Promise.resolve(resultAs(role))}
+        onAuthenticated={onAuthenticated}
+        platform={platform}
+        discardSession={discardSession}
+      />,
+    );
+    await typeInto(r, 'login-username', 'someone');
+    await typeInto(r, 'login-password', 'secret-pass');
+    await press(r, 'login-submit');
+    return { r, onAuthenticated, discardSession };
+  }
+
+  for (const role of ['technician', 'sales_rep'] as const) {
+    it(`web + ${role}: the sentence instead of a session, and the session is thrown away`, async () => {
+      const { r, onAuthenticated, discardSession } = await signInAs(role, 'web');
+      expect(onAuthenticated).not.toHaveBeenCalled();
+      expect(discardSession).toHaveBeenCalledTimes(1);
+      expect(allText(findByTestID(toJson(r), 'login-banner')!).join(' ')).toContain(FIELD_ROLE_ON_WEB);
+    });
+  }
+
+  for (const role of ['owner', 'dispatcher'] as const) {
+    it(`web + ${role}: signs in as before`, async () => {
+      const { onAuthenticated, discardSession } = await signInAs(role, 'web');
+      expect(onAuthenticated).toHaveBeenCalledTimes(1);
+      expect(discardSession).not.toHaveBeenCalled();
+    });
+  }
+
+  it('android + technician: signs in as before', async () => {
+    const { onAuthenticated } = await signInAs('technician', 'android');
+    expect(onAuthenticated).toHaveBeenCalledTimes(1);
+  });
+
+  it('webRefusalFor answers only for field roles on web', () => {
+    expect(webRefusalFor('technician', 'web')).toBe(FIELD_ROLE_ON_WEB);
+    expect(webRefusalFor('sales_rep', 'web')).toBe(FIELD_ROLE_ON_WEB);
+    expect(webRefusalFor('owner', 'web')).toBeNull();
+    expect(webRefusalFor('technician', 'android')).toBeNull();
   });
 });
 

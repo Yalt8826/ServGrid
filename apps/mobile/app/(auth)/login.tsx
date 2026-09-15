@@ -25,6 +25,7 @@ export default function LoginRoute() {
         signIn={async (username, password) =>
           api.login(username, password, await buildLoginDevice())
         }
+        discardSession={() => api.logout()}
         onAuthenticated={(result, password) => {
           const store = useSessionStore.getState();
           store.setAuthenticated(result.employee, {
