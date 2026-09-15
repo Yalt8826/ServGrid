@@ -50,7 +50,13 @@ export function createDevicesService() {
     return toDiagnostic(row);
   }
 
-  return { registerDevice };
+  /** GET /v1/devices/me — the session's device diagnostics, or null. */
+  async function myDevice(employeeId: string, deviceId: string): Promise<DeviceDiagnostic | null> {
+    const row = await repo.findOwnDevice(getPool(), employeeId, deviceId);
+    return row === null ? null : toDiagnostic(row);
+  }
+
+  return { registerDevice, myDevice };
 }
 
 export type DevicesService = ReturnType<typeof createDevicesService>;

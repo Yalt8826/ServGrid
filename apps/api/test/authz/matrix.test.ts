@@ -819,6 +819,16 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/devices/me',
+    method: 'GET',
+    url: '/v1/devices/me',
+    // Self by construction, like the POST: the token names the employee and
+    // the device it was issued for at login, so every role reads its own
+    // row — there is no cell to refuse, and no way to name another's.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/devices/me', headers: bearer(actor) }),
+    expect: { ...ALL_ROLES_OK, anon: UNAUTHENTICATED },
+  },
+  {
     name: 'POST /v1/location/pings',
     method: 'POST',
     url: '/v1/location/pings',

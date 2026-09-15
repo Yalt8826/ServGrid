@@ -29,6 +29,8 @@ const CASES = [
   { file: `${FIX}/rule3-location-tables/repo.dispatcher.ts`, reason: 'location.split defence' },
   { file: `${FIX}/rule4-accent-hex.ts`, reason: 'accent-erosion defence' },
   { file: `${FIX}/rule5-clean-module.ts`, clean: true },
+  { file: `${FIX}/rule6-device-storage.ts`, reason: 'no-device-storage defence' },
+  { file: `${FIX}/rule7-device-storage-allowed/tokenStore.impl.web.ts`, clean: true },
 ];
 
 const eslintBin = join(root, 'node_modules', '.bin', 'eslint');
@@ -82,7 +84,7 @@ for (const c of CASES) {
   }
 }
 
-// The fixture cases above prove the three custom rules fire; everything
+// The fixture cases above prove the four custom rules fire; everything
 // else in the repo must stay clean. `eslint .` alone cannot be the gate
 // (the fixtures are real errors by design), so the exclusion is computed
 // from the same CASES list that demanded the errors — a fixture added to
@@ -105,4 +107,4 @@ if (failures > 0) {
   console.error(`\nlint-proof: ${failures} fixture case(s) failed.`);
   process.exit(1);
 }
-console.log('\nlint-proof: all three custom rules proven by their fixtures.');
+console.log('\nlint-proof: all four custom rules proven by their fixtures.');

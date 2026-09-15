@@ -20,12 +20,12 @@ import * as Notifications from 'expo-notifications';
 import { Redirect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Linking, AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { api } from '../../src/lib/api';
 import { buildLoginDevice } from '../../src/lib/device';
+import { loadMyDevice } from '../../src/lib/myDevice';
 import { landingRouteFor } from '../../src/routes/landing';
 import { matchAutostartVendor } from '../../src/location/autostart';
 import { LadderScreen, type LadderDiagnostics } from '../../src/location/ladder';
@@ -34,33 +34,16 @@ import { useSessionStore } from '../../src/state/sessionStore';
 
 /**
  * Steps 3 and 4 cannot be read back from the OS through Expo (no API for
- * `isIgnoringBatteryOptimizations`, none for autostart) — the ladder's
- * only memory of them is these local records, written when the OS or the
- * user said "done". A reinstall clears them, which is honest: an
- * uninstall resets both settings too, so the steps are re-walked.
+ * `isIgnoringBatteryOptimizations`, none for autostart). They are posted
+ * to the server's device row when the OS or the user says "done", and read
+ * back from it (`GET /v1/devices/me`) — nothing is remembered on the phone
+ * (online-only, decision 2026-09-15). A reinstall registers a new install
+ * id, which reads "not confirmed": honest, because an uninstall resets
+ * both settings too, so the steps are re-walked.
  */
-const BATTERY_FLAG_KEY = 'servgrid.ladder.batteryExempt';
-const AUTOSTART_FLAG_KEY = 'servgrid.ladder.autostartConfirmed';
 
 /** Android's action that opens an activity by component name. */
 const ACTION_MAIN = 'android.intent.action.MAIN';
-
-async function readFlag(key: string): Promise<boolean> {
-  try {
-    return (await AsyncStorage.getItem(key)) === '1';
-  } catch {
-    return false;
-  }
-}
-
-async function writeFlag(key: string): Promise<boolean> {
-  try {
-    await AsyncStorage.setItem(key, '1');
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export default function LadderRoute() {
   const router = useRouter();
@@ -112,8 +95,8 @@ export default function LadderRoute() {
         probe={{
           foregroundLocation: async () => (await Location.getForegroundPermissionsAsync()).granted,
           backgroundLocation: async () => (await Location.getBackgroundPermissionsAsync()).granted,
-          batteryExempt: () => readFlag(BATTERY_FLAG_KEY),
-          autostartConfirmed: () => readFlag(AUTOSTART_FLAG_KEY),
+          batteryExempt: async () => (await loadMyDevice())?.batteryOptExempt === true,
+          autostartConfirmed: async () => (await loadMyDevice())?.autostartConfirmed === true,
           notifications: async () => {
             const settings = await Notifications.getPermissionsAsync();
             return settings.granted;
@@ -132,7 +115,8 @@ export default function LadderRoute() {
               { data: `package:${pkg}` },
             );
             const granted = result.resultCode === IntentLauncher.ResultCode.Success;
-            if (granted) await writeFlag(BATTERY_FLAG_KEY);
+            // Recorded on the server, never on the phone.
+            if (granted) await postDiagnostics({ batteryOptExempt: true });
             return granted;
           },
           openAutostart: async () => {
@@ -149,7 +133,8 @@ export default function LadderRoute() {
             }
             await Linking.openSettings();
           },
-          confirmAutostart: () => writeFlag(AUTOSTART_FLAG_KEY),
+          // The user's word is the contract (§X4), and it is the server's to keep.
+          confirmAutostart: () => postDiagnostics({ autostartConfirmed: true }),
           requestNotifications: async () => (await Notifications.requestPermissionsAsync()).granted,
         }}
       />
