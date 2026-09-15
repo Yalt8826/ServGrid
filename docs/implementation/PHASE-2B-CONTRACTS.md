@@ -112,6 +112,7 @@ CREATE INDEX job_cards_contract_idx ON job_cards (contract_id) WHERE contract_id
 | PATCH | `/v1/contracts/:id` | `If-Match`; dates, value, notes; a cancelled AMC → 409 |
 | POST | `/v1/contracts/:id/cancel` | idempotent; reason required |
 
+- Contract schemas live in a new `packages/shared/src/contracts.ts` (so T2B.3 can edit `schemas.ts` in parallel without a conflict).
 - Permission matrix: dispatcher `contract` and `contract.money` read/create/update/delete `all`; sales rep `none`; technician `contract` `assigned` read only, `contract.money` `none`.
 - `contracts.generate` removed from the flag registry. The sequence prefix for `contract:` becomes `AMC`.
 - `no-sql-money-tables` guards `job_completions` only; the money-leak suite stops forbidding `contract_value` for the dispatcher's contract reads and keeps forbidding every completion figure.
@@ -135,7 +136,8 @@ CREATE INDEX job_cards_contract_idx ON job_cards (contract_id) WHERE contract_id
 - **`POST /v1/jobs`** — dispatcher and owner, idempotent. `{ customerId, serviceId, customerProductId?, priority, scheduledFor?, contactName?, contactPhone?, description?, contractId? }`. Allocates `JC-…`, title from the service, `unassigned`, emits `created`. Returns the role's card schema.
 - `contractId` must belong to the customer, not be cancelled, and cover the job's day (its scheduled date, or today) — else a 422 in plain words.
 - Cancel with `rescheduleTo`: the successor inherits `contract_id` when that AMC covers the new date. The Phase 1 contract-visit hooks (`onContractVisitCompleted` / `onContractVisitCancelled`) are deleted.
-- The technician's card and work read carry `contract: { number, endDate } | null`; the owner's card the same.
+- The technician's card and work read carry `contract: { number, endDate } | null` — only for an uncancelled AMC. The owner's card keeps `isContractVisit`, now reading `contract_id`.
+- **The technician app follows the new shape in this task** so `main` stays green: the chip reads *AMC · until 14 Sep 2027*, the prepaid branch of the complete sheet and the cancel sheet's "spends a visit" warning are removed. The Free/Charge choice itself is T2B.5.
 - The owner's attention feed gains rank 5, **AMCs ending within 7 days**.
 
 **Tests** — `test/integration/jobs-create.test.ts`
@@ -160,6 +162,7 @@ CREATE INDEX job_cards_contract_idx ON job_cards (contract_id) WHERE contract_id
 - **AMC form** — customer search, start (today), end (start + 12 months − 1 day), price, notes. *Renew* prefills start = old end + 1 and the old price. An overlap shows the existing AMC's number as a link.
 - **Dispatch form** — a customer with an AMC covering today shows *AMC job · AMC-2627-00031 · until 14 Sep 2027*, **ticked**; the submit carries `contractId` when ticked. `?customerId=` preselects the customer.
 - Rep dashboard: *Renewing soon* removed.
+- Owner: the old O6 contract screens are replaced by the same AMC screens — cards on a phone, the desk table on web.
 
 **Tests** — `screens/contracts/*.test.tsx`, `dispatch.test.tsx`, `navmap.test.ts`
 - Due rows render the due-since date and a Dispatch action routed with the customer; ending rows at 7 days
@@ -167,7 +170,7 @@ CREATE INDEX job_cards_contract_idx ON job_cards (contract_id) WHERE contract_id
 - The AMC option appears ticked for a customer with an AMC and is absent for one without; unticking sends no `contractId`
 - Dispatcher has 4 tabs; the rep map has no `/contracts`
 
-**Commits** `chore(start): T2B.4 amc tab` → `feat(mobile): dispatcher AMC tab, AMC form and the dispatch AMC option`
+**Commits** `chore(start): T2B.4 amc tab` → `feat(mobile): AMC tab for dispatcher and owner, AMC form, dispatch AMC option`
 
 ---
 
@@ -176,17 +179,16 @@ CREATE INDEX job_cards_contract_idx ON job_cards (contract_id) WHERE contract_id
 **Reads:** `UI/plan-2/04-TECHNICIAN.md` §T4, §T5 · `07-OWNER.md` §O6 · **Depends on:** T2B.3 · **Tier:** T1
 
 **Build**
-- `ContractChip` — *"AMC · until 14 Sep 2027"*, muted, never accent.
 - **Complete sheet, AMC job** — two segments, *Free under AMC* (selected) and *Charge*. Free: the amount field and Paid-by are **absent** and the payload carries no cost and mode `none`. Charge: the ordinary money fields.
-- Cancel sheet: the "spends a visit" warning is removed.
-- Owner: the O6 screens read the new shape (number · customer · start · end · price · state · next due) and share the AMC sections; the attention feed renders the ending-soon row.
+- Owner: the dashboard's attention feed renders the *AMC ending* row (rank 5, from T2B.3).
 
 **Tests**
 - AMC job: the sheet opens on Free with no amount field in the tree; switching to Charge shows it; Free submits `collectionMode: 'none'` and no `cost`
+- The owner attention feed renders an *AMC ending* row linking to the AMC
 - An ordinary job shows no segments
-- `ContractChip` resolves to the muted colour, not `#F2C200`
+- The AMC chip resolves to the muted colour, not `#F2C200`
 
-**Commits** `chore(start): T2B.5 technician and owner amc` → `feat(mobile): AMC chip, free-or-charge completion, owner AMC screens`
+**Commits** `chore(start): T2B.5 technician and owner amc` → `feat(mobile): free-or-charge AMC completion, owner AMC attention row`
 
 ---
 
