@@ -14,8 +14,13 @@
  *   segments. The action prop is required and spelled here — a gate
  *   defaulting to `read` would hide the amount field from the
  *   technician filling it in, whose `job.money` read scope is `none`.
- * - **AMC job — the Free/Charge choice arrives in T2B.5; until then an
- *   AMC job completes like any other.**
+ * - **AMC job — two segments above the money: Free under AMC (where the
+ *   sheet opens) and Charge (decision 9, 2026-09-15).** On Free the
+ *   amount field, the discount disclosure and the Paid-by segments are
+ *   ABSENT — not zero, not disabled, not in the tree — and nothing is
+ *   collected. Charge brings the ordinary money fields back for extra
+ *   work the customer pays for. The two segment controls are built
+ *   exactly like the Paid-by ones: same props, same styles, same haptic.
  * - **No charge → "No payment taken"** in the segments' place, a single
  *   non-interactive line; `collection_mode: 'none'` is submitted. A
  *   warranty job is never asked how he was paid for work that was free.
@@ -61,6 +66,7 @@ import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
 import { messageOfWriteError } from '../../lib/intentWrite';
 import type { JobView } from './jobView';
+import { detailContractChipOf } from './jobDetail';
 import {
   chargeApplies,
   inWarranty,
@@ -68,7 +74,12 @@ import {
   payloadOf,
   submitBlockerOf,
   warrantyConfirmMessageOf,
+  AMC_SEGMENTS,
+  DEFAULT_AMC_CHOICE,
+  isAmcJob,
+  isFreeUnderAmc,
   PAYMENT_SEGMENTS,
+  type AmcChoice,
   type CollectionMode,
   type CompleteSheetPayload,
   type PartLine,
@@ -104,6 +115,11 @@ type PickerMode = 'closed' | 'catalogue';
 export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   const { view } = deps;
 
+  // Decision 9: an AMC job's sheet OPENS on Free under AMC; the
+  // technician switches to Charge when the visit carries extra work.
+  const amcJob = isAmcJob(view);
+  const [amcChoice, setAmcChoice] = useState<AmcChoice>(DEFAULT_AMC_CHOICE);
+
   const [workSummary, setWorkSummary] = useState('');
   const [amount, setAmount] = useState('');
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -125,8 +141,19 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   // (§T4: exactly one confirmation, never two dialogs a day).
   const [warrantyAcked, setWarrantyAcked] = useState(false);
 
-  const blocker = submitBlockerOf({ workSummary, amount, discountAmount, discountReason, lines });
-  const charged = chargeApplies(amount, discountAmount);
+  // Free under AMC: the money inputs are fed to the blocker as empty —
+  // NOT skipped — so a half-typed discount left behind on the Charge side
+  // can never block a free completion (§T4 blockers are validation facts
+  // about what will be SENT, and a free visit sends nothing).
+  const free = isFreeUnderAmc(view, amcChoice);
+  const blocker = submitBlockerOf({
+    workSummary,
+    amount: free ? '' : amount,
+    discountAmount: free ? '' : discountAmount,
+    discountReason: free ? '' : discountReason,
+    lines,
+  });
+  const charged = !free && chargeApplies(amount, discountAmount);
   const warranty = inWarranty(view, deps.now);
 
   function patchLine(localId: string, patch: Partial<PartLine>): void {
@@ -152,6 +179,7 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
             discountAmount,
             discountReason,
             selectedMode,
+            amcChoice,
             lines,
             customerConfirmed,
             now: deps.now,
@@ -215,64 +243,27 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
         />
 
         {/* The money half lives behind the gate whose action is spelled
-            out — create, the write-once cell the technician holds. An AMC
-            job completes like any other until T2B.5 adds Free/Charge. */}
+            out — create, the write-once cell the technician holds. On an
+            AMC job the Free/Charge segments sit above it (decision 9),
+            built exactly like the Paid-by segments below. */}
         <MoneyGate role={deps.role} action="create" testID="complete-money-gate">
-          <MoneyField
-            label="Amount collected"
-            value={amount}
-            onChangeText={setAmount}
-            helperText="Leave empty when nothing is charged."
-            testID="complete-amount"
-          />
-
-          {/* The discount is a secondary disclosure that opens
-              amount AND reason together (§T4) — the database refuses
-              the row without a reason, so the sheet asks for both at
-              once instead of failing the technician later. */}
-          {discountOpen ? (
-            <View testID="complete-discount" style={styles.block}>
-              <MoneyField label="Discount amount" value={discountAmount} onChangeText={setDiscountAmount} testID="complete-discount-amount" />
-              <TextField
-                label="Reason"
-                value={discountReason}
-                onChangeText={setDiscountReason}
-                placeholder="Why the amount was reduced"
-                helperText="Required — a discount is filed with its reason."
-                testID="complete-discount-reason"
-              />
-              <Button
-                label="Remove discount"
-                variant="ghost"
-                onPress={() => {
-                  setDiscountOpen(false);
-                  setDiscountAmount('');
-                  setDiscountReason('');
-                }}
-                testID="complete-discount-remove"
-              />
-            </View>
-          ) : (
-            <Button label="+ Add discount" variant="secondary" onPress={() => setDiscountOpen(true)} testID="complete-discount-toggle" />
-          )}
-
-          {/* Paid by — three segments, not five (§T4). Zero or empty
-              replaces them IN PLACE with the honest line. */}
-          {charged ? (
-            <View style={styles.block}>
-              <Text style={styles.sectionLabel}>Paid by</Text>
-              <View testID="complete-paid-by" style={styles.segments}>
-                {PAYMENT_SEGMENTS.map((segment) => {
-                  const selected = selectedMode === segment.mode;
+          {/* This visit — the AMC job's two segments. Free is where the
+              sheet opens; Charge brings the money fields back. */}
+          {amcJob ? (
+            <View style={styles.block} testID="complete-amc-choice">
+              <Text style={styles.sectionLabel}>This visit</Text>
+              <View style={styles.segments}>
+                {AMC_SEGMENTS.map((segment) => {
+                  const selected = amcChoice === segment.choice;
                   return (
                     <Pressable
-                      key={segment.mode}
-                      testID={`complete-segment-${segment.mode}`}
+                      key={segment.choice}
+                      testID={`complete-amc-${segment.choice}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       onPress={() => {
                         haptic('pickerSelect');
-                        setSelectedMode(segment.mode);
+                        setAmcChoice(segment.choice);
                       }}
                       style={[styles.segment, selected ? styles.segmentSelected : null]}
                     >
@@ -284,10 +275,92 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
                 })}
               </View>
             </View>
+          ) : null}
+
+          {free ? (
+            // Free under AMC — the money fields are ABSENT, not hidden:
+            // a field in the tree is a field someone taps. The chip names
+            // the AMC and the sentence says why nothing is collected.
+            <View testID="complete-amc-free" style={styles.block}>
+              <Text style={styles.chip} testID="complete-amc-chip">
+                {detailContractChipOf(view.job.contract)}
+              </Text>
+              <Text style={styles.caption}>Covered by the AMC — nothing is collected on this visit.</Text>
+            </View>
           ) : (
-            <Text testID="complete-no-payment" style={styles.noPayment}>
-              No payment taken
-            </Text>
+            <>
+              <MoneyField
+                label="Amount collected"
+                value={amount}
+                onChangeText={setAmount}
+                helperText="Leave empty when nothing is charged."
+                testID="complete-amount"
+              />
+
+              {/* The discount is a secondary disclosure that opens
+                  amount AND reason together (§T4) — the database refuses
+                  the row without a reason, so the sheet asks for both at
+                  once instead of failing the technician later. */}
+              {discountOpen ? (
+                <View testID="complete-discount" style={styles.block}>
+                  <MoneyField label="Discount amount" value={discountAmount} onChangeText={setDiscountAmount} testID="complete-discount-amount" />
+                  <TextField
+                    label="Reason"
+                    value={discountReason}
+                    onChangeText={setDiscountReason}
+                    placeholder="Why the amount was reduced"
+                    helperText="Required — a discount is filed with its reason."
+                    testID="complete-discount-reason"
+                  />
+                  <Button
+                    label="Remove discount"
+                    variant="ghost"
+                    onPress={() => {
+                      setDiscountOpen(false);
+                      setDiscountAmount('');
+                      setDiscountReason('');
+                    }}
+                    testID="complete-discount-remove"
+                  />
+                </View>
+              ) : (
+                <Button label="+ Add discount" variant="secondary" onPress={() => setDiscountOpen(true)} testID="complete-discount-toggle" />
+              )}
+
+              {/* Paid by — three segments, not five (§T4). Zero or empty
+                  replaces them IN PLACE with the honest line. */}
+              {charged ? (
+                <View style={styles.block}>
+                  <Text style={styles.sectionLabel}>Paid by</Text>
+                  <View testID="complete-paid-by" style={styles.segments}>
+                    {PAYMENT_SEGMENTS.map((segment) => {
+                      const selected = selectedMode === segment.mode;
+                      return (
+                        <Pressable
+                          key={segment.mode}
+                          testID={`complete-segment-${segment.mode}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          onPress={() => {
+                            haptic('pickerSelect');
+                            setSelectedMode(segment.mode);
+                          }}
+                          style={[styles.segment, selected ? styles.segmentSelected : null]}
+                        >
+                          <Text style={{ ...textStyle('label'), color: selected ? SEMANTIC.text.onDark : SEMANTIC.text.primary }}>
+                            {segment.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : (
+                <Text testID="complete-no-payment" style={styles.noPayment}>
+                  No payment taken
+                </Text>
+              )}
+            </>
           )}
         </MoneyGate>
 
@@ -478,6 +551,19 @@ const styles = StyleSheet.create({
   block: { alignSelf: 'stretch', gap: SPACE[3], marginTop: SPACE[4] },
   sectionLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
   caption: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  // The AMC chip on the Free branch — the detail screen's muted chip,
+  // the same hairline box the contract chip wears there (never accent).
+  chip: {
+    ...textStyle('label'),
+    color: SEMANTIC.text.secondary,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+  },
   segments: { flexDirection: 'row', gap: SPACE[2] },
   segment: {
     flex: 1,

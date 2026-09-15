@@ -15,7 +15,7 @@
  * would be a second place a dashboard figure could drift.
  */
 import { formatMoneyEnIN } from '@servgrid/shared';
-import { formatDateEnIN } from '../../components/ui';
+import { formatDateEnIN, formatDateWithYear } from '../../components/ui';
 import type { PaymentMode, ProductRecord, ServiceRecord } from '@servgrid/shared';
 import { sumMoney } from '../rep/money';
 import { daysUntil } from '../rep/model';
@@ -53,7 +53,8 @@ export type AttentionCategory =
   | 'missing_submission'
   | 'cash_variance'
   | 'overdue_job'
-  | 'tracking_health';
+  | 'tracking_health'
+  | 'contract_ending';
 
 /** `GET /v1/dashboard/owner/attention` — one row, polymorphic by category. */
 export interface AttentionItem {
@@ -72,6 +73,10 @@ export interface AttentionItem {
   customerName: string | null;
   health: 'stale' | 'permission_missing' | null;
   lastPingAt: string | null;
+  /** AMC rows: the AMC to open. */
+  contractId: string | null;
+  contractNumber: string | null;
+  contractEndDate: string | null;
 }
 
 // ── the four figures ───────────────────────────────────────────────────────
@@ -168,11 +173,12 @@ export function lastSeenLabel(lastPingAt: string, now: Date): string {
 
 /**
  * The feed arrives in consequence order (the endpoint's contract —
- * missing submissions, variances, overdue jobs, tracking health; the
- * mapper preserves it, never re-sorts). Each category states its trouble
- * in the words the owner acts on and carries the direct link: cash rows
- * to the reconciliation queue, an overdue job to the job, a sick tracker
- * to the location console's roster.
+ * missing submissions, variances, overdue jobs, tracking health, AMCs
+ * ending within 7 days; the mapper preserves it, never re-sorts). Each
+ * category states its trouble in the words the owner acts on and carries
+ * the direct link: cash rows to the reconciliation queue, an overdue job
+ * to the job, a sick tracker to the location console's roster, an AMC
+ * near its end to the AMC itself.
  */
 export function attentionRowsOf(items: AttentionItem[], now: Date): AttentionRowVm[] {
   return items.map((item, index) => {
@@ -222,6 +228,19 @@ export function attentionRowsOf(items: AttentionItem[], now: Date): AttentionRow
               : `last ping ${lastSeenLabel(item.lastPingAt, now)}`,
           note: item.health ?? 'tracking',
           target: '/location',
+        };
+      case 'contract_ending':
+        // Rank 5 (decision 7: 7 days before the end) — the term's last
+        // week, when the renewal call happens. The date carries the year:
+        // an AMC term spans years, so the year is the fact.
+        return {
+          key,
+          category: item.category,
+          severity: 'warning',
+          title: `${item.contractNumber ?? 'AMC'} · ${item.customerName ?? ''}`.trim(),
+          meta: item.contractEndDate === null ? 'ends soon' : `ends ${formatDateWithYear(item.contractEndDate)}`,
+          note: 'AMC ending',
+          target: item.contractId === null ? '/contracts' : `/contracts/${item.contractId}`,
         };
     }
   });

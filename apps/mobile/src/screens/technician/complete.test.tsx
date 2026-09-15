@@ -15,7 +15,15 @@
  * 7. Submit has no connectivity input — never disabled for a network reason.
  * 8. Success haptic fires when the server accepts, NOT on tap; a refusal
  *    keeps the sheet open, the reason on a banner, the typing intact.
- * 9. Prepaid branch hides amount AND Paid-by.
+ * 9. An ordinary job shows no AMC segments — the money half as before.
+ *
+ * Then the AMC job (T2B.5, decision 9, 2026-09-15): the sheet OPENS on
+ * Free under AMC with the money fields absent from the tree; Charge
+ * brings them back; Free submits no money and mode `none` with parts
+ * riding along; the in-warranty prompt keys on the charge, not the job;
+ * a reasonless discount left on the Charge side cannot block a free
+ * submit; and a changed body after a failed attempt goes out under a NEW
+ * idempotency key (`bodyKeyedWriters`).
  *
  * Plus the "Done when" boxes: the sheet leaves the stepper visible (the
  * ~140pt context strip over the detail screen), the one-dialog rule
@@ -38,8 +46,12 @@ import { JobDetailScreen, type JobDetailDeps } from './JobDetailScreen';
 import { CompleteSheet, CONTEXT_STRIP_EXTRA_PT, type CompleteSheetDeps } from './CompleteSheet';
 import {
   amountAfterDiscountOf,
+  bodyKeyedWriters,
   chargeApplies,
+  DEFAULT_AMC_CHOICE,
   equipmentDefaultFor,
+  isAmcJob,
+  isFreeUnderAmc,
   partLineOf,
   payloadOf,
   submitBlockerOf,
@@ -47,6 +59,7 @@ import {
   type CompleteSheetPayload,
   type PartProduct,
 } from './completeSheet';
+import { createIntentWriter, WriteNotSaved, type IntentRequest } from '../../lib/intentWrite';
 import { statusPillOf, type JobView } from './jobView';
 import type { JobStatus } from '@servgrid/shared';
 
@@ -479,22 +492,98 @@ describe('CompleteSheet (§T4)', () => {
     expect(input!.props.value).toBe('Battery swap.');
   });
 
-  it('9 · an AMC job completes like any other — the money fields stand', async () => {
-    // 2B: no prepaid branch (decision 2026-09-15). The Free/Charge choice
-    // is T2B.5's; until then an AMC job closes through the same fields.
-    const deps = baseDeps({
-      view: viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }),
-    });
+  it('9 · an ordinary job shows no AMC segments — the money half renders as before (§T4)', async () => {
+    const deps = baseDeps(); // contract: null
     const renderer = await create(<CompleteSheet {...deps} />);
     let tree = toJson(renderer);
 
-    // The ordinary money half is present for an AMC job too.
+    // No segments, no free branch: an ordinary job never asks Free/Charge.
+    expect(findByTestID(tree, 'complete-amc-choice')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-amc-free')).toBeUndefined();
     expect(findByTestID(tree, 'complete-amount')).toBeDefined();
-    expect(findByTestID(tree, 'complete-paid-by')).toBeUndefined(); // nothing charged yet — "No payment taken"
-    expect(findByTestID(tree, 'complete-prepaid')).toBeUndefined();
 
-    // Submitting free: no cost key, mode none — the honest zeros.
-    await typeInto(tree, 'complete-work-done', 'Quarterly service.');
+    // The ordinary money half behaves exactly as T4 shipped it.
+    await typeInto(tree, 'complete-amount', '500');
+    await typeInto(tree, 'complete-work-done', 'Replaced the PCB.');
+    tree = toJson(renderer);
+    expect(findByTestID(tree, 'complete-paid-by')).toBeDefined();
+    await trySubmit(toJson(renderer));
+    expect(findByTestID(toJson(renderer), 'complete-warranty')).toBeDefined(); // in-warranty charge: the one dialog
+    await press(toJson(renderer), 'complete-warranty-confirm');
+
+    const payload = submittedPayload(deps);
+    expect(payload.cost).toBe('500');
+    expect(payload.collectionMode).toBe('cash'); // charged, default segment
+    expect(isAmcJob(deps.view)).toBe(false);
+    expect(isFreeUnderAmc(deps.view, 'free')).toBe(false);
+  });
+});
+
+// ── the AMC job (decision 9, 2026-09-15) ─────────────────────────────────────
+
+describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
+  beforeEach(() => {
+    seq = 0;
+    Haptics.__reset();
+  });
+
+  /** The brief's fixture: a job under a live AMC, in-warranty unit. */
+  function amcView(extra: Partial<JobView> = {}): JobView {
+    return viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }, extra);
+  }
+
+  function amcDeps(overrides: Partial<Deps> = {}, extra: Partial<JobView> = {}): Deps {
+    return baseDeps({ view: amcView(extra), ...overrides });
+  }
+
+  it('1 · opens on Free — the segments render, and the money fields are ABSENT from the tree', async () => {
+    const renderer = await create(<CompleteSheet {...amcDeps()} />);
+    const tree = toJson(renderer);
+
+    // The choice block is there and Free is the selected segment.
+    expect(findByTestID(tree, 'complete-amc-choice')).toBeDefined();
+    const freeSegment = findByTestID(tree, 'complete-amc-free');
+    expect(freeSegment).toBeDefined();
+    expect((freeSegment!.props.accessibilityState as { selected?: boolean }).selected).toBe(true);
+    const chargeSegment = findByTestID(tree, 'complete-amc-charge');
+    expect((chargeSegment!.props.accessibilityState as { selected?: boolean }).selected).toBe(false);
+
+    // Absent, NOT hidden: no amount field, no discount disclosure, no
+    // Paid-by segments anywhere in the tree (§T4: render nothing).
+    expect(findByTestID(tree, 'complete-amount')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-discount')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-discount-toggle')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-paid-by')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-no-payment')).toBeUndefined();
+  });
+
+  it('2 · the Free branch names the AMC and says why nothing is collected', async () => {
+    // NOTE: the brief pins `complete-amc-free` on BOTH the segment and
+    // the branch block — the branch is the View, the segment the
+    // Pressable, so they are matched by type as well as testID.
+    const renderer = await create(<CompleteSheet {...amcDeps()} />);
+    const tree = toJson(renderer);
+
+    const branches = findAll(tree, (n) => n.type === 'View' && n.props.testID === 'complete-amc-free');
+    expect(branches).toHaveLength(1);
+    const text = allText(branches[0]!).join(' ');
+    expect(text).toContain('AMC · until 14 Sep 2027');
+    expect(text).toContain('Covered by the AMC — nothing is collected on this visit.');
+  });
+
+  it('3 · submitting on Free sends no cost, no discount, mode none — and the parts ride along', async () => {
+    const deps = amcDeps();
+    const renderer = await create(<CompleteSheet {...deps} />);
+    let tree = toJson(renderer);
+
+    // A part fitted before the submit — a free AMC visit still fits parts.
+    await press(tree, 'complete-parts-toggle');
+    await addCataloguePart(renderer, BATTERY.id);
+    const serial = firstDescendantOfType(lineControlOf(toJson(renderer), 'Exide 150Ah battery', '-serial'), 'TextInput');
+    await act(async () => {
+      serial?.props.onChangeText?.('EX2291184');
+    });
+    await typeInto(toJson(renderer), 'complete-work-done', 'Quarterly service.');
     tree = toJson(renderer);
     await trySubmit(tree);
 
@@ -502,7 +591,142 @@ describe('CompleteSheet (§T4)', () => {
     expect(payload.collectionMode).toBe('none');
     expect(payload.cost).toBeUndefined();
     expect(payload.discountAmount).toBeUndefined();
-    expect(chargeApplies('', '')).toBe(false);
+    expect(payload.discountReason).toBeUndefined();
+    expect(payload.parts).toEqual([{ productId: BATTERY.id, quantity: 1, serialNumber: 'EX2291184' }]);
+    expect(payload.stackChanges).toEqual([{ productId: BATTERY.id, serialNumber: 'EX2291184', installedOn: '2026-09-11' }]);
+  });
+
+  it('4 · switching to Charge brings the ordinary money fields back — what he types is what is sent', async () => {
+    const outOfWarranty = { unit: { name: 'UPS 850VA', brand: null, serialNumber: 'LM8842219', warrantyExpiresOn: '2026-01-01' } };
+    const deps = amcDeps({}, outOfWarranty);
+    const renderer = await create(<CompleteSheet {...deps} />);
+    let tree = toJson(renderer);
+
+    await press(tree, 'complete-amc-charge');
+    tree = toJson(renderer);
+
+    // The money half is back, exactly as an ordinary job renders it.
+    expect(findByTestID(tree, 'complete-amount')).toBeDefined();
+    // The Free BRANCH (the View with the chip) is gone; the unselected
+    // Free segment stays — the two controls share the brief's testID.
+    expect(findByTestID(tree, 'complete-amc-chip')).toBeUndefined();
+    expect(
+      findAll(tree, (n) => n.type === 'View' && n.props.testID === 'complete-amc-free'),
+    ).toHaveLength(0);
+    await typeInto(tree, 'complete-amount', '1500');
+    tree = toJson(renderer);
+    expect(findByTestID(tree, 'complete-paid-by')).toBeDefined();
+
+    await press(tree, 'complete-segment-upi');
+    await typeInto(tree, 'complete-work-done', 'Extra board work the customer paid for.');
+    tree = toJson(renderer);
+    await trySubmit(tree);
+
+    const payload = submittedPayload(deps);
+    expect(payload.cost).toBe('1500');
+    expect(payload.collectionMode).toBe('upi');
+    expect(payload.discountAmount).toBeUndefined();
+  });
+
+  it('5 · Charge → Free after typing: the Free payload is sent, and a reasonless discount left behind cannot block it', async () => {
+    const deps = amcDeps();
+    const renderer = await create(<CompleteSheet {...deps} />);
+    let tree = toJson(renderer);
+
+    // On the Charge side: type an amount and a discount with NO reason.
+    await press(tree, 'complete-amc-charge');
+    await typeInto(toJson(renderer), 'complete-amount', '1500');
+    await press(toJson(renderer), 'complete-discount-toggle');
+    await typeInto(toJson(renderer), 'complete-discount-amount', '200');
+    await typeInto(toJson(renderer), 'complete-work-done', 'Quarterly service, or extra work?');
+    tree = toJson(renderer);
+    expect(isDisabled(tree)).toBe(true); // blocked ON THE CHARGE SIDE — the discount needs a reason
+
+    // Switch back to Free: the half-typed discount is not his answer any
+    // more — the money inputs are fed to the blocker as empty.
+    await press(tree, 'complete-amc-free');
+    tree = toJson(renderer);
+    expect(findByTestID(tree, 'complete-amount')).toBeUndefined();
+    expect(isDisabled(tree)).toBe(false);
+
+    await trySubmit(tree);
+
+    const payload = submittedPayload(deps);
+    expect(payload.collectionMode).toBe('none');
+    expect(payload.cost).toBeUndefined();
+    expect(payload.discountAmount).toBeUndefined();
+    expect(allText(findByTestID(tree, 'complete-amc-choice') ?? null).join(' ')).toContain('Free under AMC');
+  });
+
+  it('6 · in warranty: Free raises no confirmation; Charge raises exactly the one', async () => {
+    // Free — even on an in-warranty unit, nothing is charged, so nothing
+    // is asked (the dialog is about charging covered work).
+    const freeDeps = amcDeps();
+    const freeRenderer = await create(<CompleteSheet {...freeDeps} />);
+    let tree = toJson(freeRenderer);
+    await typeInto(tree, 'complete-work-done', 'Quarterly service.');
+    tree = toJson(freeRenderer);
+    await trySubmit(tree);
+    expect(findByTestID(toJson(freeRenderer), 'complete-warranty')).toBeUndefined();
+    expect(freeDeps.onSubmit).toHaveBeenCalledTimes(1);
+
+    // Charge — the one confirmation, carrying the expiry date.
+    const chargeDeps = amcDeps();
+    const chargeRenderer = await create(<CompleteSheet {...chargeDeps} />);
+    await press(toJson(chargeRenderer), 'complete-amc-charge');
+    await typeInto(toJson(chargeRenderer), 'complete-amount', '500');
+    await typeInto(toJson(chargeRenderer), 'complete-work-done', 'PCB swap on the covered unit.');
+    await trySubmit(toJson(chargeRenderer));
+
+    const dialogs = findAllByTestID(toJson(chargeRenderer), 'complete-warranty');
+    expect(dialogs).toHaveLength(1);
+    expect(allText(dialogs[0] ?? null).join(' ')).toContain('This unit is under warranty until 14 Mar 2027. Charge anyway?');
+    await press(toJson(chargeRenderer), 'complete-warranty-confirm');
+    expect(chargeDeps.onSubmit).toHaveBeenCalledTimes(1);
+    expect((submittedPayload(chargeDeps) as CompleteSheetPayload).cost).toBe('500');
+  });
+
+  it('8 · a changed body after a failed attempt goes out under a NEW idempotency key; the same body replays the pinned one', async () => {
+    // The route's retry rule (bodyKeyedWriters + createIntentWriter),
+    // asserted directly: the pinned key exists for the ambiguous
+    // failure — same body, same key. Switching Free ↔ Charge changes the
+    // body, and a changed body under an old key is 422
+    // IDEMPOTENCY_KEY_REUSED, so the edit is a new intent under a new key.
+    const keys: (string | undefined)[] = [];
+    let reach = false;
+    const request: IntentRequest = async (_method, _path, options) => {
+      keys.push(options.idempotencyKey);
+      return reach
+        ? { ok: true, status: 200, data: {}, error: null }
+        : { ok: false, status: 0, data: null, error: { code: 'NETWORK', message: 'no connection', requestId: 'test' } };
+    };
+    const amc = amcView();
+    const base = { view: amc, discountAmount: '', discountReason: '', lines: [], customerConfirmed: false, now: NOW, completedAt: '2026-09-11T10:00:00.000Z' };
+    const freeBody = JSON.stringify(
+      payloadOf({ ...base, workSummary: 'Quarterly service.', amount: '', selectedMode: 'cash', amcChoice: 'free' }),
+    );
+    const chargeBody = JSON.stringify(
+      payloadOf({ ...base, workSummary: 'Quarterly service plus extra work.', amount: '1500', selectedMode: 'upi', amcChoice: 'charge' }),
+    );
+    expect(freeBody).not.toBe(chargeBody);
+
+    // Same body: first attempt fails at the network, the retry replays
+    // the SAME key — the request may have landed.
+    const sameBody = bodyKeyedWriters(() => createIntentWriter(request));
+    await expect(sameBody.writerFor(freeBody).send('POST', '/v1/jobs/j1/complete', JSON.parse(freeBody))).rejects.toBeInstanceOf(WriteNotSaved);
+    reach = true;
+    await sameBody.writerFor(freeBody).send('POST', '/v1/jobs/j1/complete', JSON.parse(freeBody));
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+
+    // Changed body after a failure: a NEW key, never the pinned one.
+    reach = false;
+    const edited = bodyKeyedWriters(() => createIntentWriter(request));
+    await expect(edited.writerFor(freeBody).send('POST', '/v1/jobs/j1/complete', JSON.parse(freeBody))).rejects.toBeInstanceOf(WriteNotSaved);
+    reach = true;
+    await edited.writerFor(chargeBody).send('POST', '/v1/jobs/j1/complete', JSON.parse(chargeBody));
+    expect(keys).toHaveLength(4);
+    expect(keys[3]).not.toBe(keys[2]);
   });
 });
 
@@ -649,6 +873,17 @@ describe('CompleteSheet — Done when (§T4)', () => {
     expect(chargeApplies('', '')).toBe(false); // empty
     expect(chargeApplies('500', '200')).toBe(true);
 
+    // Decision 9, pure: the AMC job branches on the CHOICE, and Free is
+    // where the sheet opens — an ordinary job never branches at all.
+    const amc = viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } });
+    const ordinary = viewOf();
+    expect(isAmcJob(amc)).toBe(true);
+    expect(isAmcJob(ordinary)).toBe(false);
+    expect(DEFAULT_AMC_CHOICE).toBe('free');
+    expect(isFreeUnderAmc(amc, 'free')).toBe(true);
+    expect(isFreeUnderAmc(amc, 'charge')).toBe(false);
+    expect(isFreeUnderAmc(ordinary, 'free')).toBe(false);
+
     // Submit blockers are validation facts only — no network-shaped
     // input exists to disable submit for a network reason (§T4 Never).
     const valid = { workSummary: 'Done', amount: '', discountAmount: '', discountReason: '', lines: [] };
@@ -670,6 +905,7 @@ describe('CompleteSheet — Done when (§T4)', () => {
       discountAmount: '',
       discountReason: '',
       selectedMode: 'upi',
+      amcChoice: 'charge',
       lines: [],
       customerConfirmed: true,
       now: NOW,
@@ -679,5 +915,25 @@ describe('CompleteSheet — Done when (§T4)', () => {
     expect(payload.customerSigned).toBe(true);
     expect('amountCollected' in payload).toBe(false);
     expect(payload.completedAt).toBe('2026-09-11T10:00:00.000Z');
+
+    // Free under AMC sends NO money at all — whatever was left typed on
+    // the Charge side — and never a payment mode (the pure decision).
+    const freePayload = payloadOf({
+      view: viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }),
+      workSummary: 'Done',
+      amount: '500',
+      discountAmount: '200',
+      discountReason: 'left over from the Charge side',
+      selectedMode: 'upi',
+      amcChoice: 'free',
+      lines: [],
+      customerConfirmed: true,
+      now: NOW,
+      completedAt: '2026-09-11T10:00:00.000Z',
+    });
+    expect(freePayload.cost).toBeUndefined();
+    expect(freePayload.discountAmount).toBeUndefined();
+    expect(freePayload.discountReason).toBeUndefined();
+    expect(freePayload.collectionMode).toBe('none');
   });
 });
