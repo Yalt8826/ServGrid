@@ -17,7 +17,7 @@ describe('business number format', () => {
     assert.equal(formatBusinessNumber('job', 26, 42), 'JC-2627-00042');
     assert.equal(formatBusinessNumber('sale', 26, 1), 'SL-2627-00001');
     assert.equal(formatBusinessNumber('payment', 26, 12345), 'PM-2627-12345');
-    assert.equal(formatBusinessNumber('contract', 27, 0), 'CT-2728-00000');
+    assert.equal(formatBusinessNumber('contract', 27, 0), 'AMC-2728-00000');
   });
 
   it('pads to five digits and leaves larger values alone', () => {
@@ -29,7 +29,7 @@ describe('business number format', () => {
     assert.equal(prefixForScope('job'), 'JC');
     assert.equal(prefixForScope('sale'), 'SL');
     assert.equal(prefixForScope('payment'), 'PM');
-    assert.equal(prefixForScope('contract'), 'CT');
+    assert.equal(prefixForScope('contract'), 'AMC');
   });
 
   it('parses what it formats', () => {

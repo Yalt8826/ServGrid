@@ -89,21 +89,31 @@ const FORBIDDEN_NORMALISED = new Set(FORBIDDEN_KEYS.map(normaliseKey));
  * The recursive walk. Collects every object key at ANY depth — nested
  * objects and arrays both — whose normalised name is forbidden. Empty
  * `hits` is the assertion; the walker is proven to fire in its own test
- * below, so a broken walk cannot silently pass.
+ * below, so a broken walk cannot silently pass. The forbidden set is a
+ * parameter: the contract routes legitimately carry `contract_value`
+ * (decision 2026-09-15), so their walk entries subtract it — every other
+ * entry walks the full set.
  */
-function walkKeys(value: unknown, path: string, hits: string[]): void {
+function walkKeys(value: unknown, path: string, hits: string[], forbidden: ReadonlySet<string> = FORBIDDEN_NORMALISED): void {
   if (Array.isArray(value)) {
-    value.forEach((item, i) => walkKeys(item, `${path}[${i}]`, hits));
+    value.forEach((item, i) => walkKeys(item, `${path}[${i}]`, hits, forbidden));
     return;
   }
   if (value !== null && typeof value === 'object') {
     for (const [key, child] of Object.entries(value)) {
-      if (FORBIDDEN_NORMALISED.has(normaliseKey(key))) {
+      if (forbidden.has(normaliseKey(key))) {
         hits.push(`${path}.${key}`);
       }
-      walkKeys(child, `${path}.${key}`, hits);
+      walkKeys(child, `${path}.${key}`, hits, forbidden);
     }
   }
+}
+
+/** The forbidden set for one manifest entry: FORBIDDEN_NORMALISED minus the entry's allow-list (normalised). */
+function forbiddenSetFor(allow: readonly string[] | undefined): ReadonlySet<string> {
+  if (allow === undefined || allow.length === 0) return FORBIDDEN_NORMALISED;
+  const allowed = new Set(allow.map(normaliseKey));
+  return new Set([...FORBIDDEN_NORMALISED].filter((key) => !allowed.has(key)));
 }
 
 /** One route as the discovery saw it: its methods, path and response roles. */
@@ -122,8 +132,18 @@ const ROUTE_TABLE: RouteEntry[] = [];
  * surface (§6.4): the customer endpoints that answer a dispatcher at all
  * are walked like the job endpoints — a customer row carries no money,
  * and the walk is how that stays a fact instead of a hope.
+ *
+ * `allow` names money keys a route legitimately carries (T2B.2: the AMC
+ * price is the dispatcher's by decision 2026-09-15). Everything else in
+ * FORBIDDEN_KEYS — every job-revenue key included — stays forbidden on
+ * those routes, and `contract_value` itself stays forbidden on every
+ * route without an explicit allow.
  */
-const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
+const DISPATCHER_MANIFEST: ReadonlyArray<{
+  method: string;
+  url: string;
+  allow?: readonly (typeof FORBIDDEN_KEYS)[number][];
+}> = [
   { method: 'GET', url: '/v1/jobs' },
   // T2.7: the dashboard figures — same view, counted server-side.
   { method: 'GET', url: '/v1/jobs/summary' },
@@ -142,6 +162,15 @@ const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'GET', url: '/v1/customers/:id' },
   { method: 'PATCH', url: '/v1/customers/:id' },
   { method: 'GET', url: '/v1/customers/:id/stack' },
+  // T2B.2: the AMC surface (registered after the customers module in
+  // server.ts). `contract_value` is allowed here — the AMC price is the
+  // dispatcher's by decision (2026-09-15); job revenue keys stay
+  // forbidden here too.
+  { method: 'GET', url: '/v1/contracts', allow: ['contract_value'] },
+  { method: 'GET', url: '/v1/contracts/:id', allow: ['contract_value'] },
+  { method: 'POST', url: '/v1/contracts', allow: ['contract_value'] },
+  { method: 'PATCH', url: '/v1/contracts/:id', allow: ['contract_value'] },
+  { method: 'POST', url: '/v1/contracts/:id/cancel', allow: ['contract_value'] },
   // T2.7: the roster health warning — registered after the customers
   // module (server.ts), so discovery lists it last.
   { method: 'GET', url: '/v1/location/health' },
@@ -152,6 +181,11 @@ function istNoonUtc(offsetDays: number): string {
   const shifted = new Date(Date.now() + offsetDays * 86_400_000 + 5.5 * 3_600_000);
   const day = shifted.toISOString().slice(0, 10);
   return new Date(`${day}T12:00:00+05:30`).toISOString();
+}
+
+/** The IST business date `offsetDays` from today, as the plain `YYYY-MM-DD` a date column takes. */
+function istDate(offsetDays: number): string {
+  return new Date(Date.now() + offsetDays * 86_400_000 + 5.5 * 3_600_000).toISOString().slice(0, 10);
 }
 
 interface Actor {
@@ -245,6 +279,9 @@ function bearer(actor: Actor): Record<string, string> {
 let customerId = '';
 let serviceId = '';
 let techId = '';
+/** T2B.2: the AMC over the saturated customer, and a second one the mutation walks edit. */
+let contractId = '';
+let renewalContractId = '';
 /** A technician who can log in, and his completed job — the online timeline's reader (TON.1). */
 const FIELD_TECH: Actor = { username: '', id: '', token: '' };
 let fieldJobId = '';
@@ -261,7 +298,7 @@ let bulkJobId2 = '';
 async function seedDispatcherFlags(employeeId: string): Promise<void> {
   await db.query(
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled, updated_by)
-     VALUES ($1, 'dispatch.console', true, $1), ($1, 'dispatch.bulk', true, $1)`,
+     VALUES ($1, 'dispatch.console', true, $1), ($1, 'dispatch.bulk', true, $1), ($1, 'contracts.manage', true, $1)`,
     [employeeId],
   );
 }
@@ -335,6 +372,35 @@ beforeAll(async () => {
   bulkJobId1 = await seedJob({ status: 'assigned' });
   bulkJobId2 = await seedJob({ status: 'unassigned' });
 
+  // T2B.2: one AMC over the saturated customer, carrying its price (the
+  // one money key the contract routes are allowed to return), with the
+  // SATURATED completed job linked to it — the detail's job list is then
+  // walked against a job that HAS a completion row, proving `cost`,
+  // `amount_collected` etc. never ride along on an AMC payload.
+  contractId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO service_contracts (contract_number, customer_id, start_date, end_date, contract_value, created_by)
+       VALUES ($1, $2, $3, $4, '18000.00', $5) RETURNING id`,
+      [
+        `AMC-ML-${randomBytes(4).toString('hex')}`,
+        customerId,
+        istDate(-10),
+        istDate(355),
+        DISPATCHER.id,
+      ],
+    )
+  ).rows[0]!.id;
+  await db.query('UPDATE job_cards SET contract_id = $1 WHERE id = $2', [contractId, doneJobId]);
+  // A second, later-term AMC for the walk's create/patch/cancel calls to
+  // edit without touching the first.
+  renewalContractId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO service_contracts (contract_number, customer_id, start_date, end_date, contract_value, created_by)
+       VALUES ($1, $2, $3, $4, '20000.00', $5) RETURNING id`,
+      [`AMC-ML-${randomBytes(4).toString('hex')}`, customerId, istDate(356), istDate(720), DISPATCHER.id],
+    )
+  ).rows[0]!.id;
+
   // TON.1: the technician now reads his own job's timeline online. His
   // completed job carries every money column and an amended event whose
   // stored payload is the money's before/after pair.
@@ -394,7 +460,8 @@ describe('discovery — the suite cannot shrink', () => {
         }
       }
     }
-    expect(discovered).toEqual(DISPATCHER_MANIFEST);
+    // `allow` is walk metadata, not part of the route identity.
+    expect(discovered).toEqual(DISPATCHER_MANIFEST.map(({ method, url }) => ({ method, url })));
   });
 });
 
@@ -614,6 +681,90 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     const hits: string[] = [];
     walkKeys(JSON.parse(res.body), '$', hits);
     expect(hits, `money keys leaked on the stack read: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  // ── T2B.2: the AMC surface — the one place contract_value may appear ───
+
+  /** The contract routes' allow-list: the AMC price only, never job revenue. */
+  const CONTRACT_ALLOW = ['contract_value'] as const;
+
+  it('GET /v1/contracts — the AMC list, recursed; the price present, job revenue absent', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/contracts', headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body.items) && body.items.length > 0, 'the fixture page is non-empty').toBe(true);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits, forbiddenSetFor(CONTRACT_ALLOW));
+    expect(hits, `money keys leaked in the contract list: ${hits.join(', ')}`).toEqual([]);
+    // The allow-list is real: the AMC price IS on the payload...
+    expect(JSON.stringify(body)).toContain('18000.00');
+    // ...and the saturated completion's figures are not.
+    expect(JSON.stringify(body)).not.toContain('14500.00');
+  });
+
+  it('GET /v1/contracts/:id — AMC plus linked jobs, walked against a job that HAS a completion', async () => {
+    const res = await app.inject({ method: 'GET', url: `/v1/contracts/${contractId}`, headers: bearer(DISPATCHER) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.jobs.length, 'the saturated job is linked').toBeGreaterThanOrEqual(1);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits, forbiddenSetFor(CONTRACT_ALLOW));
+    expect(hits, `money keys leaked on the contract detail: ${hits.join(', ')}`).toEqual([]);
+    // The AMC price is the dispatcher's (decision 2026-09-15)...
+    expect(body.contract.contractValue).toBe('18000.00');
+    // ...the linked completed job's completion is not, at any depth: the
+    // job rides as id/number/title/status/names, never its money.
+    const text = JSON.stringify(body);
+    expect(text).not.toContain('14500.00');
+    expect(text).not.toContain('1500.00');
+    expect(text).not.toContain('UPI-REF-ML-0001');
+  });
+
+  it('POST /v1/contracts — the created AMC read back, walked', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/contracts',
+      headers: { ...bearer(DISPATCHER), 'idempotency-key': randomBytes(16).toString('hex') },
+      payload: { customerId, startDate: istDate(721), endDate: istDate(1085), contractValue: '21000.00' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits, forbiddenSetFor(CONTRACT_ALLOW));
+    expect(hits, `money keys leaked on contract create: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('PATCH /v1/contracts/:id — the AMC read back after the edit, walked', async () => {
+    const version = (
+      await db.query<{ version: number }>('SELECT version FROM service_contracts WHERE id = $1', [renewalContractId])
+    ).rows[0]!.version;
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/contracts/${renewalContractId}`,
+      headers: { ...bearer(DISPATCHER), 'if-match': String(version) },
+      payload: { notes: 'money-leak walk edit' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits, forbiddenSetFor(CONTRACT_ALLOW));
+    expect(hits, `money keys leaked on contract patch: ${hits.join(', ')}`).toEqual([]);
+  });
+
+  it('POST /v1/contracts/:id/cancel — the AMC read back after the cancel, walked', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/contracts/${renewalContractId}/cancel`,
+      headers: { ...bearer(DISPATCHER), 'idempotency-key': randomBytes(16).toString('hex') },
+      payload: { reason: 'money-leak walk cancel' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const hits: string[] = [];
+    walkKeys(JSON.parse(res.body), '$', hits, forbiddenSetFor(CONTRACT_ALLOW));
+    expect(hits, `money keys leaked on contract cancel: ${hits.join(', ')}`).toEqual([]);
   });
 
   it('GET /v1/jobs/:id/events — the timeline, with the amended event money payload redacted', async () => {

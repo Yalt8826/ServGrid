@@ -75,17 +75,18 @@ const EXPECTED: Readonly<Record<Resource, Readonly<Record<Role, Record<Action, S
   },
   contract: {
     owner: row('all', 'all', 'all', 'all'),
-    // visit context, moves due dates, skips a customer-phone cancellation — no contract value.
-    dispatcher: row('all', 'none', 'all', 'none'),
-    // the contract behind his visit; reschedules or spends from the cancel sheet.
-    technician: row('assigned', 'none', 'assigned', 'none'),
-    sales_rep: row('own', 'own', 'own', 'none'), // contracts he sold; only the owner cancels
+    // records, edits, renews and cancels AMCs — the desk's own surface now
+    // (decision 1 and 11, 2026-09-15).
+    dispatcher: row('all', 'all', 'all', 'all'),
+    // the AMC behind his job; read only — the job itself carries the link.
+    technician: row('assigned', 'none', 'none', 'none'),
+    sales_rep: row('none', 'none', 'none', 'none'), // reps have no part in AMCs (decision 10)
   },
   'contract.money': {
     owner: row('all', 'all', 'all', 'all'),
-    dispatcher: row('none', 'none', 'none', 'none'), // v_contract_visits_dispatcher has no value column
+    dispatcher: row('all', 'all', 'all', 'all'), // the price is his by decision (2026-09-15)
     technician: row('none', 'none', 'none', 'none'),
-    sales_rep: row('own', 'own', 'own', 'none'), // reads the value of what he sold
+    sales_rep: row('none', 'none', 'none', 'none'),
   },
   sale: {
     owner: row('all', 'all', 'all', 'all'), // full, incl. void
@@ -201,10 +202,11 @@ describe('matrix cases the task brief names', () => {
     assert.equal(permit('sales_rep', 'company', 'read'), 'own');
   });
 
-  it('both money splits stay split — dispatcher reads contract context, never value', () => {
+  it('job revenue stays hidden from the dispatcher; the AMC price is his (decision 2026-09-15)', () => {
     assert.equal(permit('dispatcher', 'job.money', 'read'), 'none');
-    assert.equal(permit('dispatcher', 'contract.money', 'read'), 'none');
-    assert.equal(permit('dispatcher', 'contract', 'read'), 'all');
+    assert.equal(permit('dispatcher', 'contract.money', 'read'), 'all');
+    assert.equal(permit('technician', 'contract.money', 'read'), 'none');
+    assert.equal(permit('sales_rep', 'contract', 'read'), 'none');
   });
 
   it('both location splits stay split — dispatcher gets health, never position', () => {

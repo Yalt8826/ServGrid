@@ -160,3 +160,20 @@ export async function ownerLocationEnabled(request: FastifyRequest): Promise<voi
     throw new AppError('FLAG_DISABLED', OWNER_LOCATION_DISABLED_MESSAGE);
   }
 }
+
+/**
+ * `contracts.manage` — the AMC surface (PHASE-2B-CONTRACTS.md T2B.2): the
+ * contract list, detail, create, edit and cancel. Dispatcher and owner are
+ * the only roles on it, so the gate asks the flag of EVERY caller, after
+ * the matrix gate — flipping it off darkens the AMC tab for everyone,
+ * which is the phase's T0 rollback. Jobs already linked stay ordinary jobs.
+ */
+export const CONTRACTS_DISABLED_MESSAGE = 'AMC contracts are switched off for your account.';
+
+export async function contractsManageEnabled(request: FastifyRequest): Promise<void> {
+  const auth = request.auth;
+  if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  if (!(await isFlagOn(auth.sub, 'contracts.manage'))) {
+    throw new AppError('FLAG_DISABLED', CONTRACTS_DISABLED_MESSAGE);
+  }
+}

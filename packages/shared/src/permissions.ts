@@ -15,9 +15,12 @@ export type Role = (typeof ROLES)[number];
  * The `Resource` union from PLAN-BACKEND.md §5. Both money splits and both
  * location splits are load-bearing — do not collapse either pair:
  *
- * - `job.money` / `contract.money` — revenue is guarded wherever it lives,
- *   not only in `job_completions`; the dispatcher guarantee covers
- *   `service_contracts.contract_value` too.
+ * - `job.money` / `contract.money` — both money splits stay split, but the
+ *   guarantee moved with the owner's decision of 2026-09-15: job revenue
+ *   (`job_completions`) is guarded wherever it lives and no dispatcher ever
+ *   reads it; the AMC price (`contract_value`) is a figure the dispatcher
+ *   himself negotiates and types in, and technicians and reps hold none of
+ *   `contract.money`.
  * - `location.read` / `location.health` — *where someone is* (owner alone)
  *   is not *whether the device is reporting* (dispatcher's roster warning,
  *   no coordinates in it). Without the split the choice was a live map of
@@ -69,8 +72,8 @@ export const SCOPES = ['all', 'own', 'assigned', 'none'] as const satisfies read
  * | customer          | read (assigned only)              | create/read/update    | —                                  | full             |
  * | customer.stack    | update                            | —                     | —                                  | full             |
  * | company           | —                                 | none                  | own accounts + house accounts      | full             |
- * | contract          | visit context, resched/spend      | context, dates/skip   | contracts he sold                  | full             |
- * | contract.money    | —                                 | none                  | —                                  | full             |
+ * | contract          | the AMC behind his job (read)     | records, edits, renews, cancels | —             | full             |
+ * | contract.money    | —                                 | the price is his      | —                                  | full             |
  * | sale              | —                                 | —                     | own                                | full             |
  * | payment           | —                                 | —                     | own                                | full             |
  * | cash.declare      | declares own                      | —                     | declares own                       | confirm/reopen   |
@@ -127,8 +130,8 @@ const MATRIX: Readonly<Record<Role, Readonly<Record<Resource, Record<Action, Sco
     customer: cell('all', 'all', 'all', 'none'), // create/read/update; company_id stripped server-side
     'customer.stack': cell('none', 'none', 'none', 'none'),
     company: cell('none', 'none', 'none', 'none'), // no company permission at all (PLAN.md §5)
-    contract: cell('all', 'none', 'all', 'none'), // context + due dates + skips, via v_contract_visits_dispatcher
-    'contract.money': cell('none', 'none', 'none', 'none'), // that view has no value column
+    contract: cell('all', 'all', 'all', 'all'), // records, edits, renews and cancels AMCs (decision 2026-09-15)
+    'contract.money': cell('all', 'all', 'all', 'all'), // the price is his by decision (2026-09-15)
     sale: cell('none', 'none', 'none', 'none'),
     payment: cell('none', 'none', 'none', 'none'),
     'cash.declare': cell('none', 'none', 'none', 'none'),
@@ -146,7 +149,7 @@ const MATRIX: Readonly<Record<Role, Readonly<Record<Resource, Record<Action, Sco
     customer: cell('assigned', 'none', 'none', 'none'), // read, assigned only — through a job
     'customer.stack': cell('none', 'none', 'assigned', 'assigned'), // at sites he has/had a job for
     company: cell('none', 'none', 'none', 'none'),
-    contract: cell('assigned', 'none', 'assigned', 'none'), // the contract behind his visit
+    contract: cell('assigned', 'none', 'none', 'none'), // the AMC behind his job (read only; the job carries it — T2B.3)
     'contract.money': cell('none', 'none', 'none', 'none'),
     sale: cell('none', 'none', 'none', 'none'),
     payment: cell('none', 'none', 'none', 'none'),
@@ -165,8 +168,8 @@ const MATRIX: Readonly<Record<Role, Readonly<Record<Resource, Record<Action, Sco
     customer: cell('none', 'none', 'none', 'none'),
     'customer.stack': cell('none', 'none', 'none', 'none'),
     company: cell('own', 'own', 'own', 'none'), // owner_rep_id = actor OR owner_rep_id IS NULL (G3); create sets owner_rep_id = creator
-    contract: cell('own', 'own', 'own', 'none'), // contracts he sold — scoped by sold_by (§11.1)
-    'contract.money': cell('own', 'own', 'own', 'none'), // reads the value of what he sold
+    contract: cell('none', 'none', 'none', 'none'), // reps have no part in AMCs (decision 10, 2026-09-15)
+    'contract.money': cell('none', 'none', 'none', 'none'),
     sale: cell('own', 'own', 'own', 'none'), // own sales; owner voids
     payment: cell('own', 'own', 'own', 'none'), // own payments; owner voids
     'cash.declare': cell('own', 'own', 'own', 'none'), // reps declare too (PLAN-GAPS G2)

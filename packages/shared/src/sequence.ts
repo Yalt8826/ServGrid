@@ -6,13 +6,13 @@
  * prefix live in the `sequences` scope key (`job:2627`, `sale:2627`,
  * `payment:2627`, `contract:2627`).
  *
- * Drafts carry no number by design: `sales_cards.sale_number` and
- * `service_contracts.contract_number` are NULL while draft (§3.5, §3.10),
- * so `parseBusinessNumber` accepts `null`/`undefined` — absence is the
- * draft state, not a parse failure.
+ * Drafts carry no number by design: `sales_cards.sale_number` is NULL
+ * while draft (§3.5), so `parseBusinessNumber` accepts `null`/`undefined`
+ * — absence is the draft state, not a parse failure. (An AMC number is
+ * different: migration 015 allocates it at CREATE — there is no draft.)
  */
 
-export const NUMBER_PREFIXES = ['JC', 'SL', 'PM', 'CT'] as const;
+export const NUMBER_PREFIXES = ['JC', 'SL', 'PM', 'AMC'] as const;
 export type NumberPrefix = (typeof NUMBER_PREFIXES)[number];
 
 export const SEQUENCE_SCOPES = ['job', 'sale', 'payment', 'contract'] as const;
@@ -24,7 +24,7 @@ const PREFIX_BY_SCOPE: Readonly<Record<SequenceScope, NumberPrefix>> = {
   job: 'JC',
   sale: 'SL',
   payment: 'PM',
-  contract: 'CT',
+  contract: 'AMC',
 };
 
 export function prefixForScope(scope: SequenceScope): NumberPrefix {
@@ -54,7 +54,7 @@ export function formatFiscalYear(fiscalYear: number): string {
   return `${start}${end}`;
 }
 
-const NUMBER_RE = /^(JC|SL|PM|CT)-(\d{4})-(\d{5,})$/;
+const NUMBER_RE = /^(JC|SL|PM|AMC)-(\d{4})-(\d{5,})$/;
 
 /** Parsed parts of a business number. `value` is not zero-padded. */
 export interface ParsedBusinessNumber {

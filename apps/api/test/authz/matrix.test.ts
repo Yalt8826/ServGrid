@@ -95,6 +95,8 @@ let matrixProductId = '';
 let matrixServiceRowId = '';
 /** A company the matrix sales_rep OWNS — the row-scoped company probes' target (T3.2). */
 let matrixCompanyId = '';
+/** An AMC over the matrix customer — the contract detail probe's target (T2B.2). */
+let matrixContractId = '';
 /** An attachment on the matrix technician's job, for the GET probe. */
 let matrixAttachmentId = '';
 /** A locate-now request by the matrix owner, for the GET probe (T4.4). */
@@ -194,6 +196,32 @@ async function seedJobUnassigned(): Promise<string> {
     `INSERT INTO job_cards (job_number, customer_id, service_id, title, status)
      VALUES ($1, $2, $3, 'Matrix probe job', 'unassigned') RETURNING id`,
     [`JC-T10-${randomBytes(4).toString('hex')}`, customerId, serviceId],
+  );
+  return r.rows[0]!.id;
+}
+
+/** The plain `YYYY-MM-DD` IST business date `offsetDays` from today — what a date column takes. */
+function istDate(offsetDays: number): string {
+  return new Date(Date.now() + offsetDays * 86_400_000 + 5.5 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * A fresh site and its AMC at version 1 — the contract PATCH and cancel
+ * probes' per-probe target (T2B.2). One site per probe, so the
+ * one-AMC-per-site rule never refuses the probe pair, and the If-Match is
+ * always current.
+ */
+async function seedMatrixContract(): Promise<string> {
+  const siteId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO customers (name, phone) VALUES ($1, '9840000002') RETURNING id`,
+      [`Matrix T10 AMC site ${randomBytes(4).toString('hex')}`],
+    )
+  ).rows[0]!.id;
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO service_contracts (contract_number, customer_id, start_date, end_date, contract_value, created_by)
+     VALUES ($1, $2, business_date(now()) - 10, business_date(now()) + 355, '12000.00', $3) RETURNING id`,
+    [`AMC-T10-${randomBytes(4).toString('hex')}`, siteId, selfIds.owner],
   );
   return r.rows[0]!.id;
 }
@@ -313,6 +341,11 @@ const CUSTOMER_WRITERS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sal
 /** §6.4/PLAN.md §5: the stack is written by the owner and, at a site he has or has had a job
  * for, by the technician — a dispatcher holds none of the `customer.stack` cell at all. */
 const STACK_WRITERS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** §11.1 (T2B.2): the AMC surface is the office's — dispatcher and owner, via `requireAll`
+ * (the technician's `assigned` read is carried inline by his own job, T2B.3; a rep holds
+ * none of the cell). `contracts.manage` gates every caller and rides enabled for the two
+ * office roles (seeded below). */
+const CONTRACT_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.4: the catalogue (products, services) is read by everyone — the completion form and the sales picker both need it. */
 const CATALOG_READERS = { ...ALL_ROLES_OK, anon: UNAUTHENTICATED } as const;
 
@@ -1561,6 +1594,89 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/contracts',
+    method: 'GET',
+    url: '/v1/contracts',
+    // §11.1 (T2B.2): the AMC tab's list — the office's surface. The
+    // matrix dispatcher's and owner's OK requires `contracts.manage`
+    // (enabled for them above); the technician's `assigned` read never
+    // reaches this endpoint at all (`requireAll`), which is the row's
+    // point: his AMC context rides on his own job (T2B.3).
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/contracts', headers: bearer(actor) }),
+    expect: CONTRACT_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ items: unknown[] }>().items)).toBe(true);
+    },
+  },
+  {
+    name: 'GET /v1/contracts/:id',
+    method: 'GET',
+    url: '/v1/contracts/:id',
+    probe: (actor) => app.inject({ method: 'GET', url: `/v1/contracts/${matrixContractId}`, headers: bearer(actor) }),
+    expect: CONTRACT_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ contract: { id: string } }>().contract.id).toBe(matrixContractId);
+    },
+  },
+  {
+    name: 'POST /v1/contracts',
+    method: 'POST',
+    url: '/v1/contracts',
+    // §11.1 (T2B.2): each allowed probe records its own site, so the
+    // one-AMC-per-site rule never refuses the probe pair.
+    probe: async (actor) => {
+      const siteId = (
+        await db.query<{ id: string }>(
+          `INSERT INTO customers (name, phone) VALUES ($1, '9840000002') RETURNING id`,
+          [`Matrix T10 AMC create site ${randomBytes(4).toString('hex')}`],
+        )
+      ).rows[0]!.id;
+      return app.inject({
+        method: 'POST',
+        url: '/v1/contracts',
+        headers: bearer(actor),
+        payload: { customerId: siteId, startDate: istDate(0), endDate: istDate(364), contractValue: '18000.00' },
+      });
+    },
+    expect: CONTRACT_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ contractNumber: string }>().contractNumber).toMatch(/^AMC-\d{4}-\d{5}$/);
+    },
+  },
+  {
+    name: 'PATCH /v1/contracts/:id',
+    method: 'PATCH',
+    url: '/v1/contracts/:id',
+    // §11.1 (T2B.2): a fresh AMC per probe keeps the If-Match current.
+    probe: async (actor) => {
+      const id = await seedMatrixContract();
+      return app.inject({
+        method: 'PATCH',
+        url: `/v1/contracts/${id}`,
+        headers: { ...bearer(actor), 'if-match': '1' },
+        payload: { notes: 'Matrix probe AMC edit.' },
+      });
+    },
+    expect: CONTRACT_ACTORS,
+  },
+  {
+    name: 'POST /v1/contracts/:id/cancel',
+    method: 'POST',
+    url: '/v1/contracts/:id/cancel',
+    // §11.1 (T2B.2): repeatable per actor — every probe cancels its own
+    // fresh AMC.
+    probe: async (actor) => {
+      const id = await seedMatrixContract();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/contracts/${id}/cancel`,
+        headers: bearer(actor),
+        payload: { reason: 'Matrix probe cancel.' },
+      });
+    },
+    expect: CONTRACT_ACTORS,
+  },
+  {
     name: 'GET /v1/sales',
     method: 'GET',
     url: '/v1/sales',
@@ -1957,6 +2073,16 @@ beforeAll(async () => {
      SELECT id, 'owner.location', true FROM employees WHERE role = 'owner'`,
   );
 
+  // Same for the AMC surface (T2B.2): the contract probes exercise ROLE
+  // authorization (`requireAll` — dispatcher and owner only), so the two
+  // office roles ride with `contracts.manage` enabled — the flag's own
+  // switchable behaviour is test/authz/contracts.test.ts's and
+  // test/integration/contracts.test.ts's subject.
+  await db.query(
+    `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+     SELECT id, 'contracts.manage', true FROM employees WHERE role IN ('owner', 'dispatcher')`,
+  );
+
   // The jobs-endpoint probes need a real job (migration 007) assigned to
   // the matrix technician.
   customerId = (
@@ -1978,6 +2104,16 @@ beforeAll(async () => {
     await db.query<{ id: string }>(
       `INSERT INTO companies (name, owner_rep_id) VALUES ($1, $2) RETURNING id`,
       [`Matrix T10 Account ${randomBytes(3).toString('hex')}`, selfIds.sales_rep],
+    )
+  ).rows[0]!.id;
+
+  // The contract probes (T2B.2) need an AMC to read: the matrix
+  // customer's own, recorded by the owner.
+  matrixContractId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO service_contracts (contract_number, customer_id, start_date, end_date, contract_value, created_by)
+       VALUES ($1, $2, business_date(now()) - 10, business_date(now()) + 355, '18000.00', $3) RETURNING id`,
+      [`AMC-T10-${randomBytes(4).toString('hex')}`, customerId, selfIds.owner],
     )
   ).rows[0]!.id;
 
