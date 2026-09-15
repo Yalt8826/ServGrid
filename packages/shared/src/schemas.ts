@@ -1244,6 +1244,15 @@ export const syncWorkingSetSchema = z
   .strict();
 export type SyncWorkingSet = z.infer<typeof syncWorkingSetSchema>;
 
+/**
+ * `GET /v1/technician/work` — the technician's working set, read online
+ * (PLAN-BACKEND.md §7, decision 2026-09-15). The same five collections the
+ * mirror carried, with no cursor: nothing is stored on the handset to
+ * catch up. The `sync*` exports around it go with the mobile mirror (TON.2).
+ */
+export const technicianWorkResponseSchema = syncWorkingSetSchema;
+export type TechnicianWork = SyncWorkingSet;
+
 /** `GET /v1/sync/bootstrap` — the cold-start set plus the cursor to delta from. */
 export const syncBootstrapResponseSchema = z
   .object({

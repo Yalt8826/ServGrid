@@ -5,11 +5,9 @@ import sharp from 'sharp';
 import type { FastifyInstance } from 'fastify';
 import {
   PaymentSchema,
-  syncBatchResponseSchema,
   type ErrorEnvelope,
   type LoginResponse,
   type PaymentRecord,
-  type SyncOperation,
 } from '@servgrid/shared';
 import { loadConfig, type Config } from '../../src/config.js';
 import { closePool } from '../../src/db/pool.js';
@@ -37,11 +35,11 @@ import { ULID, validEnv } from '../helpers/env.js';
  * - **A rep sees his own payments and not the other rep's, including for
  *   a house account** — `own` on payment is `received_by`, deliberately
  *   stricter than `own` on company.
- * - **The proof photo drains after its parent payment, across the two
- *   drain passes** — pass 1 resolves the payment through the JSON batch,
- *   pass 2 uploads the photo to /v1/attachments against the parent that
- *   only exists because pass 1 applied. (The on-device Maestro flow is
- *   T3.7's; this suite proves the server half on the real stack.)
+ * - **The proof photo uploads after its parent payment** — the app
+ *   creates the payment, then uploads the photo to /v1/attachments
+ *   against the parent it just got back; a refused payment leaves nothing
+ *   to attach to. (Online-only since 2026-09-15: the two calls are made
+ *   directly, one after the other, not drained from an outbox.)
  */
 
 function databaseUrl(): string {
@@ -98,8 +96,7 @@ async function seedEmployee(role: 'owner' | 'sales_rep' | 'dispatcher', who: Act
   for (const flag of flags) {
     // The task's T0 rollback tier ships dark: the suite turns the flags on
     // for the people on the surface, the way the owner's flip would — the
-    // flag mechanics themselves are flags.test.ts's subject. `tech.offline`
-    // lights the sync batch, the drain's pass 1, for the proof-photo story.
+    // flag mechanics themselves are flags.test.ts's subject.
     await db.query(`INSERT INTO employee_flag_overrides (employee_id, flag, enabled) VALUES ($1, $2, true)`, [
       who.id,
       flag,
@@ -229,21 +226,7 @@ async function newCompany(): Promise<string> {
   return createCompany(REP_A, `Integr Payments ${randomBytes(3).toString('hex')}`);
 }
 
-// ── the drain (§7) and the proof photo (§9) ─────────────────────────────────
-
-/** One queued outbox operation — a uuid key generated once at enqueue, kept across retries. */
-function op(localId: string, path: string, body: Record<string, unknown>, extra: Partial<SyncOperation> = {}): SyncOperation {
-  return { localId, idempotencyKey: randomUUID(), method: 'POST', path, body, ...extra };
-}
-
-function postBatch(actor: Actor, operations: SyncOperation[]) {
-  return app.inject({
-    method: 'POST',
-    url: '/v1/sync/batch',
-    headers: { ...bearer(actor), 'x-client-source': 'mobile' },
-    payload: { operations },
-  });
-}
+// ── the proof photo (§9) ────────────────────────────────────────────────────
 
 function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -335,7 +318,7 @@ beforeAll(async () => {
   // The reps carry `sales.cards` too: the fixtures confirm real sales
   // through the API so the payment stories settle against live balances —
   // T3.3's surface, not this task's subject.
-  await seedEmployee('sales_rep', REP_A, ['sales.payments', 'sales.cards', 'tech.offline']);
+  await seedEmployee('sales_rep', REP_A, ['sales.payments', 'sales.cards']);
   await seedEmployee('sales_rep', REP_B, ['sales.payments', 'sales.cards']);
   await seedEmployee('sales_rep', REP_NO_FLAG, []); // the flag-off probe
 
@@ -712,41 +695,27 @@ describe('a rep sees his own payments and not the other rep’s — even on a ho
   });
 });
 
-describe('the proof photo drains after its parent payment — the two passes', () => {
+describe('the proof photo uploads after its parent payment', () => {
   /**
-   * The device queues ONE payment op and ONE proof photo whose outbox row
-   * `dependsOn` it (§11). The drain runs two passes: the JSON batch
-   * resolves the parent, then the binary pass uploads the photo. This
-   * suite drives both passes through the real stack — the batch door and
-   * the attachments door — because what must be proven is exactly what a
-   * mock cannot prove: the photo lands against a parent that only exists
-   * because pass 1 applied first.
+   * The app records ONE payment, then uploads its proof photo against the
+   * id the create returned (PLAN-FRONTEND.md §5). Both calls run through
+   * the real stack — the payments door and the attachments door — because
+   * what must be proven is that the photo lands against a parent that
+   * exists, and that only the collector may send or read it.
    */
-  it('pass 1: the payment op applies through the JSON batch and mints its number', async () => {
-    const res = await postBatch(REP_A, [
-      op('pay_1', '/v1/payments', {
-        companyId,
-        amount: '1200.00',
-        mode: 'cash',
-        receivedAt: '2026-09-12T19:00:00+05:30',
-      }),
-    ]);
-    expect(res.statusCode, res.body).toBe(200);
-    const results = syncBatchResponseSchema.parse(res.json()).results;
-    expect(results).toHaveLength(1);
-    expect(results[0]!.localId).toBe('pay_1');
-    expect(results[0]!.outcome).toBe('applied');
-    expect(results[0]!.status).toBe(200);
-
-    // The applied body IS the created payment — the drain re-ran the real
-    // handler, and the number was allocated inside it.
-    const payment = PaymentSchema.parse(results[0]!.body) as PaymentRecord;
-    expect(payment.paymentNumber).toMatch(/^PM-\d{4}-\d{5,}$/);
+  it('the payment is created first and mints its number', async () => {
+    const payment = await createPaymentOk(REP_A, {
+      companyId,
+      amount: '1200.00',
+      mode: 'cash',
+      receivedAt: '2026-09-12T19:00:00+05:30',
+    });
+    expect(PaymentSchema.parse(payment).paymentNumber).toMatch(/^PM-\d{4}-\d{5,}$/);
     expect(payment.receivedBy).toBe(REP_A.id);
   });
 
-  it('pass 2: the photo uploads to /v1/attachments AFTER its parent, and only the collector may send or read it', async () => {
-    // The parent, created moments ago through pass 1 (the describes above).
+  it('the photo uploads to /v1/attachments AFTER its parent, and only the collector may send or read it', async () => {
+    // The parent, created by the test just above.
     const parent = (await listPayments(OWNER)).find(
       (p) => p.receivedBy === REP_A.id && p.amount === '1200.00' && p.businessDate === '2026-09-12',
     );
@@ -801,38 +770,25 @@ describe('the proof photo drains after its parent payment — the two passes', (
     expect(errorOf(readOther.statusCode, readOther.body).code).toBe('OUT_OF_SCOPE');
   });
 
-  it('a rejected parent payment never gets its proof — the batch short-circuits the dependent op', async () => {
-    // The offline case that gives the ordering its point: the payment was
-    // queued against an account that the server refuses. The proof queued
-    // behind it must not be attempted.
-    const res = await postBatch(REP_A, [
-      op('bad_pay', '/v1/payments', {
-        companyId: randomUUID(), // no such account
-        amount: '300.00',
-        mode: 'cash',
-        receivedAt: '2026-09-12T19:30:00+05:30',
-      }),
-      op('proof_of_bad_pay', '/v1/payments', {
-        companyId,
-        amount: '1.00',
-        mode: 'cash',
-        receivedAt: '2026-09-12T19:31:00+05:30',
-      }, { dependsOn: 'bad_pay' }),
-    ]);
-    expect(res.statusCode, res.body).toBe(200);
-    const results = syncBatchResponseSchema.parse(res.json()).results;
-    expect(results[0]!.outcome).toBe('rejected');
-    expect(results[0]!.status).toBe(422);
-    expect(results[1]!.outcome).toBe('skipped');
-    expect(results[1]!.status).toBe(0); // never attempted — no HTTP call exists for it
-    expect(results[1]!.error?.code).toBe('PARENT_REJECTED');
+  it('a refused payment never gets a proof — there is no parent to attach it to', async () => {
+    // The create is refused at submit time (no such account), so the app
+    // has no id to upload against; a photo sent at a made-up id is refused
+    // too, and nothing is stored.
+    const refused = await createPayment(REP_A, {
+      companyId: randomUUID(), // no such account
+      amount: '300.00',
+      mode: 'cash',
+      receivedAt: '2026-09-12T19:30:00+05:30',
+    });
+    expect(refused.statusCode, refused.body).toBe(422);
 
-    // The real stack proof: neither payment exists, and no proof photo
-    // hangs off anything.
-    const rows = await db.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM payments WHERE company_id = $1 AND amount IN ('300.00','1.00')`,
-      [companyId],
+    const orphan = await uploadProof(REP_A, randomUUID(), await pngBytes());
+    expect(orphan.statusCode, orphan.body).toBeGreaterThanOrEqual(400);
+
+    const payments = await db.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM payments WHERE amount = '300.00' AND received_by = $1`,
+      [REP_A.id],
     );
-    expect(rows.rows[0]!.n).toBe('0');
+    expect(payments.rows[0]!.n).toBe('0');
   });
 });

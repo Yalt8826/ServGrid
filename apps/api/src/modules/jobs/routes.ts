@@ -249,6 +249,8 @@ export const jobsRoutes: FastifyPluginAsync<{ workWindow: WorkWindow }> = async 
         responseSchemaByRole: {
           owner: jobTimelineOwnerResponseSchema,
           dispatcher: jobTimelineDispatcherResponseSchema,
+          // His own job only, redacted like the desk's (service.ts).
+          technician: jobTimelineDispatcherResponseSchema,
         },
       },
     },

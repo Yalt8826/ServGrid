@@ -300,20 +300,8 @@ const CANCEL_ACTORS = { owner: OK, dispatcher: OK, technician: OK, sales_rep: FO
 const RESCHEDULE_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §6.3 (T2.3): assignment and bulk reassign are "dispatcher, owner" — the `job.assign` cell, which a technician and a rep do not hold. */
 const ASSIGN_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
-/** §7 (T1.8): the sync read doors are the technician handset's — Phase 1 builds his working set, the
- * sales-rep mirror arrives with the sales module, and dispatcher/owner work online by design. */
-const SYNC_ACTORS = { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
-/** §7 (T3.2): the BATCH is the field handsets' drain — it re-runs the caller's own queued ops
- * through each route's own rbac, so the rep drains offline company work here. A rep the owner has
- * not switched the offline tier on for is refused by the FLAG (the T0 rollback, 409), not by the
- * role gate; dispatcher/owner have no offline door at all. */
-const SYNC_BATCH_ACTORS = {
-  owner: FORBIDDEN,
-  dispatcher: FORBIDDEN,
-  technician: OK,
-  sales_rep: { status: 409, code: 'FLAG_DISABLED' } as Expectation,
-  anon: UNAUTHENTICATED,
-} as const;
+/** §7 (TON.1): the work read is the technician's own list — the office reads the job list instead. */
+const TECHNICIAN_WORK_ACTORS = { owner: FORBIDDEN, dispatcher: FORBIDDEN, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
 /** §11/PLAN.md §5: the rep works his accounts plus the house accounts (`own` on company), the
  * owner sees all — a dispatcher holds no company cell at all, a technician neither. */
 const COMPANY_ACTORS = { owner: OK, dispatcher: FORBIDDEN, technician: FORBIDDEN, sales_rep: OK, anon: UNAUTHENTICATED } as const;
@@ -586,16 +574,16 @@ const ENDPOINTS: EndpointRow[] = [
     name: 'GET /v1/jobs/:id/events',
     method: 'GET',
     url: '/v1/jobs/:id/events',
-    // The timeline (§6.3, T4.11): "dispatcher, owner" like the summary —
-    // a technician reads his trail from his mirror, a sales rep holds no
-    // job read at all. The dispatcher's answer is the SMALLER schema (no
-    // completion block), so the probe asserts its absence by role.
+    // The timeline (§6.3, T4.11, TON.1): the office reads every job's; the
+    // technician reads his OWN job's (matrixJobId is his), in the
+    // dispatcher's redacted shape; a sales rep holds no job read at all.
+    // Both smaller answers carry no completion block, asserted by role.
     probe: (actor) => app.inject({ method: 'GET', url: `/v1/jobs/${matrixJobId}/events`, headers: bearer(actor) }),
-    expect: { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    expect: { owner: OK, dispatcher: OK, technician: OK, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
     assertOk: (actor, res) => {
       const body = res.json<{ events: unknown[]; completion?: unknown }>();
       expect(Array.isArray(body.events)).toBe(true);
-      if (actor === 'dispatcher') expect(body).not.toHaveProperty('completion');
+      if (actor === 'dispatcher' || actor === 'technician') expect(body).not.toHaveProperty('completion');
     },
   },
   {
@@ -1056,57 +1044,19 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
-    name: 'GET /v1/sync/bootstrap',
+    name: 'GET /v1/technician/work',
     method: 'GET',
-    url: '/v1/sync/bootstrap',
-    // §7 (T1.8): the cold-start working set, the technician's alone — his
-    // jobs and the customers they touch, never another role's surface. A
-    // 200 is the five-collection envelope with a cursor on it.
-    probe: (actor) => app.inject({ method: 'GET', url: '/v1/sync/bootstrap', headers: bearer(actor) }),
-    expect: SYNC_ACTORS,
+    url: '/v1/technician/work',
+    // §7 (TON.1): the technician's working set, read online — his jobs,
+    // the sites they are at, the units there and the catalogue. No cursor:
+    // nothing is stored on the handset to catch up.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/technician/work', headers: bearer(actor) }),
+    expect: TECHNICIAN_WORK_ACTORS,
     assertOk: (_actor, res) => {
-      const body = res.json<{ data: { jobs: unknown[] }; cursor: string }>();
-      expect(Array.isArray(body.data.jobs)).toBe(true);
-      expect(body.cursor).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
-    },
-  },
-  {
-    name: 'GET /v1/sync/delta',
-    method: 'GET',
-    url: '/v1/sync/delta',
-    // §7 (T1.8): the catch-up door. The probe sends an old-but-well-formed
-    // cursor so the technician's 200 proves the envelope, not a 422 — a
-    // cursor that never moved delivers an empty page, which IS the answer.
-    probe: (actor) =>
-      app.inject({
-        method: 'GET',
-        url: '/v1/sync/delta?cursor=2026-01-01T00%3A00%3A00.000000Z',
-        headers: bearer(actor),
-      }),
-    expect: SYNC_ACTORS,
-    assertOk: (_actor, res) => {
-      const body = res.json<{ data: { jobs: unknown[] }; tombstones: unknown[]; hasMore: boolean }>();
-      expect(Array.isArray(body.data.jobs)).toBe(true);
-      expect(Array.isArray(body.tombstones)).toBe(true);
-      expect(typeof body.hasMore).toBe('boolean');
-    },
-  },
-  {
-    name: 'POST /v1/sync/batch',
-    method: 'POST',
-    url: '/v1/sync/batch',
-    // §7 (T1.8, rep door T3.2): the outbox drain. An empty queue is a
-    // well-formed envelope and always HTTP 200 with a cursor, whatever the
-    // actor could have queued — the role gate refuses dispatcher/owner,
-    // and a rep without the offline flag meets the T0 rollback (409), not
-    // the role gate.
-    probe: (actor) =>
-      app.inject({ method: 'POST', url: '/v1/sync/batch', headers: bearer(actor), payload: { operations: [] } }),
-    expect: SYNC_BATCH_ACTORS,
-    assertOk: (_actor, res) => {
-      const body = res.json<{ results: unknown[]; cursor: string }>();
-      expect(Array.isArray(body.results)).toBe(true);
-      expect(body.cursor).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
+      const body = res.json<{ jobs: unknown[]; customers: unknown[]; products: unknown[] }>();
+      expect(Array.isArray(body.jobs)).toBe(true);
+      expect(Array.isArray(body.customers)).toBe(true);
+      expect(body).not.toHaveProperty('cursor');
     },
   },
   {
@@ -1917,13 +1867,13 @@ beforeAll(async () => {
   }
   subject = await seedEmployee('technician');
 
-  // The offline tier ships dark (PLAN-EXECUTION.md §3); the sync-door
-  // probes exercise ROLE authorization, so the matrix technician's sync
-  // flag is enabled directly — the flag's own behavior is
-  // integration/flags.test.ts's subject.
+  // The technician's job screens ship dark (PLAN-EXECUTION.md §3); the
+  // work-read probe exercises ROLE authorization, so the matrix
+  // technician's `tech.jobs` flag is enabled directly — the flag's own
+  // behavior is integration/flags.test.ts's subject.
   await db.query(
     `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
-     SELECT id, 'tech.offline', true FROM employees WHERE username = $1`,
+     SELECT id, 'tech.jobs', true FROM employees WHERE username = $1`,
     [usernames.technician],
   );
 

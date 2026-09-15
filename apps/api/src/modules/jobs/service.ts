@@ -85,7 +85,7 @@ export const ASSIGN_ACTORS_MESSAGE = 'A job is assigned by the office — the di
 /** T2.7 (§D1): the summary figures are an all-rows console read — "dispatcher, owner"; a technician's `assigned` scope counts his own day, not the desk's. */
 export const SUMMARY_ACTORS_MESSAGE = 'The dashboard figures are read by the office — the field app has its own screens.';
 /** §6.3: the timeline is "dispatcher, owner" — the technician reads his own trail from the mirror; a rep holds no job read at all. */
-export const TIMELINE_ACTORS_MESSAGE = 'The job timeline is read by the office — the field app reads its own mirror.';
+export const TIMELINE_ACTORS_MESSAGE = 'The job timeline is read by the office and by the technician on the job.';
 /** §6.3: the picker names a technician; anything else on that cell is a form error, not a 404. */
 const NOT_A_TECHNICIAN_MESSAGE = 'Pick a technician from the roster — that account is not an active technician.';
 /** §6.3: a stale version on a job with nobody on it has no name to give — the sentence stays actionable anyway. */
@@ -437,6 +437,12 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
    *   like every dispatcher-reachable one, so the redaction happens here
    *   in the service, not in a schema someone could forget to attach.
    *
+   * - **technician** — his own job only (the `job` × `read` `own` cell,
+   *   the same predicate `getJobCard` applies), in the dispatcher's
+   *   redacted shape: his `job.money` read cell is `none`. This replaced
+   *   the timeline the app used to fold out of its own outbox
+   *   (decision 2026-09-15, online-only).
+   *
    * The dispatcher's existence check runs against the view (§5 rule 2)
    * before anything else is read, so a missing job is 404 in the same
    * shape `getJobCard` answers with.
@@ -445,7 +451,7 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
     actor: Actor,
     jobId: string,
   ): Promise<JobTimelineDispatcherResponse | JobTimelineOwnerResponse> {
-    if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+    if (actor.role !== 'dispatcher' && actor.role !== 'owner' && actor.role !== 'technician') {
       throw new AppError('FORBIDDEN', TIMELINE_ACTORS_MESSAGE);
     }
 
@@ -472,6 +478,18 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
       const card = await dispatcherRepo.findDispatcherCard(getPool(), jobId);
       if (card === null) {
         throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+      }
+      const rows = await repo.listTimelineEvents(getPool(), jobId);
+      return { events: rows.map((row) => eventOf(row, true)) };
+    }
+
+    if (actor.role === 'technician') {
+      const card = await repo.findCard(getPool(), 'technician', jobId);
+      if (card === null) {
+        throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
+      }
+      if ((card as repo.TechnicianCardRow).assigned_to !== actor.id) {
+        throw new AppError('OUT_OF_SCOPE', OUT_OF_SCOPE_MESSAGE);
       }
       const rows = await repo.listTimelineEvents(getPool(), jobId);
       return { events: rows.map((row) => eventOf(row, true)) };
