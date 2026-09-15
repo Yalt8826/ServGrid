@@ -197,7 +197,8 @@ When two tasks must share a file, the later one depends on the earlier — that 
 | 0 | `PHASE-0-FOUNDATION.md` | M | ~3 wks | none |
 | 1 | `PHASE-1-TECHNICIAN.md` | XL | ~7 wks | Phase 0 exit met |
 | 2 | `PHASE-2-DISPATCHER.md` | M | ~4 wks | Job Logs 5-second prototype passed; FCM proven |
-| 2B | `PHASE-2B-CONTRACTS.md` | M | ~4 wks | Phase 2 exit met |
+| ON | `PHASE-ON-ONLINE.md` | M | ~2 wks | Owner decisions of 2026-09-15 (`../decisions/2026-09-15-online-only.md`) — **runs before 2B** |
+| 2B | `PHASE-2B-CONTRACTS.md` | M | ~4 wks | Phase 2 exit met; **Phase ON merged** |
 | 3 | `PHASE-3-SALES-REP.md` | M | ~4 wks | Phase 1 exit met; rep account split agreed |
 | 4 | `PHASE-4-OWNER.md` | L | ~6 wks | Map tile source decided; RNW spike on day 3 |
 | 5 | `PHASE-5-HARDENING.md` | M | ~4 wks | Phases 1–4 cut over; handsets available |
@@ -213,8 +214,8 @@ The go/no-go gates in `PLAN-EXECUTION.md` Part III are not advisory. Two of them
 Every task is checked against these. They are the promises the architecture exists to keep, and each has a CI assertion behind it rather than a habit.
 
 1. **No dispatcher ever sees a revenue figure** — not from `job_completions`, not from `service_contracts`. Response-schema assertions, a lint rule, and optionally a database grant.
-2. **No path silently discards a technician's work** — not a logout, not a shared handset, not a rejected sync, not a scope change, not a 401 mid-drain.
+2. **No submit silently loses work** — a failed submit keeps everything typed, says what happened, and can be retried; a lost connection covers the screen without unmounting it. (Online-only since 2026-09-15; this was "no path silently discards a technician's work" when there was an outbox.)
 3. **Derived money is never stored** — company dues and expected cash are views. A stored counter is correct until the first edit, void or retried request.
-4. **Every mutation carries an idempotency key, generated once at enqueue** — regenerating on retry defeats the entire server-side guard and is the single easiest mistake in this codebase.
+4. **Every mutation carries an idempotency key, generated once per submit intent** — regenerating on retry defeats the entire server-side guard and is the single easiest mistake in this codebase.
 
 A task that would weaken one of these is wrong even if it passes its own tests. Say so in review rather than shipping it behind a flag.

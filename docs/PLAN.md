@@ -145,19 +145,23 @@ The cash precondition is the one that is easy to leave out and expensive to leav
 
 ---
 
-## 6. Offline sync — technicians and sales reps only
+## 6. Online-only — every role
 
-SQLite mirror of what the role needs in the field, plus an `outbox` table. User acts, writes locally, enqueues, UI updates immediately. The queue drains on reconnect, on foreground and on a timer.
+**Decided 2026-09-15** (`docs/decisions/2026-09-15-online-only.md`). Every role works online against the API, and **no business data is stored on a device**. This replaces the original design, which gave technicians and sales reps an offline SQLite mirror and an outbox.
 
-Conflicts resolve by last-write-wins on descriptive fields, but status transitions are validated server-side — you cannot complete a job the office cancelled while you were underground. On rejection the client keeps the local record and shows a plain banner explaining what happened. No silent overwrite in either direction.
+**What stays on a phone:** the login token, in secure storage, so people stay logged in; and unsent GPS pings in a small buffer (§7), so a technician in a basement still surfaces with his real trail. Nothing else — no copy of jobs, no queue of pending work, no cached lists on disk.
 
-Job and sale numbers are server-assigned; the device shows "Pending sync" until one arrives, never a fake local number. Photos queue as local file URIs and upload on reconnect. Nothing in the UI blocks on the network, and a pending-count badge stays visible so the technician can see work is queued rather than lost.
+**When the connection drops**, the app shows a full *"No connection"* screen over whatever was open, for every role. It is a cover, not a navigation: a half-typed completion or payment underneath is exactly as it was when the connection returns. That input lives in memory only; closing the app loses it, which the owner accepted.
 
-**Logging out never discards queued work.** Logout is blocked while anything is queued or in flight, reporting the count and offering a retry. If only rejected items remain, logout proceeds and those are kept, keyed to the employee, so they reappear when he logs back in on that handset. On a shared phone the mirror is cleared on user switch; the outbox is filtered, not wiped.
+**No submit silently loses work.** A submit that fails keeps everything typed, says what happened in plain words, and can be retried. Every submit carries an idempotency key minted once for that intent and reused on every retry, so a request that timed out after the server saved it replays the saved result instead of creating a second payment.
 
-**Assignment notifications.** The drain and delta sync fire on reconnect, on foreground and on a timer *while the app is active* — none of which run when the app is backgrounded. Without a push, a technician learns about an urgent job when he next opens the app. So the server sends a data-only FCM message on assignment, reassignment, cancellation of an assigned job, and priority escalation. It carries no job content: it wakes the device, which syncs and raises a local notification from the row it just received.
+Status transitions are still validated server-side — you cannot complete a job the office cancelled — but the refusal now arrives at the moment of submit, in front of the person, instead of on a later sync. Job and sale numbers come back in the submit's response.
 
-**The system stays correct with every push dropped.** Push is a latency improvement over the existing sync triggers, never the transport. A technician who receives none still gets the job on next foreground. Keeping FCM off the correctness path is what makes it safe to depend on a delivery channel nobody controls.
+**Assignment notifications.** The server sends a data-only FCM message on assignment, reassignment, cancellation of an assigned job, and priority escalation. It carries no job content: it wakes the app, which refetches and raises a local notification from the rows it just fetched.
+
+**The system stays correct with every push dropped.** Push only makes a new job show up sooner; the next open or foreground refetches anyway. Keeping FCM off the correctness path is what makes it safe to depend on a delivery channel nobody controls.
+
+**Field staff use the Android app only.** Background GPS exists only there. The web build is for the owner and dispatchers; a technician or rep who signs in on web is told to use the phone app.
 
 ---
 
