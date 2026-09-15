@@ -47,7 +47,7 @@ import { istDateKey, type JobView } from './jobView';
 /** The product categories the sync contract carries (schemas.ts). */
 export type ProductCategory = 'ups' | 'battery' | 'inverter' | 'accessory' | 'spare';
 
-/** One catalogue row the parts picker offers. From the mirror's `products`. */
+/** One catalogue row the parts picker offers. From the work read's `products`. */
 export interface PartProduct {
   id: string;
   name: string;
@@ -82,10 +82,10 @@ export interface PartLine {
 
 /**
  * The payload the sheet builds — field names verbatim from
- * `jobCompleteSchema` (packages/shared/src/schemas.ts), which the batch
- * re-posts to `POST /v1/jobs/:id/completions`. Deliberately NO
+ * `jobCompleteSchema` (packages/shared/src/schemas.ts), which the route
+ * posts to `POST /v1/jobs/:id/complete`. Deliberately NO
  * `amountCollected` (generated server-side) and no photos (attachments
- * queue as their own outbox rows; §5).
+ * upload as their own requests after the completion; §5).
  */
 export interface CompleteSheetPayload {
   completedAt: string;

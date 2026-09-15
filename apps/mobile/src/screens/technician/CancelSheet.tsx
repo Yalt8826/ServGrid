@@ -30,12 +30,11 @@
  *   ordinary job is simply cancelled; a contract visit becomes
  *   `skipped`). Submit demands a reason — never a date.
  * - **Submit is never disabled for a network reason.** Like the complete
- *   sheet: the optimistic write + enqueue are the route's job (§5); a
- *   failed enqueue keeps the sheet open with everything he chose —
- *   never lose the record of a wasted trip.
+ *   sheet: the write is the route's job (§5); a failure keeps the sheet
+ *   open with everything he chose — never lose the record of a wasted trip.
  *
- * Pure UI over injected seams — the route owns the mirror write and the
- * enqueue, exactly like the complete route beside it.
+ * Pure UI over injected seams — the route owns the write to the server,
+ * exactly like the complete route beside it.
  */
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';

@@ -130,7 +130,22 @@ TON.8 map tiles (blocked on the owner's MapTiler key)
 **Done when**
 - [ ] `grep -ri "outbox\|pending sync\|PendingBadge" apps/mobile/src apps/mobile/app` finds only the decision-record reference in a comment, or nothing
 
+**Also removed while building:** the server's fourth deactivation precondition — a role change refused while an "undrained outbox operation" existed (`employees/service.ts`, `listUndrainedOperations`). With no outbox it only ever saw a request in flight; the owner's blocking-rows screen loses its `outbox` kind with it.
+
 **Commits** `chore(start): TON.4 remove offline remnants` → `refactor(mobile): remove pending-sync UI and outbox seams`
+
+---
+
+### TON.4b — Retire the design system's `stale` state
+
+**Depends on:** TON.4 · **Tier:** T1
+
+**Build** — the primitives (`Button`, `TextField`, `MoneyField`, `Select`, `DatePicker`, `Banner`, `EmptyState`, `MoneyFigure`) still accept `stale` and render the `Pending sync` caption from the `STALE` token; no screen sets it any more. Remove the prop, the caption and the gallery/test states, and keep the dashed inset only where it now means "a write is on its way" (`JobCard`, the job detail header). `UI/plan-2/03-COMPONENTS.md` loses the eighth state in TON.7.
+
+**Done when**
+- [ ] `grep -rn "Pending sync" apps/mobile/src apps/mobile/app` finds nothing
+
+**Commits** `chore(start): TON.4b retire stale state` → `refactor(mobile): retire the primitives' stale state`
 
 ---
 

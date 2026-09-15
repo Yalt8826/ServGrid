@@ -3,9 +3,8 @@
  * §S2 form over the pure `SaleFormScreen`: this file owns the reads (his
  * accounts + house for the company search, the catalogue for the product
  * picker) and the writes — draft create, then confirm, the move that
- * allocates the number and lifts the balance. Both run directly today,
- * like the cash-handover route's calls; the screen's seams make rewiring
- * to enqueue outbox rows a route-file change only. Gated on
+ * allocates the number and lifts the balance. Both run directly against
+ * the API, like every write in the app. Gated on
  * `sales.cards` — the same flag the sales surface answers to.
  */
 import { useEffect, useRef, useState } from 'react';

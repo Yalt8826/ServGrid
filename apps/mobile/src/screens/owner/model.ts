@@ -462,11 +462,10 @@ export function healthLabel(health: TrackingHealthWord | null): string {
 export type BlockingRow =
   | { kind: 'job'; id: string; jobNumber: string; title: string; status: string }
   | { kind: 'company'; id: string; name: string }
-  | { kind: 'cash'; id: string; businessDate: string; status: string; declaredAmount: string }
-  | { kind: 'outbox'; id: string; endpoint: string };
+  | { kind: 'cash'; id: string; businessDate: string; status: string; declaredAmount: string };
 
 /** Where each blocking row's link lands — the screen the reassignment
- * happens on. Outbox rows have no screen: they drain or they don't. */
+ * happens on. */
 export function blockingRowRoute(row: BlockingRow): string | null {
   switch (row.kind) {
     case 'job':
@@ -475,8 +474,6 @@ export function blockingRowRoute(row: BlockingRow): string | null {
       return `/companies/${row.id}`;
     case 'cash':
       return '/cash';
-    case 'outbox':
-      return null;
   }
 }
 
@@ -489,8 +486,6 @@ export function blockingRowLabel(row: BlockingRow): string {
       return row.name;
     case 'cash':
       return `Cash ${row.businessDate} · ${row.status}`;
-    case 'outbox':
-      return `Undrained · ${row.endpoint}`;
   }
 }
 
@@ -503,8 +498,6 @@ export function blockingRowSection(row: BlockingRow): string {
       return 'Owned accounts — reassign or make house accounts';
     case 'cash':
       return 'Unconfirmed cash — confirm or dispute';
-    case 'outbox':
-      return 'Undrained offline work';
   }
 }
 

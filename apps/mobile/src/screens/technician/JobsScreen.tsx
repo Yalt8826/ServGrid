@@ -5,8 +5,8 @@
  *
  * Sort (§T2): Today by `scheduled_for` ascending, **overdue first** (and
  * yesterday's unfinished carry-over rides in Today — work he must do
- * today is today's); Completed newest first, dated by the local
- * completion instant the outbox kept.
+ * today is today's); Completed newest first, dated by the server's
+ * `closedAt`.
  *
  * **A search field appears only when the tab holds more than 12 jobs** —
  * a technician with six does not need search, and an always-present
@@ -52,9 +52,9 @@ const STANDARD_EASING = easing(EASING.standard);
 const ENTER_EASING = easing(EASING.enter);
 
 export interface JobsDeps {
-  /** Every job in his mirror, joined to its customer — no fetch. */
+  /** His jobs from the server's work read, joined to their customers. */
   jobs: JobView[];
-  /** Job id → the instant its completion left this device (outbox). */
+  /** Job id → when the server closed a completed job. */
   completedAtById: Record<string, string>;
   /** Injectable clock — IST "today" is computed from it. */
   now: Date;

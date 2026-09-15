@@ -4,12 +4,10 @@
  * reassign them, and the screen hands him that work rather than
  * describing it — jobs link to the job, companies to the account whose
  * reassignment control lives on the owner's companies screens, cash to
- * the reconciliation queue. Only an undrained outbox row renders
- * unlinked, because there is no screen that drains it — the evidence
- * says wait.
+ * the reconciliation queue.
  *
- * The three deactivation conditions are the first three kinds; the
- * fourth (outbox) rides only on a role change out of an offline role.
+ * The three kinds are the three conditions that block a deactivation or
+ * a role change.
  */
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -30,7 +28,7 @@ export interface BlockingRowsProps {
 
 export function BlockingRows({ rows, onOpen, testID }: BlockingRowsProps): React.ReactNode {
   // Group by section, in first-appearance order — jobs, then accounts,
-  // then cash, then outbox, matching the server's collection order.
+  // then cash, matching the server's collection order.
   const sections: { title: string; rows: BlockingRow[] }[] = [];
   for (const row of rows) {
     const title = blockingRowSection(row);

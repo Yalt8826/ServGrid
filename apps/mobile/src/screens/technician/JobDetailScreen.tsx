@@ -9,18 +9,17 @@
  * expiry date and the word **prepaid** are the load-bearing parts), THE
  * UNIT with its serial, CONTACT with *Call* (dials) and *Navigate*
  * (deep-links `google.navigation:q=lat,lng` — there is no map in the
- * technician app), the description, and the timeline — collapsed, local
- * events with their `occurred_at` instants (see `jobDetail.ts` for why
- * the timeline reads this device's outbox). The thumb bar carries Cancel
- * and the one primary: the verb the job's status dictates.
+ * technician app), the description, and the timeline — collapsed, the
+ * job's trail from the server with its `occurred_at` instants. The thumb
+ * bar carries Cancel and the one primary: the verb the job's status
+ * dictates.
  *
- * States (§T3): **stale** — the dashed inset on the header and `Pending
- * sync` in place of the number, while the stepper still advances
- * locally. **Rejected** — the header keeps its real rail and a banner
- * pinned UNDER THE HEADER carries the server's `message` verbatim with
- * the two actions, *Discard my copy* and *View the office version*
- * (`PLAN-FRONTEND.md` §5). **Closed** — the thumb bar collapses to a
- * single `Completed 16:42` line. No revenue.
+ * States (§T3): **sending** — a status write is on its way: the dashed
+ * inset on the header and `Sending…` under the number. **Refused** — the
+ * header keeps its real rail and a banner pinned UNDER THE HEADER carries
+ * the server's `message` verbatim with one action, *Refresh*, which reads
+ * the job again (`PLAN-FRONTEND.md` §5). **Closed** — the thumb bar
+ * collapses to a single `Completed 16:42` line. No revenue.
  *
  * The hero beat (§5.1): when the job advances while the screen is open,
  * the stepper runs its 520ms choreography and the header's 4px rail
@@ -57,16 +56,16 @@ const STANDARD_EASING = easing(EASING.standard);
 
 export interface JobDetailDeps {
   view: JobView;
-  /** This device's events for the job, queued order (the local timeline). */
+  /** The job's trail from the server, in the order it was recorded. */
   events: readonly JobTimelineEntry[];
-  /** The instant this device queued the completion, when it did. */
+  /** When the server closed the job, once it has. */
   completedAt: string | null;
   onBack: () => void;
   /** Dials the contact (`tel:`) — no number, no call. */
   onCall: (view: JobView) => void;
   /** Deep-links `google.navigation:q=lat,lng`. */
   onNavigate: (view: JobView) => void;
-  /** The optimistic advance: *Start job* / *Arrive*. */
+  /** The advance: *Start job* / *Arrive*, written to the server. */
   onStartJob: (view: JobView) => void;
   /** Opens the complete sheet (T4). */
   onComplete: (view: JobView) => void;
@@ -77,9 +76,8 @@ export interface JobDetailDeps {
    * hook for anything else that must move WITH the stepper, never
    * against it. */
   onAnimateStart?: () => void;
-  /** Rejection banner actions (§T3 Rejected). */
-  onDiscardMyCopy: (view: JobView) => void;
-  onViewOfficeVersion: (view: JobView) => void;
+  /** The refusal banner's one action: clear it and read the job again. */
+  onRefresh: () => void;
   /** Injectable clock — the warranty chip is judged against it. */
   now: Date;
 }
@@ -121,9 +119,9 @@ export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
     backgroundColor: interpolateColor(railProgress.value, [0, 1], [railFrom.value, railTo.value]),
   }));
 
-  // The docket tell is "always the same place": the number stays even on
-  // a stale job (§T3 stale says inset, not replacement — the number came
-  // from the server, it is real). Pending sync rides beneath it.
+  // The docket tell is "always the same place": the number stays while a
+  // write is on its way (the number came from the server, it is real).
+  // `Sending…` rides beneath it.
   const numberText = (
     <View style={{ alignItems: 'flex-end', gap: SPACE[1] }}>
       <Text testID="detail-number" style={{ ...textStyle('mono'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] }}>
@@ -131,7 +129,7 @@ export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
       </Text>
       {view.pending && !rejected ? (
         <Text testID="detail-pending" style={{ ...textStyle('caption'), color: SEMANTIC.text.secondary }}>
-          {STALE.caption}
+          Sending…
         </Text>
       ) : null}
     </View>
@@ -181,17 +179,14 @@ export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
           </View>
         </View>
 
-        {/* Rejected: the banner is pinned UNDER the header (§T3), the
-            server's message verbatim, two actions, never auto-dismissed. */}
+        {/* Refused: the banner is pinned UNDER the header (§T3), the
+            server's message verbatim, one action, never auto-dismissed. */}
         {rejected ? (
           <Banner
             testID="detail-rejected"
             tone="danger"
             message={view.rejectedMessage ?? ''}
-            actions={[
-              { label: 'Discard my copy', onPress: () => deps.onDiscardMyCopy(view) },
-              { label: 'View the office version', onPress: () => deps.onViewOfficeVersion(view) },
-            ]}
+            actions={[{ label: 'Refresh', onPress: deps.onRefresh }]}
           />
         ) : null}
 
@@ -276,8 +271,7 @@ export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
         ) : null}
 
         {/* TIMELINE — collapsed to one line per event, `occurred_at`
-            instants. This device's truth; the office's history arrives
-            with sync, and the caption says so. */}
+            instants, from the job's trail on the server. */}
         <View style={{ alignSelf: 'stretch', gap: SPACE[1] }}>
           <Text style={styles.sectionLabel}>TIMELINE</Text>
           {deps.events.length === 0 ? (
@@ -296,9 +290,6 @@ export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
               ))}
             </View>
           )}
-          <Text style={{ ...textStyle('caption'), color: SEMANTIC.text.secondary }}>
-            This device's events — the office's history arrives with sync.
-          </Text>
         </View>
       </ScrollView>
 

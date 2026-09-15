@@ -8,10 +8,9 @@
  *
  * Two states this file owns the correctness of:
  *
- * - **Stale** (`pending`): the dashed 2px `slate.400` inset plus `Pending
- *   sync` in place of the job number (§T2) — never a fabricated local
- *   number, and never a spinner. The rail keeps its status colour: the
- *   data is real.
+ * - **Sending** (`pending`): a status write is on its way to the server —
+ *   the dashed 2px `slate.400` inset plus `Sending…` in place of the job
+ *   number. The rail keeps its status colour: the data is real.
  * - **Rejected** (§T2): the card **keeps its real status rail** and takes
  *   the stale dashed inset in `feedback.danger`, plus the server's
  *   one-line reason verbatim. The rail is NOT repainted red — `cancelled`
@@ -36,8 +35,8 @@ import { istTimeLabel, railColorOf, statusPillOf, type JobView } from '../../scr
 
 export const RAIL_WIDTH = 4;
 
-/** The contract chip from the mirror's flat contract columns (§T3:
- * "visit n of m" — the mirror carries `visitsRemaining`; the remaining
+/** The contract chip from the job card's contract context (§T3:
+ * "visit n of m" — the card carries `visitsRemaining`; the remaining
  * count is the load-bearing half, so that is what reads). */
 export function contractChipLabel(visitsRemaining: number | null): string | null {
   if (visitsRemaining === null) return null;
@@ -87,9 +86,9 @@ export function JobCard({ view, compact = false, onPress, actions, arrivedFromSy
     view.pending && !rejected ? (
       <Text
         style={{ ...textStyle('caption'), color: SEMANTIC.text.secondary }}
-        testID={testID ? `${testID}-pending-sync` : undefined}
+        testID={testID ? `${testID}-sending` : undefined}
       >
-        Pending sync
+        Sending…
       </Text>
     ) : (
       <Text

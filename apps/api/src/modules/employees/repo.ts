@@ -234,35 +234,6 @@ export async function listUnconfirmedCash(db: Db, employeeId: string): Promise<U
 }
 
 /**
- * A drain claim with no stored verdict — the fourth condition, role
- * changes only. The outbox itself lives on the handset and nothing
- * server-side can count its queued rows; what the server CAN see is the
- * drain ledger: while `POST /v1/sync/batch` works through an operation,
- * the idempotency middleware holds a claim row with `response_status`
- * NULL, and a drain that died mid-flight leaves exactly that row behind
- * for the retry. Either way the queue is not empty and the role must not
- * flip — §4.1's client-side drain-first rule stays the primary
- * guarantee; this is the server's backstop against the one state it can
- * actually observe.
- */
-export interface UndrainedOperationRow {
-  key: string;
-  endpoint: string;
-  created_at: Date;
-}
-
-export async function listUndrainedOperations(db: Db, employeeId: string): Promise<UndrainedOperationRow[]> {
-  const r = await db.query<UndrainedOperationRow>(
-    `SELECT key, endpoint, created_at
-     FROM idempotency_keys
-     WHERE employee_id = $1 AND response_status IS NULL
-     ORDER BY created_at`,
-    [employeeId],
-  );
-  return r.rows;
-}
-
-/**
  * The deactivation consequence chain (G15): his handsets drop out of
  * device diagnostics and any future locate-now. A `completed`/`cancelled`
  * style soft flip — the rows stay, `is_active` was never a delete. The

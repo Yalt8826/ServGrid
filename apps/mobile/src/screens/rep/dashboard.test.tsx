@@ -2,10 +2,8 @@
  * S1 Dashboard tests (UI/plan-2/06-SALES-REP.md §S1). The ones the spec
  * names:
  *
- * - **Dashboard figures carry the stale inset when the outbox is
- *   non-empty** — this is the screen where the state matters most: a
- *   balance shown to a customer while a payment sits in the outbox is
- *   the single most embarrassing thing this app can do.
+ * - **Figures never carry a stale inset or Pending sync** — the app is
+ *   online-only, so nothing waits on the phone behind a figure.
  * - **Figures cross-fade, never count up** (mechanism asserted in
  *   `money.test.tsx`; here the figure text IS the value).
  * - The owed rows read "… · owes ₹85,000", descending — a rep's day is
@@ -77,7 +75,6 @@ function payment(overrides: Partial<PaymentRecord> = {}): PaymentRecord {
 function baseProps(overrides: Partial<Parameters<typeof RepDashboardScreen>[0]> = {}) {
   return {
     name: 'Anitha',
-    pendingSyncCount: 0,
     figures: { soldThisMonth: '420000', outstanding: '185000' },
     figuresError: null,
     salesOff: false,
@@ -99,20 +96,12 @@ function baseProps(overrides: Partial<Parameters<typeof RepDashboardScreen>[0]> 
 }
 
 describe('RepDashboardScreen (§S1)', () => {
-  it('the figures carry the stale inset when the outbox is non-empty', async () => {
-    const stale = await create(<RepDashboardScreen {...baseProps({ pendingSyncCount: 2 })} />);
-    // Both figures — sold AND outstanding — carry the inset plus the
-    // Pending sync caption. The inset is the honest answer.
-    expect(findByTestID(toJson(stale), 'dashboard-figure-sold-stale')).toBeDefined();
-    expect(findByTestID(toJson(stale), 'dashboard-figure-outstanding-stale')).toBeDefined();
-    expect(findByTestID(toJson(stale), 'dashboard-figure-sold-pending')).toBeDefined();
-    expect(findByTestID(toJson(stale), 'dashboard-figure-outstanding-pending')).toBeDefined();
-    expect(allText(toJson(stale)).filter((t) => t === 'Pending sync').length).toBe(2);
-
-    // Drained: the inset leaves.
-    const fresh = await create(<RepDashboardScreen {...baseProps({ pendingSyncCount: 0 })} />);
-    expect(findByTestID(toJson(fresh), 'dashboard-figure-sold-stale')).toBeUndefined();
-    expect(findByTestID(toJson(fresh), 'dashboard-figure-outstanding-stale')).toBeUndefined();
+  it('the figures never carry a stale inset or Pending sync — nothing waits on the phone', async () => {
+    const tree = toJson(await create(<RepDashboardScreen {...baseProps()} />));
+    expect(findByTestID(tree, 'dashboard-figure-sold-stale')).toBeUndefined();
+    expect(findByTestID(tree, 'dashboard-figure-outstanding-stale')).toBeUndefined();
+    expect(findByTestID(tree, 'dashboard-pending-badge')).toBeUndefined();
+    expect(allText(tree)).not.toContain('Pending sync');
   });
 
   it('the figures render whole values, mono tabular — never a count-up', async () => {

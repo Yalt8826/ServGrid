@@ -5,19 +5,12 @@
  * 11:00.
  *
  * Anatomy: name, role, username · the `TrackingHealthChip`, prominent ·
- * the permission ladder as four rows with individual state · pending
- * sync count, app version, device model · *Change password* · *Log out*.
+ * the permission ladder as four rows with individual state · app
+ * version, device model · *Change password* · *Log out*.
  *
- * **Logout is a gate** (PLAN-FRONTEND.md §5, per T1.14): blocked while
- * anything is queued or in flight, reporting the count and offering
- * *Retry now*. There is no confirm-and-lose path — no dialog exists on
- * this screen — because the technician tapping it at the end of a shift
- * is tired and about to hand the phone over. The count the route feeds
- * in counts `queued` + `inflight` rows for this employee only;
- * `rejected` and `failed` rows are excluded by contract — they are kept
- * deliberately and must not trap someone at the end of a shift. A gate
- * that cries wolf gets worked around, and the workaround is a factory
- * reset.
+ * **Logout is one tap.** The app is online-only (decision 2026-09-15):
+ * nothing is ever queued on the phone, so there is nothing to lose and no
+ * gate to pass — and no dialog exists on this screen.
  *
  * Motion (§T7): a ladder row that resolves — a permission granted on
  * return from settings — plays the one celebratory beat the role earns:
@@ -40,7 +33,7 @@ import Animated, { interpolateColor, useAnimatedStyle } from 'react-native-reani
 
 import type { TrackingHealth } from '@servgrid/shared';
 import { DURATION, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
-import { Banner, Button } from '../../components/ui';
+import { Button } from '../../components/ui';
 import { TrackingHealthChip, type LadderTarget } from '../../components/domain/TrackingHealthChip';
 import { textStyle } from '../../fonts/textStyle';
 import { useToggleProgress } from '../../components/ui/motion';
@@ -72,12 +65,7 @@ export interface ProfileDeps {
   loadHealth: () => Promise<TrackingHealth>;
   /** The four ladder rows, judged by OS truth. */
   loadLadderRows: () => Promise<LadderRowState[]>;
-  /** Queued + inflight outbox rows for this employee; `rejected` and
-   * `failed` are excluded by contract (§5 — kept rows never trap). */
-  pendingSyncCount: number;
-  /** The *Retry now* action — a manual drain. */
-  retrySync: () => void;
-  /** Only called when the gate is open; the route owns the session end. */
+  /** The route owns the session end. */
   logout: () => void;
   /** Red/amber chip taps and row *Fix* buttons. The route navigates to
    * the ladder, which opens at the failed step by its own probe. */
@@ -160,7 +148,6 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
   }, []);
 
   const name = health?.employeeName ?? deps.username;
-  const blocked = deps.pendingSyncCount > 0;
 
   return (
     <ScrollView contentContainerStyle={styles.content} testID="profile-screen">
@@ -204,12 +191,6 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
       ))}
 
       <Text style={styles.sectionLabel}>This phone</Text>
-      <View style={styles.infoRow} testID="profile-pending-sync">
-        <Text style={styles.infoLabel}>Pending sync</Text>
-        <Text style={styles.infoValue}>
-          {deps.pendingSyncCount === 0 ? 'Nothing waiting' : `${deps.pendingSyncCount} waiting`}
-        </Text>
-      </View>
       <View style={styles.infoRow} testID="profile-app-version">
         <Text style={styles.infoLabel}>App version</Text>
         <Text style={styles.infoValue}>{deps.appVersion}</Text>
@@ -222,31 +203,7 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
       <View style={styles.actions}>
         <Button label="Change password" variant="secondary" onPress={deps.changePassword} fullwidth testID="profile-change-password" />
 
-        {/* The gate (§5). Blocked: the count is the message, *Retry now*
-        is the only offer, and no confirm-and-lose path exists anywhere —
-        there is no dialog on this screen. The logout handler is not even
-        wired while blocked, so the button cannot act however it is
-        pressed. Rejected and failed rows never block: they are kept
-        deliberately and must not trap someone at the end of a shift. */}
-        {blocked ? (
-          <Banner
-            tone="warning"
-            message={`${deps.pendingSyncCount} items not yet synced`}
-            testID="profile-logout-gate"
-          />
-        ) : null}
-        <Button
-          label="Log out"
-          variant="danger"
-          onPress={blocked ? undefined : deps.logout}
-          disabled={blocked}
-          disabledReason={`${deps.pendingSyncCount} items not yet synced`}
-          fullwidth
-          testID="profile-logout"
-        />
-        {blocked ? (
-          <Button label="Retry now" variant="secondary" onPress={deps.retrySync} fullwidth testID="profile-retry-sync" />
-        ) : null}
+        <Button label="Log out" variant="danger" onPress={deps.logout} fullwidth testID="profile-logout" />
       </View>
     </ScrollView>
   );

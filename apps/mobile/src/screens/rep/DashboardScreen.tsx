@@ -3,16 +3,12 @@
  * doing this month, and who owes me money?" — in a customer's office,
  * often mid-conversation about money.
  *
- * Anatomy: name and pending badge · the two figures (sold this month,
- * outstanding) · *New sale* · OWES THE MOST · RENEWING SOON · RECENT
- * PAYMENTS.
+ * Anatomy: name · the two figures (sold this month, outstanding) · *New
+ * sale* · OWES THE MOST · RENEWING SOON · RECENT PAYMENTS.
  *
- * **Stale matters more here than anywhere.** The figures carry the dashed
- * inset plus `Pending sync` when the mirror has unsynced writes behind
- * them (`pendingSyncCount > 0`): a balance shown to a customer while a
- * payment sits in the outbox is the single most embarrassing thing this
- * app can do. The list rows do not carry the inset — the figures are
- * what gets read aloud.
+ * The figures are the server's, read online — nothing waits on the phone
+ * behind them (online-only, decision 2026-09-15), so they never carry a
+ * `Pending sync` caption.
  *
  * Motion: figures cross-fade on change, 140ms (`MoneyFigure`). **No
  * count-up** — a money figure animating in front of a customer looks like
@@ -30,7 +26,6 @@ import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Button, EmptyState } from '../../components/ui';
-import { PendingBadge } from '../../components/domain/PendingBadge';
 import { formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, MoneyFigure } from './money';
@@ -38,7 +33,6 @@ import type { OwedRow, PaymentRow, RenewalRow } from './model';
 
 export interface RepDashboardScreenProps {
   name: string;
-  pendingSyncCount: number;
   figures: { soldThisMonth: string; outstanding: string } | null;
   figuresError: string | null;
   /** `sales.cards` off — the sold figure renders "turned off", honestly. */
@@ -65,7 +59,6 @@ export function owedRowText(name: string, balance: string): string {
 }
 
 export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactNode {
-  const stale = props.pendingSyncCount > 0;
   const nowYear = new Date().getFullYear();
 
   return (
@@ -74,7 +67,6 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
         <Text style={styles.heading} testID="dashboard-name">
           {props.name}
         </Text>
-        <PendingBadge count={props.pendingSyncCount} testID="dashboard-pending-badge" />
       </View>
 
       {props.figuresError !== null ? (
@@ -94,7 +86,6 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             ) : (
               <MoneyFigure
                 value={`₹${formatMoneyEnIN(props.figures.soldThisMonth)}`}
-                stale={stale}
                 testID="dashboard-figure-sold"
               />
             )}
@@ -108,7 +99,6 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             ) : (
               <MoneyFigure
                 value={`₹${formatMoneyEnIN(props.figures.outstanding)}`}
-                stale={stale}
                 testID="dashboard-figure-outstanding"
               />
             )}

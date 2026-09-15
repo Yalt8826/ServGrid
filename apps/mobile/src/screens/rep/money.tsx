@@ -94,10 +94,8 @@ export function ledgerAmountOf(kind: 'sale' | 'payment', amount: string): string
  * immediately — movement is removed, the information is not.
  *
  * `stale` carries the dashed inset plus the `Pending sync` caption
- * (03-COMPONENTS.md): the honest answer when the mirror has unsynced
- * writes behind the figure — a balance shown to a customer while a
- * payment sits in the outbox is the single most embarrassing thing this
- * app can do.
+ * (03-COMPONENTS.md). No screen sets it since the app went online-only
+ * (2026-09-15); the design system's stale state is retired in TON.4b.
  */
 export function MoneyFigure({
   value,

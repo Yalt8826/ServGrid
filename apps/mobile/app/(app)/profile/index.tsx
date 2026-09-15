@@ -134,9 +134,6 @@ function TechnicianProfileRoute(): React.ReactNode {
           return res.data;
         }}
         loadLadderRows={loadLadderRows}
-        // Online-only: nothing is ever queued on the handset (TON.4 removes the row).
-        pendingSyncCount={0}
-        retrySync={() => {}}
         logout={() => {
           void (async () => {
             await api.logout();
@@ -174,7 +171,7 @@ function DispatcherProfileRoute(): React.ReactNode {
   // username, so the name resolves from `/v1/auth/me` (the same read the
   // flags just made) and degrades to the username until it lands — the
   // same resolve-into-state rule the technician's screen uses. No
-  // tracking read, no outbox count: this role has neither.
+  // tracking read: this role is not tracked.
   const [fullName, setFullName] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;

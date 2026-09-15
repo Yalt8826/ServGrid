@@ -23,8 +23,8 @@ export const SYNC_ON_PUSH_TASK = 'servgrid-sync-on-push';
 
 /**
  * Queries the push means "the server has new work". The online roles'
- * dashboards read through react-query; the offline role's mirror is
- * refreshed by the delta sync inside `handlePushWake` instead. Exported
+ * dashboards read through react-query; the technician's work read is
+ * refetched inside `handlePushWake` instead. Exported
  * so tests can assert against the same list.
  */
 export const PUSH_INVALIDATED_QUERY_KEYS = [
@@ -68,10 +68,10 @@ export async function handleDataOnlyPush(data?: Record<string, unknown>): Promis
     // react-query surface needed refreshing.
   }
 
-  // The technician's half (T2.6, PLAN-FRONTEND.md §6): one delta sync,
-  // then LOCAL notifications composed from the rows that arrived. A
-  // missing mirror session degrades to no notification inside the
-  // handler — the next foreground sync recovers, every push is optional.
+  // The technician's half (T2.6, PLAN-FRONTEND.md §5): one refetch of his
+  // work, then LOCAL notifications composed from the rows that arrived.
+  // No registered executor degrades to no notification inside the
+  // handler — the next open recovers, every push is optional.
   const raised = await handlePushWake();
 
   return hasClient || raised;
