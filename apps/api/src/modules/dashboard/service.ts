@@ -58,6 +58,9 @@ export function createDashboardService() {
       customerName: row.customer_name,
       health: row.health,
       lastPingAt: row.last_ping_at === null ? null : new Date(row.last_ping_at).toISOString(),
+      contractId: row.contract_id,
+      contractNumber: row.contract_number,
+      contractEndDate: row.contract_end_date,
     }));
     return { items };
   }

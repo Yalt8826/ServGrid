@@ -693,9 +693,9 @@ describe('GET /v1/dashboard/owner/attention — ordered by consequence, not rece
     };
 
     expect(body.items.length).toBeGreaterThan(0);
-    // Contracts expiring (§O1 item 5) rejoins at rank 5 when migration 015
-    // (Phase 2B) ships v_contracts_expiring; until then the feed ends at
-    // tracking health — and today's seeds make every live rank present.
+    // Rank 5 (contract_ending) joins when an in-window AMC exists; this
+    // fixture seeds none, so the feed ends at tracking health — and today's
+    // seeds make every live rank present.
     const distinctInOrder = [...new Set(body.items.map((i) => i.category))];
     expect(distinctInOrder).toEqual([
       'missing_submission',
@@ -751,6 +751,95 @@ describe('GET /v1/dashboard/owner/attention — ordered by consequence, not rece
     const dashboard = await getDashboard(OWNER);
     const figures = JSON.parse(dashboard.body) as { cashAwaitingConfirmation: string };
     expect(figures.cashAwaitingConfirmation).toBe('8000.00');
+  });
+});
+
+describe('attention rank 5 — contract_ending (decision 7: the warning is 7 days)', () => {
+  it('AMCs ending within 7 days appear after every tracking row, ordered by days left', async () => {
+    // Four AMCs across four sites: one ending in 2 days, one in 6, one in
+    // 9 (outside the window), one cancelled (excluded whatever its dates).
+    const names = ['T2B3 AMC site A', 'T2B3 AMC site B', 'T2B3 AMC site C', 'T2B3 AMC site D'];
+    const customerIds: string[] = [];
+    for (const name of names) {
+      customerIds.push(
+        (
+          await db.query<{ id: string }>(
+            `INSERT INTO customers (name, phone) VALUES ($1, $2) RETURNING id`,
+            [name, `9840${randomBytes(3).toString('hex')}`],
+          )
+        ).rows[0]!.id,
+      );
+    }
+    const amcRows: Array<{ id: string; customerId: string; end: string; cancelled: boolean }> = [];
+    for (const [i, [customerIdI, endDays, cancelled]] of [
+      [customerIds[0]!, 2, false],
+      [customerIds[1]!, 6, false],
+      [customerIds[2]!, 9, false],
+      [customerIds[3]!, 3, true],
+    ].entries()) {
+      const end = await istDateOffset(endDays as number);
+      const start = await istDateOffset(-30);
+      amcRows.push({
+        id: (
+          await db.query<{ id: string }>(
+            `INSERT INTO service_contracts
+               (contract_number, customer_id, start_date, end_date, contract_value, created_by,
+                cancelled_at, cancelled_by, cancel_reason)
+             VALUES ($1, $2, $3::date, $4::date, '8000.00', $5, $6, $7, $8) RETURNING id`,
+            [
+              `AMC-DASH-${i}-${randomBytes(3).toString('hex')}`,
+              customerIdI,
+              start,
+              end,
+              OWNER.id,
+              cancelled ? new Date().toISOString() : null,
+              cancelled ? OWNER.id : null,
+              cancelled ? 'wrong site' : null,
+            ],
+          )
+        ).rows[0]!.id,
+        customerId: customerIdI as string,
+        end: end as string,
+        cancelled: cancelled as boolean,
+      });
+    }
+
+    const res = await getAttention(OWNER);
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body) as {
+      items: Array<{
+        category: string;
+        contractId: string | null;
+        contractNumber: string | null;
+        contractEndDate: string | null;
+        customerName: string | null;
+      }>;
+    };
+
+    // Rank 5 sits BELOW every tracking-health row — the whole rank order,
+    // still "ordered by consequence, not recency".
+    const lastTracking = body.items.map((i) => i.category).lastIndexOf('tracking_health');
+    const firstContract = body.items.findIndex((i) => i.category === 'contract_ending');
+    expect(lastTracking).toBeGreaterThanOrEqual(0);
+    expect(firstContract).toBeGreaterThan(lastTracking);
+
+    // Exactly the two in-window AMCs, soonest end first.
+    const ending = body.items.filter((i) => i.category === 'contract_ending');
+    expect(ending).toHaveLength(2);
+    expect(ending[0]!.contractEndDate! < ending[1]!.contractEndDate!).toBe(true);
+    expect(ending[0]!.customerName).toBe('T2B3 AMC site A'); // ends in 2 days
+    expect(ending[1]!.customerName).toBe('T2B3 AMC site B'); // ends in 6 days
+
+    // Each row names the AMC to open — id, number and end — nothing else.
+    const byCustomer = new Map(ending.map((i) => [i.customerName, i]));
+    const siteA = byCustomer.get('T2B3 AMC site A')!;
+    expect(siteA.contractId).toBe(amcRows.find((r) => r.customerId === customerIds[0])!.id);
+    expect(siteA.contractNumber).toMatch(/^AMC-DASH-0-/);
+    expect(siteA.contractEndDate).toBe(amcRows.find((r) => r.customerId === customerIds[0])!.end);
+
+    // Out of the window (9 days) or cancelled: absent, however close.
+    expect(body.items.some((i) => i.customerName === 'T2B3 AMC site C')).toBe(false);
+    expect(body.items.some((i) => i.customerName === 'T2B3 AMC site D')).toBe(false);
   });
 });
 

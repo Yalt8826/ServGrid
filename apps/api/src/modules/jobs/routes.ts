@@ -12,6 +12,7 @@ import {
   jobCancelSchema,
   jobCompleteSchema,
   jobCompletionAmendSchema,
+  jobCreateSchema,
   jobRescheduleSchema,
   jobStatusChangeSchema,
   jobStatusSchema,
@@ -29,6 +30,7 @@ import {
   ASSIGN_ACTORS_MESSAGE,
   CANCEL_ACTORS_MESSAGE,
   COMPLETION_ACTORS_MESSAGE,
+  CREATE_ACTORS_MESSAGE,
   SUMMARY_ACTORS_MESSAGE,
   createJobsService,
 } from './service.js';
@@ -40,8 +42,8 @@ import {
  * paths: `POST /v1/jobs/:id/cancel` (which may raise a successor) and
  * `PATCH /v1/jobs/:id` of `scheduled_for` (which never does). The
  * timeline (`GET /v1/jobs/:id/events`) and the completion amendment
- * (T4.3) are here too. Creation and assignment are later tasks on the
- * same module.
+ * (T4.3) are here too, as is the dispatcher's create door (T2B.3,
+ * `POST /v1/jobs`) beside assignment.
  *
  * Response shape **by role** is three separate schemas (`JobCardTechnician`
  * / `JobCardDispatcher` / `JobCardOwner`, §6.3) — attached per request via
@@ -190,6 +192,33 @@ export const jobsRoutes: FastifyPluginAsync<{ workWindow: WorkWindow }> = async 
       });
       const query = jobListQuerySchema.parse(request.query ?? {});
       return service.listJobs({ id: auth.sub, role: auth.role }, scope, query);
+    },
+  );
+
+  // §6.3: the dispatcher's create door — dispatcher and owner (`job` × `create`
+  // at scope `all`; a technician's `own` never raises jobs). Gated like the
+  // rest of the console by `dispatch.console`. The server allocates the
+  // number and the title; the card starts unassigned. `contractId` links it to
+  // the customer's AMC (decision 2026-09-15). Idempotent through the plugin.
+  app.post(
+    '/v1/jobs',
+    {
+      preHandler: [
+        app.requireAuth,
+        app.requireAll('job', 'create', CREATE_ACTORS_MESSAGE),
+        dispatchConsoleEnabled,
+      ],
+      config: {
+        responseSchemaByRole: {
+          owner: JobCardOwnerSchema,
+          dispatcher: JobCardDispatcherSchema,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const body = jobCreateSchema.parse(request.body);
+      return service.createJob({ id: auth.sub, role: auth.role }, body, request.context.source);
     },
   );
 

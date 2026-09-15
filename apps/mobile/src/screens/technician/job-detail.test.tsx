@@ -323,17 +323,17 @@ describe('JobDetailScreen (§T3)', () => {
     expect(warranty).toBe('In warranty · to 14 Mar 2027');
   });
 
-  it('names prepaid on an upfront contract visit', async () => {
+  it('names the AMC and its end date', async () => {
     const renderer = await create(
       <JobDetailScreen
         {...baseDeps({
           view: viewOf({
-            contract: { number: 'AMC-2627-0031', billing: 'upfront', visitsRemaining: 3 },
+            contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' },
           }),
         })}
       />,
     );
     const tree = toJson(renderer);
-    expect(allText(findByTestID(tree, 'detail-contract') ?? null).join(' ')).toBe('AMC-2627-0031 · 3 visits left · prepaid');
+    expect(allText(findByTestID(tree, 'detail-contract') ?? null).join(' ')).toBe('AMC · until 14 Sep 2027');
   });
 });

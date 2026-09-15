@@ -17,10 +17,8 @@
  *   submits `collection_mode: 'none'` and shows "No payment taken" in
  *   the segments' place, so a warranty job is never asked how he was
  *   paid for work that was free.
- * - **Prepaid contract visit** — the money half is absent (the screen
- *   renders the contract chip there instead) and the payload carries no
- *   money fields at all: absent means 0/0/none server-side (§3.4), which
- *   is exactly the shape a prepaid visit must arrive as.
+ * - **AMC job — the Free/Charge choice arrives in T2B.5; until then an
+ *   AMC job completes like any other.**
  * - **One parts list, two server arrays.** Every line becomes a
  *   `parts[]` row (consumed on this job); every TICKED line *also*
  *   becomes a `stackChanges[]` entry (standing at that site). The
@@ -102,16 +100,6 @@ export interface CompleteSheetPayload {
 // ── the conditional branches ─────────────────────────────────────────────────
 
 /**
- * A prepaid contract visit: the amount field and the Paid-by segments
- * are ABSENT — not zero, not disabled — and the contract chip reading
- * **prepaid** sits in their place (§T4). An upfront-billed contract is
- * the condition; per-visit visits collect at the door as usual.
- */
-export function isPrepaidVisit(view: JobView): boolean {
-  return view.job.contract !== null && view.job.contract.billing === 'upfront';
-}
-
-/**
  * The amount after discount, as a number — or null when the amount
  * field is empty. The ONLY derived figure in the sheet, and it decides
  * the Paid-by branch; it is never rendered (never a subtotal, §T4).
@@ -123,13 +111,14 @@ export function amountAfterDiscountOf(amount: string, discount: string): number 
 }
 
 /**
- * Whether this completion carries a charge: not prepaid, and the amount
- * after discount is a positive figure. Zero or empty means **no payment
- * taken** — `collection_mode: 'none'` is submitted, and a warranty job
- * is never asked how he was paid for work that was free (§T4).
+ * Whether this completion carries a charge: the amount after discount is
+ * a positive figure. Zero or empty means **no payment taken** —
+ * `collection_mode: 'none'` is submitted, and a warranty job is never
+ * asked how he was paid for work that was free (§T4). An AMC job
+ * completes like any other until T2B.5 adds the Free/Charge choice
+ * (decision 2026-09-15).
  */
-export function chargeApplies(amount: string, discount: string, prepaid: boolean): boolean {
-  if (prepaid) return false;
+export function chargeApplies(amount: string, discount: string): boolean {
   const after = amountAfterDiscountOf(amount, discount);
   return after !== null && after > 0;
 }
@@ -260,9 +249,7 @@ export function payloadOf(input: {
   /** The submit instant — the completion's `completed_at`. */
   completedAt: string;
 }): CompleteSheetPayload {
-  const { view } = input;
-  const prepaid = isPrepaidVisit(view);
-  const charged = chargeApplies(input.amount, input.discountAmount, prepaid);
+  const charged = chargeApplies(input.amount, input.discountAmount);
   const amount = input.amount.trim();
   const discount = input.discountAmount.trim();
   const workSummary = input.workSummary.trim();
@@ -297,9 +284,9 @@ export function payloadOf(input: {
   return {
     completedAt: input.completedAt,
     workSummary,
-    // Absent money fields are the server's honest zeros (§3.4) — a
-    // prepaid visit and a free warranty job send no money at all.
-    ...(prepaid || amount === '' ? {} : { cost: amount }),
+    // Absent money fields are the server's honest zeros (§3.4) — a free
+    // job sends no money at all.
+    ...(amount === '' ? {} : { cost: amount }),
     ...(discount === '' || Number(discount) <= 0 ? {} : { discountAmount: discount, discountReason: input.discountReason.trim() }),
     // `none` is a consequence, not a choice (§T4): no charge → none,
     // whatever the segments showed before the amount emptied.

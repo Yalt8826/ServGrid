@@ -33,8 +33,6 @@ async function withReadSnapshot<T>(fn: (client: PoolClient) => Promise<T>): Prom
 // ── row → wire mappers; each returns exactly its schema's keys ──────────────
 
 function toJob(row: repo.WorkJobRow): TechnicianWorkJob {
-  // `contract` needs migration 015 (Phase 2B): null, not absent — the
-  // screens already render the contract-bearing shape.
   return {
     id: row.id,
     jobNumber: row.job_number,
@@ -46,7 +44,9 @@ function toJob(row: repo.WorkJobRow): TechnicianWorkJob {
     contactName: row.contact_name,
     contactPhone: row.contact_phone,
     description: row.description,
-    contract: null,
+    contract: row.contract_number === null || row.contract_end_date === null
+      ? null
+      : { number: row.contract_number, endDate: row.contract_end_date },
     version: row.version,
     closedAt: row.closed_at === null ? null : row.closed_at.toISOString(),
   };

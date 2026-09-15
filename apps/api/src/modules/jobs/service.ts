@@ -5,6 +5,7 @@ import {
   type JobCardOwner,
   type JobCardTechnician,
   type JobCompletionAmendRequest,
+  type JobCreate,
   type JobTimelineEvent,
   type JobStatus,
   type JobTimelineDispatcherResponse,
@@ -16,6 +17,7 @@ import { AppError } from '../../plugins/errors.js';
 import { getPool } from '../../db/pool.js';
 import { withTransaction } from '../../db/tx.js';
 import { allocateNumber } from '../../lib/sequences.js';
+import { dayLabel } from '../../lib/day-label.js';
 import type { PoolClient } from 'pg';
 import type { RequestSource } from '../../plugins/request-context.js';
 import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
@@ -53,9 +55,9 @@ import * as dispatcherRepo from './repo.dispatcher.js';
  * successor card when the work can still happen (`rescheduleTo`), while
  * `PATCH /v1/jobs/:id` of `scheduled_for` moves the very same card under
  * `If-Match` and never closes anything. They produce different events
- * (`cancelled` vs `rescheduled`), different rows (`job_cancellations` vs
- * none), and different consequences for a contract visit in Phase 2B —
- * if they ever merge into one code path, separate them before continuing.
+ * (`cancelled` vs `rescheduled`) and different rows (`job_cancellations`
+ * vs none) — if they ever merge into one code path, separate them before
+ * continuing.
  */
 
 /** §6.2/§6.3: `occurredAt` may not be in the future nor older than this. */
@@ -82,6 +84,8 @@ export const RESCHEDULE_ACTORS_MESSAGE =
   'Rescheduling a job is done by the office — on site, cancel the job with the new date instead.';
 /** §6.3: assign and bulk-assign are "dispatcher, owner" — the matrix cell is `job.assign`, which a technician or rep does not hold. */
 export const ASSIGN_ACTORS_MESSAGE = 'A job is assigned by the office — the dispatcher or the owner.';
+/** §6.3: create is "dispatcher, owner" (`job` × `create` at scope `all`; a technician's `own` never raises jobs). */
+export const CREATE_ACTORS_MESSAGE = 'Jobs are raised by the office — dispatchers and the owner.';
 /** T2.7 (§D1): the summary figures are an all-rows console read — "dispatcher, owner"; a technician's `assigned` scope counts his own day, not the desk's. */
 export const SUMMARY_ACTORS_MESSAGE = 'The dashboard figures are read by the office — the field app has its own screens.';
 /** §6.3: the timeline is "dispatcher, owner" — the technician reads his own trail from the mirror; a rep holds no job read at all. */
@@ -90,6 +94,15 @@ export const TIMELINE_ACTORS_MESSAGE = 'The job timeline is read by the office a
 const NOT_A_TECHNICIAN_MESSAGE = 'Pick a technician from the roster — that account is not an active technician.';
 /** §6.3: a stale version on a job with nobody on it has no name to give — the sentence stays actionable anyway. */
 const STALE_VERSION_MESSAGE = 'This job changed after you opened it — reload it and try again.';
+/** §6.3 create (§6.4 shapes): every refusal is a form error the dispatcher fixes in the picker, said plainly. */
+const NO_CUSTOMER_MESSAGE = "That customer doesn't exist — pick them again from the search.";
+const NO_SERVICE_MESSAGE = 'That service is no longer offered — pick another.';
+const UNIT_NOT_AT_SITE_MESSAGE = "That unit isn't at this customer's site — pick it again.";
+const AMC_WRONG_CUSTOMER_MESSAGE = 'That AMC belongs to a different customer — untick the AMC option and try again.';
+const AMC_CANCELLED_MESSAGE = 'That AMC was cancelled — untick the AMC option to raise an ordinary job.';
+function amcNotCoveringMessage(day: string, start: string, end: string): string {
+  return `The AMC runs ${dayLabel(start)} to ${dayLabel(end)}, so it doesn't cover ${dayLabel(day)} — untick the AMC option or pick a date inside it.`;
+}
 /** §6.2: "The warranty rule is a prompt, not a constraint" — nothing here forces cost to zero; the client confirms on site. */
 
 /** §3.1: the message is shown verbatim — it says what to do, not what failed. */
@@ -198,8 +211,6 @@ function isoOrNull(t: Date | null): string | null {
 }
 
 function toTechnicianCard(row: repo.TechnicianCardRow): JobCardTechnician {
-  // `contract` needs migration 015 (Phase 2B); the column is nullable and
-  // nothing points at a contract yet, so the field is null, not absent.
   return {
     id: row.id,
     jobNumber: row.job_number,
@@ -211,7 +222,9 @@ function toTechnicianCard(row: repo.TechnicianCardRow): JobCardTechnician {
     contactName: row.contact_name,
     contactPhone: row.contact_phone,
     description: row.description,
-    contract: null,
+    contract: row.contract_number === null || row.contract_end_date === null
+      ? null
+      : { number: row.contract_number, endDate: row.contract_end_date },
     version: row.version,
   };
 }
@@ -590,14 +603,90 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
   }
 
   /**
+   * POST /v1/jobs (§6.3) — the dispatcher's create door. Every refusal is
+   * a form error answered BEFORE the number is allocated, so a refused
+   * create burns no `JC-…` (the sequence is not gap-free, §3.9 — it is
+   * the caller's job not to consume values it never uses). The card
+   * starts `unassigned` and wakes nobody: the assign call sends the push.
+   * `contractId` links the job to the customer's AMC — belonging to the
+   * customer, uncancelled, and covering the job's day (its scheduled date
+   * or today), else a 422 in plain words (decision 2026-09-15).
+   */
+  async function createJob(
+    actor: Actor,
+    input: JobCreate,
+    source: RequestSource,
+  ): Promise<JobCardTechnician | JobCardDispatcher | JobCardOwner> {
+    if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+      throw new AppError('FORBIDDEN', CREATE_ACTORS_MESSAGE); // the route gate already refused; belt and braces
+    }
+    const createdAt = new Date().toISOString();
+    return withTransaction(async (client) => {
+      try {
+        if ((await repo.findActiveCustomer(client, input.customerId)) === null) {
+          throw new AppError('VALIDATION_FAILED', NO_CUSTOMER_MESSAGE);
+        }
+        const service = await repo.findActiveService(client, input.serviceId);
+        if (service === null) throw new AppError('VALIDATION_FAILED', NO_SERVICE_MESSAGE);
+        const unitId = input.customerProductId ?? null;
+        if (unitId !== null && !(await repo.unitBelongsTo(client, unitId, input.customerId))) {
+          throw new AppError('VALIDATION_FAILED', UNIT_NOT_AT_SITE_MESSAGE);
+        }
+        const contractId = input.contractId ?? null;
+        if (contractId !== null) {
+          const amc = await repo.findContractForJob(client, contractId);
+          if (amc === null || amc.customer_id !== input.customerId) {
+            throw new AppError('VALIDATION_FAILED', AMC_WRONG_CUSTOMER_MESSAGE);
+          }
+          if (amc.cancelled_at !== null) throw new AppError('VALIDATION_FAILED', AMC_CANCELLED_MESSAGE);
+          const day = await repo.businessDateOf(client, input.scheduledFor ?? null);
+          if (day < amc.start_date || day > amc.end_date) {
+            throw new AppError('VALIDATION_FAILED', amcNotCoveringMessage(day, amc.start_date, amc.end_date));
+          }
+        }
+        // Allocate last: after every check that can refuse, so a refused
+        // create leaves the sequence untouched.
+        const jobNumber = await allocateNumber('job', { db: client, at: new Date(createdAt) });
+        const jobId = await repo.insertJobCard(client, {
+          jobNumber,
+          customerId: input.customerId,
+          serviceId: input.serviceId,
+          customerProductId: unitId,
+          title: service.name,
+          description: input.description ?? null,
+          priority: input.priority,
+          scheduledFor: input.scheduledFor ?? null,
+          contactName: input.contactName ?? null,
+          contactPhone: input.contactPhone ?? null,
+          createdBy: actor.id,
+          contractId,
+        });
+        await repo.insertJobEvent(client, {
+          jobCardId: jobId,
+          eventType: 'created',
+          actorId: actor.id,
+          occurredAt: createdAt,
+          fromStatus: null,
+          toStatus: 'unassigned',
+          source,
+          payload: contractId === null ? {} : { contractId },
+        });
+        return readBackCard(actor, client, jobId);
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw mapDbRefusal(error);
+      }
+    });
+  }
+
+  /**
    * POST /v1/jobs/:id/cancel (§6.3) — the technician's or office's
-   * terminal close. With a `rescheduleTo` and an ordinary job, the
-   * successor card is raised INSIDE this same transaction and linked by
+   * terminal close. With a `rescheduleTo`, the successor card is raised
+   * INSIDE this same transaction and linked by
    * `job_cancellations.replacement_job_id`, so the wasted trip and the
-   * fresh commitment commit together or not at all. A contract visit is
-   * Phase 2B: the branch is left, the visit flip is the hook below, and
-   * no successor is created here — the generator raises the fresh card
-   * when the visit comes due, and creating one now would double-raise.
+   * fresh commitment commit together or not at all. An AMC job cancelled
+   * with a new date is still AMC work — when the AMC covers the new day;
+   * otherwise the successor is an ordinary job (decision 2026-09-15).
    */
   async function cancelJob(
     actor: Actor,
@@ -633,15 +722,26 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
         }
 
         let successorId: string | null = null;
-        if (input.rescheduleTo !== undefined && job.contract_visit_id === null) {
+        if (input.rescheduleTo !== undefined) {
           if (input.rescheduleTo < istToday()) {
             throw new AppError('VALIDATION_FAILED', RESCHEDULE_TO_PAST_MESSAGE);
+          }
+          // An AMC job cancelled with a new date is still AMC work — when
+          // the AMC covers the new day. Otherwise the successor is an
+          // ordinary job (decision 2026-09-15).
+          let successorContractId: string | null = null;
+          if (job.contract_id !== null) {
+            const amc = await repo.findContractForJob(client, job.contract_id);
+            if (amc !== null && amc.cancelled_at === null
+                && input.rescheduleTo >= amc.start_date && input.rescheduleTo <= amc.end_date) {
+              successorContractId = job.contract_id;
+            }
           }
           // A fresh number from the same fiscal-year sequence any created
           // job draws from — allocated on this transaction's client, so a
           // rolled-back cancellation does not even leave a gap's claim.
           const jobNumber = await allocateNumber('job', { db: client, at: new Date(cancelledAt) });
-          successorId = await repo.insertSuccessorJob(client, {
+          successorId = await repo.insertJobCard(client, {
             jobNumber,
             customerId: job.customer_id,
             serviceId: job.service_id,
@@ -653,6 +753,7 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
             contactName: job.contact_name,
             contactPhone: job.contact_phone,
             createdBy: actor.id,
+            contractId: successorContractId,
           });
           await repo.insertJobEvent(client, {
             jobCardId: successorId,
@@ -664,12 +765,6 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
             source,
             payload: { cancelledJobId: jobId },
           });
-        }
-
-        // Phase 2B: the visit returns to `scheduled` with
-        // `due_date = rescheduleTo`, or becomes `skipped` without one.
-        if (job.contract_visit_id !== null) {
-          await onContractVisitCancelled(client, job.contract_visit_id, input.rescheduleTo ?? null, actor.id);
         }
 
         await repo.insertCancellation(client, {
@@ -1029,7 +1124,7 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
     };
   }
 
-  return { listJobs, getJobCard, jobTimeline, changeStatus, completeJob, amendCompletion, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
+  return { listJobs, getJobCard, jobTimeline, createJob, changeStatus, completeJob, amendCompletion, cancelJob, rescheduleJob, assignJob, bulkAssign, technicianLoad, dispatcherSummary };
 }
 
 // ── completion (§6.2) ───────────────────────────────────────────────────────
@@ -1105,8 +1200,7 @@ function mapDbRefusal(error: unknown): Error {
  * whole job is to answer "then what happens to what I just typed?"
  * before the technician wonders: the phone keeps the record, the office
  * reconciles. Timestamps are the site's business clock (IST).
- */
-function closedMessage(closure: repo.ClosureActor): string {
+ */function closedMessage(closure: repo.ClosureActor): string {
   const when = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
     day: 'numeric',
@@ -1143,41 +1237,6 @@ export interface CompletionInput {
   stackChanges?: JobStackChange[];
   /** §6.2 step 6 — what was fitted or consumed. A record, not a bill: nothing here touches cost. */
   parts?: JobCompletionPart[];
-}
-
-/**
- * §6.2 step 7 — the contract-visit flip. `contract_visits` is a Phase 2B
- * table (migration 015 adds its FK); until then the column on job_cards
- * is populated by nothing, and the hook is honestly a no-op. The skipped
- * test in test/integration/completion.test.ts marks where the flip gets
- * asserted.
- */
-async function onContractVisitCompleted(
-  _client: PoolClient,
-  _contractVisitId: string,
-  _actorId: string,
-): Promise<void> {
-  /* Phase 2B: UPDATE contract_visits SET status = 'completed' … */
-}
-
-/**
- * §6.3 — the contract-visit branch of cancellation. Phase 2B: with a
- * `rescheduleTo` the visit returns to `scheduled` with
- * `due_date = rescheduleTo` (the generator then raises a fresh card when
- * it comes due — no successor is created here, or the work would
- * double-raise); without one the visit becomes `skipped`, carrying the
- * cancellation reason, and the customer has spent it. `contract_visits`
- * is created by migration 015, which also adds job_cards.contract_visit_id's
- * FOREIGN KEY; until then nothing reaches this hook. The skipped test in
- * test/integration/cancellation.test.ts marks where the branch is asserted.
- */
-async function onContractVisitCancelled(
-  _client: PoolClient,
-  _contractVisitId: string,
-  _rescheduleTo: string | null,
-  _actorId: string,
-): Promise<void> {
-  /* Phase 2B: UPDATE contract_visits SET status = $rescheduleTo ? 'scheduled' : 'skipped', due_date = … */
 }
 
 /** POST /v1/jobs/:id/complete (§6.2) — one transaction, eight steps. */
@@ -1314,10 +1373,7 @@ export async function completeJob(
       throw mapDbRefusal(error);
     }
 
-    // Step 7 — contract visits: Phase 2B flips the visit's status (hook above).
-    if (job.contract_visit_id !== null) {
-      await onContractVisitCompleted(client, job.contract_visit_id, actor.id);
-    }
+    // §6.2 step 7 removed 2026-09-15: AMC reminders read the completed job directly (v_contracts).
 
     // Step 8 — attachments arrive as separate requests; a completion is
     // valid without them. Nothing to do here by design.

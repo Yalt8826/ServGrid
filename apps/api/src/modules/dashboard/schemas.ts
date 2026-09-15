@@ -67,6 +67,7 @@ export const attentionCategorySchema = z.enum([
   'cash_variance',
   'overdue_job',
   'tracking_health',
+  'contract_ending',
 ]);
 
 export const attentionItemSchema = z
@@ -91,6 +92,10 @@ export const attentionItemSchema = z
     /** Tracking rows: `stale` or `permission_missing` — the two §O1 names. */
     health: z.enum(['stale', 'permission_missing']).nullable(),
     lastPingAt: isoDateTime.nullable(),
+    /** AMC rows: the AMC to open. */
+    contractId: uuid.nullable(),
+    contractNumber: z.string().nullable(),
+    contractEndDate: z.string().date().nullable(),
   })
   .strict();
 

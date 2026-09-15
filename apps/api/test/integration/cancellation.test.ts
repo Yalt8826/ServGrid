@@ -95,19 +95,21 @@ async function seedEmployee(
 
 let customerId = '';
 let serviceId = '';
+let amcId = '';
 
 interface SeedJobOverrides {
   status?: JobStatus;
   assignedTo?: string | null;
   scheduledFor?: Date | null;
+  contractId?: string | null;
 }
 
 async function seedJob(overrides: SeedJobOverrides = {}): Promise<string> {
   const status = overrides.status ?? 'assigned';
   const assignedTo = overrides.assignedTo === undefined ? TECH_A.id : overrides.assignedTo;
   const r = await db.query<{ id: string }>(
-    `INSERT INTO job_cards (job_number, customer_id, service_id, title, status, assigned_to, assigned_at, closed_at, scheduled_for)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    `INSERT INTO job_cards (job_number, customer_id, service_id, title, status, assigned_to, assigned_at, closed_at, scheduled_for, contract_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
     [
       `JC-T17-${randomBytes(4).toString('hex')}`,
       customerId,
@@ -119,6 +121,7 @@ async function seedJob(overrides: SeedJobOverrides = {}): Promise<string> {
       // job_closed_coherent: terminal exactly when closed_at is set.
       status === 'completed' || status === 'cancelled' ? new Date().toISOString() : null,
       overrides.scheduledFor === undefined ? new Date().toISOString() : (overrides.scheduledFor?.toISOString() ?? null),
+      overrides.contractId ?? null,
     ],
   );
   return r.rows[0]!.id;
@@ -189,6 +192,7 @@ interface CardRow {
   created_by: string | null;
   closed_at: Date | null;
   contract_visit_id: string | null;
+  contract_id: string | null;
   version: number;
 }
 
@@ -196,7 +200,8 @@ async function cardRow(jobId: string): Promise<CardRow> {
   const r = await db.query<CardRow>(
     `SELECT job_number, status, assigned_to::text, customer_id::text, service_id::text,
             customer_product_id::text, title, priority::text, scheduled_for,
-            scheduled_date::text, created_by::text, closed_at, contract_visit_id::text, version
+            scheduled_date::text, created_by::text, closed_at, contract_visit_id::text,
+            contract_id::text, version
      FROM job_cards WHERE id = $1`,
     [jobId],
   );
@@ -273,6 +278,17 @@ beforeAll(async () => {
   await seedEmployee('technician', TECH_B);
   await seedEmployee('dispatcher', DISPATCHER);
   await seedEmployee('sales_rep', SALES_REP);
+
+  // The customer's AMC (T2B.3) — wide enough that the successor tests can
+  // pick a day inside it and a day past its end.
+  amcId = (
+    await db.query<{ id: string }>(
+      `INSERT INTO service_contracts
+         (contract_number, customer_id, start_date, end_date, contract_value, created_by)
+       VALUES ($1, $2, $3::date, $4::date, '12000.00', $5) RETURNING id`,
+      [`AMC-T17-${randomBytes(4).toString('hex')}`, customerId, istDatePlus(-10), istDatePlus(500), DISPATCHER.id],
+    )
+  ).rows[0]!.id;
 });
 
 afterAll(async () => {
@@ -690,15 +706,41 @@ describe('rescheduling is a PATCH of scheduled_for — a different door (§6.3)'
   });
 });
 
-describe('§6.3 — contract visits are Phase 2B', () => {
-  it.skip('a contract visit cancels without a successor; rescheduleTo sends the visit back to scheduled', async () => {
-    // Phase 2B: `contract_visits` is created by migration 015, which also
-    // adds job_cards.contract_visit_id's FOREIGN KEY. Until then nothing
-    // can point at a visit, so the branch (onContractVisitCancelled in
-    // modules/jobs/service.ts) is honestly unreachable. This test is
-    // written then: a visit's cancel with `rescheduleTo` sets the visit
-    // `scheduled` with `due_date = rescheduleTo` and raises NO successor
-    // (the generator does that); without one the visit becomes `skipped`
-    // carrying the reason, and the customer has spent it.
+describe('an AMC job cancelled with a date — the successor inherits the AMC (decision 2026-09-15)', () => {
+  it('a date inside the AMC term: the successor carries the same contract_id', async () => {
+    const jobId = await seedJob({ status: 'assigned', contractId: amcId });
+    const rescheduleTo = istDatePlus(3); // inside [today-10, today+500]
+
+    const res = await postCancel(TECH_A.token, jobId, { reasonCode: 'no_access', rescheduleTo });
+    expect(res.statusCode, res.body).toBe(200);
+    const replacementJobId = (await cancellationRow(jobId))!.replacement_job_id!;
+    const successor = await cardRow(replacementJobId);
+    expect(successor.scheduled_date).toBe(rescheduleTo);
+    expect(successor.contract_visit_id).toBeNull(); // the column is retired, never written
+    expect(successor.contract_id).toBe(amcId); // still AMC work
+  });
+
+  it('a date past the AMC end: the successor is an ordinary job — contract_id NULL', async () => {
+    const jobId = await seedJob({ status: 'assigned', contractId: amcId });
+    const rescheduleTo = istDatePlus(600); // past today+500
+
+    const res = await postCancel(TECH_A.token, jobId, { reasonCode: 'no_access', rescheduleTo });
+    expect(res.statusCode, res.body).toBe(200);
+    const replacementJobId = (await cancellationRow(jobId))!.replacement_job_id!;
+    const successor = await cardRow(replacementJobId);
+    expect(successor.contract_id).toBeNull();
+  });
+
+  it('without a date: no successor, and the AMC is untouched', async () => {
+    const jobId = await seedJob({ status: 'assigned', contractId: amcId });
+
+    const res = await postCancel(TECH_A.token, jobId, { reasonCode: 'no_access' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect((await cancellationRow(jobId))!.replacement_job_id).toBeNull();
+    const amc = await db.query<{ cancelled_at: Date | null }>(
+      'SELECT cancelled_at FROM service_contracts WHERE id = $1',
+      [amcId],
+    );
+    expect(amc.rows[0]!.cancelled_at).toBeNull();
   });
 });

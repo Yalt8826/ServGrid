@@ -13,22 +13,15 @@ import type { Db } from '../auth/repo.js';
  *   outstanding company dues    → v_company_balances      (migration 018)
  *
  * and the attention feed reads the same views plus
- * v_employee_tracking_health (migration 009). None of it selects from
- * job_cards directly — the integration suite proves that from the captured
- * SQL text, not from this comment.
+ * v_employee_tracking_health (migration 009) and v_contracts (migration
+ * 015). None of it selects from job_cards directly — the integration
+ * suite proves that from the captured SQL text, not from this comment.
  *
  * "Today" everywhere below is `business_date(now())` — the Asia/Kolkata
  * calendar day (migration 001), never the server clock's UTC date, which
  * is wrong for five and a half hours out of every twenty-four. The chart
  * series run on generated_series so a day with no jobs is a zero bar, not
  * a missing row — an absent bucket renders as a broken chart.
- *
- * The contracts-expiring slice of the attention feed (§O1 item 5) has no
- * source yet: `v_contracts_expiring` ships with migration 015 (Phase 2B),
- * which has not run when this module lands. The feed's contract is the
- * category union plus its order; when 015 lands, its branch slots in at
- * rank 5. Inventing a contracts table here would be starting Phase 2B's
- * work, and guessing at its columns would be worse.
  */
 
 /** Figure 1 — the open jobs on today's IST board, one column per open status. */
@@ -155,12 +148,12 @@ export async function revenuePerWeek(db: Db): Promise<ChartWeekRow[]> {
  *                         so the dashboard cannot disagree with the list
  *   4 tracking_health     stale or permission-missing handsets (§O1's two);
  *                         `never_reported` is onboarding, not a problem
- *   5 contracts expiring  waits for v_contracts_expiring (migration 015,
- *                         Phase 2B) — see the file header
+ *   5 contract_ending     active AMCs ending within 7 days
+ *                         (v_contracts.is_ending_soon, decision 7)
  */
 export interface AttentionRow {
   rank: number;
-  category: 'missing_submission' | 'cash_variance' | 'overdue_job' | 'tracking_health';
+  category: 'missing_submission' | 'cash_variance' | 'overdue_job' | 'tracking_health' | 'contract_ending';
   employee_id: string | null;
   employee_name: string | null;
   business_date: string | null;
@@ -176,6 +169,10 @@ export interface AttentionRow {
   customer_name: string | null;
   health: 'stale' | 'permission_missing' | null;
   last_ping_at: Date | null;
+  /** AMC rows: the AMC to open. */
+  contract_id: string | null;
+  contract_number: string | null;
+  contract_end_date: string | null;
 }
 
 export async function attentionFeed(db: Db): Promise<AttentionRow[]> {
@@ -198,6 +195,9 @@ export async function attentionFeed(db: Db): Promise<AttentionRow[]> {
          NULL::text                 AS customer_name,
          NULL::text                 AS health,
          NULL::timestamptz          AS last_ping_at,
+         NULL::uuid                 AS contract_id,
+         NULL::text                 AS contract_number,
+         NULL::text                 AS contract_end_date,
          0                          AS sort_a,
          extract(epoch FROM q.business_date)::double precision AS sort_b
        FROM v_cash_reconciliation_queue q
@@ -215,6 +215,7 @@ export async function attentionFeed(db: Db): Promise<AttentionRow[]> {
          q.declared_amount::text,
          q.variance::text,
          NULL::uuid, NULL::text, NULL::text, NULL::job_status, NULL::text, NULL::text, NULL::text, NULL::timestamptz,
+         NULL::uuid, NULL::text, NULL::text,
          0,
          (-abs(q.variance))::double precision
        FROM v_cash_reconciliation_queue q
@@ -240,6 +241,7 @@ export async function attentionFeed(db: Db): Promise<AttentionRow[]> {
          c.name,
          NULL::text,
          NULL::timestamptz,
+         NULL::uuid, NULL::text, NULL::text,
          0,
          extract(epoch FROM v.scheduled_date)::double precision
        FROM v_job_cards_dispatcher v
@@ -257,10 +259,29 @@ export async function attentionFeed(db: Db): Promise<AttentionRow[]> {
          NULL::uuid, NULL::text, NULL::text, NULL::job_status, NULL::text, NULL::text,
          h.health::text,
          h.last_ping_at,
+         NULL::uuid, NULL::text, NULL::text,
          CASE WHEN h.health = 'permission_missing' THEN 0 ELSE 1 END,
          (-COALESCE(h.minutes_since, 0))::double precision
        FROM v_employee_tracking_health h
        WHERE h.health IN ('stale', 'permission_missing')
+
+       UNION ALL
+
+       SELECT
+         5,
+         'contract_ending',
+         NULL::uuid, NULL::text,
+         NULL::text, NULL::text, NULL::text, NULL::text,
+         NULL::uuid, NULL::text, NULL::text, NULL::job_status, NULL::text,
+         vc.customer_name,
+         NULL::text, NULL::timestamptz,
+         vc.id,
+         vc.contract_number,
+         vc.end_date::text,
+         0,
+         vc.days_to_end::double precision
+       FROM v_contracts vc
+       WHERE vc.is_ending_soon
      ) attention
      ORDER BY rank, sort_a, sort_b, employee_name NULLS LAST, job_number NULLS LAST`,
   );

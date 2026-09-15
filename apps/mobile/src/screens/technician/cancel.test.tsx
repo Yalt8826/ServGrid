@@ -8,12 +8,11 @@
  *    date.
  * 4. Reason rows are ≥52pt.
  *
- * Plus the "Done when" box (the contract warning slot exists and renders
- * nothing pre-2B), the §T5 motion facts (Selection haptic on reason
- * rows), the payload's strict shape, and the timeline fold of the
- * server's cancelled event — what the detail screen shows once the
- * cancellation is filed. The pure model
- * (`cancelSheet.ts`) is asserted alongside the screen it drives.
+ * Plus the 2B fact (an AMC job shows no warning — nothing is spent), the
+ * §T5 motion facts (Selection haptic on reason rows), the payload's
+ * strict shape, and the timeline fold of the server's cancelled event —
+ * what the detail screen shows once the cancellation is filed. The pure
+ * model (`cancelSheet.ts`) is asserted alongside the screen it drives.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
@@ -26,7 +25,6 @@ import { allText, create, findAll, findByTestID, firstDescendantOfType, toJson, 
 import { CancelSheet, type CancelSheetDeps } from './CancelSheet';
 import {
   cancelPayloadOf,
-  contractWarningOf,
   rescheduleConfirmLine,
   rescheduleDateErrorOf,
   rescheduleWindow,
@@ -295,41 +293,26 @@ describe('CancelSheet — Done when (§T5)', () => {
     Haptics.__reset();
   });
 
-  it('the contract warning slot exists and renders nothing pre-2B', async () => {
-    // Pre-2B: no job carries a contract, so the slot renders NOTHING —
-    // the exact "Done when". No warning text anywhere in the tree.
+  it('an AMC job shows no warning — nothing is spent', async () => {
+    // 2B: AMCs carry no visit count (decision 2026-09-15), so cancelling
+    // without a date spends nothing and the sheet says so by rendering
+    // no warning at all — not for a plain job, not for an AMC job.
     const plain = baseDeps();
     const plainRenderer = await create(<CancelSheet {...plain} />);
     const plainTree = toJson(plainRenderer);
     expect(findByTestID(plainTree, 'cancel-contract-warning')).toBeUndefined();
     expect(allText(plainTree).join(' ')).not.toContain('visits');
 
-    // The slot is real, though: with a contract (2B's shape, already in
-    // the technician's job-card schema) the warning stands ABOVE the date
-    // picker, in body weight — never caption (§T5).
+    // The AMC-linked job (the technician card's contract shape) cancels
+    // exactly the same way — no slot, no warning, no visit arithmetic.
     const contracted = baseDeps({
-      view: viewOf({ contract: { number: 'AMC-2627-0031', billing: 'per_visit', visitsRemaining: 4 } }),
+      view: viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }),
     });
     const renderer = await create(<CancelSheet {...contracted} />);
     const tree = toJson(renderer);
 
-    const warning = findByTestID(tree, 'cancel-contract-warning');
-    expect(warning).toBeDefined();
-    expect(allText(warning ?? null).join(' ')).toBe("Skipping without a date spends one of this customer's 4 visits.");
-    const style = styleOf(warning);
-    expect(style.fontWeight).toBe('500'); // bodyStrong, not caption (400/13)
-    expect(style.lineHeight).toBe(22); // body's line, not caption's 16
-
-    // Above the date picker, in render order.
-    const ordered = findAll(tree, (node) => node.props.testID === 'cancel-contract-warning' || node.props.testID === 'cancel-reschedule');
-    expect(ordered.map((node) => node.props.testID)).toEqual(['cancel-contract-warning', 'cancel-reschedule']);
-
-    // The pure decision agrees at both ends, singular included.
-    expect(contractWarningOf(null)).toBeNull();
-    expect(contractWarningOf({ number: 'AMC-1', billing: 'per_visit', visitsRemaining: 1 })).toBe(
-      "Skipping without a date spends one of this customer's 1 visit.",
-    );
-    expect(contractWarningOf({ number: 'AMC-1', billing: 'upfront', visitsRemaining: 4 })).toContain('4 visits');
+    expect(findByTestID(tree, 'cancel-contract-warning')).toBeUndefined();
+    expect(allText(tree).join(' ')).not.toContain('AMC');
   });
 
   it('reason selection fires the Selection haptic and fills the row', async () => {

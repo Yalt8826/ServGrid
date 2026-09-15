@@ -8,7 +8,7 @@ export { Button, type ButtonProps, type ButtonVariant } from './Button';
 export { TextField, type TextFieldProps } from './TextField';
 export { MoneyField, type MoneyFieldProps } from './MoneyField';
 export { Select, type SelectProps, type SelectOption } from './Select';
-export { DatePicker, formatDateEnIN, type DatePickerProps } from './DatePicker';
+export { DatePicker, formatDateEnIN, formatDateWithYear, type DatePickerProps } from './DatePicker';
 export { Sheet, type SheetProps } from './Sheet';
 export { Banner, type BannerProps, type BannerTone } from './Banner';
 export { Skeleton, type SkeletonProps } from './Skeleton';
