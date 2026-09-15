@@ -203,7 +203,7 @@ TON.8 map tiles (blocked on the owner's MapTiler key)
 
 ### TON.8 — Map tiles
 
-**Blocked on:** the owner's MapTiler account. **Build** — `EXPO_PUBLIC_MAP_STYLE_URL` documented in `.env.example` and the T4.10 runbook; verify the console renders tiles on web and Android. **Done when** the owner sees his roster on a map.
+**Unblocked 2026-09-15** (key received). **Build** — `EXPO_PUBLIC_MAP_STYLE_URL` documented in `apps/mobile/.env.example` and T4.10; the key lives only in the gitignored `apps/mobile/.env`; verify the console renders tiles on web (Android shows the roster only, by design). **Done when** the owner sees his roster on a map.
 
 ---
 

@@ -1,17 +1,17 @@
 /**
  * The location console's map — WEB implementation (T4.10,
- * UI/plan-2/07-OWNER.md §O3). MapLibre GL JS with a RASTER tile source,
- * avoiding a Mapbox token for a one-user surface; this is the only map
- * in the system, and Metro bundles this module for web alone.
+ * UI/plan-2/07-OWNER.md §O3). MapLibre GL JS, avoiding a Mapbox token for
+ * a one-user surface; this is the only map in the system, and Metro
+ * bundles this module for web alone.
  *
- * THE TILE SOURCE IS AN OPEN OWNER DECISION (`PLAN-FRONTEND.md` open
- * item 2: self-hosted raster vs a free tier with attribution
- * obligations). This file does not improvise one: it reads the style
- * URL from `EXPO_PUBLIC_MAP_STYLE_URL`, and while that is unset it
- * renders an honest placeholder instead of a map — the roster next to
- * it still answers "is tracking actually working", which is the part
- * that survives descoping. Dropping the decision in is a one-line env
- * var, not a code change.
+ * The tile source is hosted OpenStreetMap from MapTiler (decided
+ * 2026-09-15, TON.8). The style URL comes from
+ * `EXPO_PUBLIC_MAP_STYLE_URL` (`apps/mobile/.env.example`); while it is
+ * unset this renders an honest placeholder instead of a map — the roster
+ * next to it still answers "is tracking actually working", which is the
+ * part that survives descoping. Changing provider is an env var, not a
+ * code change. The style carries the provider's attribution, which the
+ * compact attribution control displays.
  *
  * Dots: current positions, one HTML marker each — MOVED (not rebuilt)
  * when a fix arrives, so a locate-now fulfilment shows the dot move.
@@ -40,7 +40,7 @@ import type { TrailStop } from './locationModel';
 import type { LocationMapProps } from './locationMap';
 
 export const MAP_UNCONFIGURED_MESSAGE =
-  'Map not rendered — no tile source configured yet. The tile source is an owner decision (self-hosted vs a free attribution tier); the roster still answers "is tracking working".';
+  'Map not rendered — this build has no map style (EXPO_PUBLIC_MAP_STYLE_URL). The roster still answers "is tracking working".';
 
 /** The trail's draw-once duration (§O3 Motion: 400ms, left to right). */
 const TRAIL_DRAW_MS = 400;
@@ -110,7 +110,7 @@ export function LocationMap({
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: styleUrl as string,
-      attributionControl: { compact: true }, // an attribution obligation is the owner's call, honoured once made
+      attributionControl: { compact: true }, // MapTiler + OpenStreetMap attribution, required by the free tier
     });
     map.on('load', () => {
       map.addSource('trail', { type: 'geojson', data: EMPTY_COLLECTION });

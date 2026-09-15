@@ -432,7 +432,7 @@ Both layouts. Fourteen routes in five Android groups; a left rail on web.
 
 **Amending a completion** is an owner action reachable from the job detail: a reason is required, and if that day's handover is already confirmed the API refuses with the reconciliation named. The UI then offers to reopen it — two deliberate steps rather than one convenient one, because confirmation is where money stops being provisional.
 
-**Location console** is the only map in the system and it is web-only. `react-native-maps` drops out entirely; one web map library remains — MapLibre GL JS with a raster tile source, avoiding a Mapbox token for a 1-user surface. Shows current positions, a selected employee's day trail with time labels, and a *Locate now* action that posts a request and polls it, showing "requested 40s ago, device has not answered" rather than spinning.
+**Location console** is the only map in the system and it is web-only. `react-native-maps` drops out entirely; one web map library remains — MapLibre GL JS with hosted OpenStreetMap tiles from MapTiler (decided 2026-09-15), avoiding a Mapbox token for a 1-user surface. The style URL is `EXPO_PUBLIC_MAP_STYLE_URL` (`apps/mobile/.env.example`). Shows current positions, a selected employee's day trail with time labels, and a *Locate now* action that posts a request and polls it, showing "requested 40s ago, device has not answered" rather than spinning.
 
 **Cash queue must default to a range that includes days with no submission.** `missing_submission` sorts first. A default filter of "submitted handovers" would hide the exact row the feature exists to catch.
 
@@ -460,7 +460,7 @@ The location matrix is a table of `manufacturer × OS version × mitigation stat
 | # | Item | Impact | Needed by |
 |---|---|---|---|
 | 1 | Dispatcher Job Logs on a phone — prototype at real volume before building | **High** — the one screen where phone-first has a real cost | Prototype in Phase 1, decide before Phase 2 |
-| 2 | Web map library — MapLibre + raster tiles proposed; needs a tile source decision (self-hosted vs. a free tier with an attribution requirement) | Medium | Before Phase 4 |
+| 2 | ~~Web map library — MapLibre + raster tiles proposed; needs a tile source decision~~ **Closed: MapLibre with hosted OpenStreetMap tiles from MapTiler**, attribution shown by the map's compact control; style URL in `EXPO_PUBLIC_MAP_STYLE_URL` | — | Done (2026-09-15, TON.8) |
 | 3 | Whether a technician sees amounts in his own completion history. Proposed: no. Mirrors `PLAN-BACKEND.md` open item 2. | Low, but staff-visible | Phase 1, confirm with owner |
 | 4 | OEM autostart walkthroughs need real screenshots per vendor — cannot be written from documentation | Medium — blocks the ladder's last step | Phase 1, needs the handsets |
 | 5 | Owner desktop is a React Native Web build. If the `DataTable` and rail fight RNW hard enough, a separate thin React app sharing `packages/shared` is the escape hatch. | Medium — a real fork in the road | Assess at Phase 4 start |

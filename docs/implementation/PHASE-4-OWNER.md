@@ -6,7 +6,7 @@ One user. Online-only, like every role. At a desk with a laptop most of the time
 
 **Entry — one blocking item, one already cleared:**
 
-1. **Map tile source decided** (`PLAN-FRONTEND.md` open item 2) — self-hosted raster vs. a free tier with attribution obligations.
+1. ~~**Map tile source decided**~~ — **cleared 2026-09-15**: hosted OpenStreetMap tiles from MapTiler (`PLAN-FRONTEND.md` open item 2, TON.8).
 2. FCM was the second blocker. It is proven since Phase 0 and in production use since Phase 2, so *Locate now* inherits a channel that has been carrying assignment notifications for two phases. **That is the straightforward gain from moving it early: the riskiest part of on-demand location is no longer new.**
 
 **And one assessment on day 3, not in week 4:** does React Native Web carry the `DataTable` and the rail acceptably? T4.1.
@@ -444,7 +444,9 @@ T0: `owner.cash` off — but **this is the screen the phase exists for**, so tre
 
 **Roster sorted by health severity, not alphabetically** — the person with a problem is at the top. Each row: name, health chip, last-seen relative time.
 
-**Map** — the only map in the system. **MapLibre GL JS with a raster tile source**, avoiding a Mapbox token for a one-user surface. Current positions as dots; a selected employee's day trail as a line with **time labels at direction changes, not at every point**.
+**Map** — the only map in the system. **MapLibre GL JS with hosted OpenStreetMap tiles from MapTiler** (decided 2026-09-15), avoiding a Mapbox token for a one-user surface. Current positions as dots; a selected employee's day trail as a line with **time labels at direction changes, not at every point**.
+
+**Map style (TON.8).** `EXPO_PUBLIC_MAP_STYLE_URL` in `apps/mobile/.env` — `https://api.maptiler.com/maps/streets-v2/style.json?key=<key>` (see `apps/mobile/.env.example`). Expo inlines it at build time, so the staging and production web builds need it set where they are built, and changing it means rebuilding the web bundle. The key is public by nature once in a browser bundle: **restrict it to the web app's origins in the MapTiler dashboard**. Unset, the console renders the roster beside a "map not configured" panel.
 
 **Phone: roster only, no map.** Health and last-seen is the part that matters, and it is the part that survives descoping.
 
