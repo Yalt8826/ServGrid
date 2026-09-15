@@ -169,9 +169,9 @@ The dashed 2px `slate.400` inset, which used to mean *stale*, now means only *a 
 
 ## X6. Navigation shell
 
-**Android:** bottom tabs from that role's group map (`PLAN-FRONTEND.md` §3) — **technician 4** (Dashboard · Jobs · Cash · Profile), **dispatcher 3** (Dashboard · Operations · Profile), **sales rep 5** (Dashboard · Sales · Companies · Cash · Profile), **owner 5**.
+**Android:** bottom tabs from that role's group map (`PLAN-FRONTEND.md` §3) — **technician 4** (Dashboard · Jobs · Cash · Profile), **dispatcher 4** (Dashboard · Operations · AMC · Profile), **sales rep 5** (Dashboard · Sales · Companies · Cash · Profile), **owner 5**.
 
-The map is per role, not the owner's map with rows hidden. Filtering one owner-shaped map is what leaves the technician's handover and the rep's contract list unreachable — both are permitted, both exist as routes, and neither has a tab that leads to them.
+The map is per role, not the owner's map with rows hidden. Filtering one owner-shaped map is what leaves the technician's handover unreachable — permitted, routed, and with no tab that leads to it.
 
 Active tab: **2px accent underline** above the label, sliding between tabs over 220ms. Not a filled pill (`03-COMPONENTS.md` — a precise underline is a signature; pills are everywhere).
 
@@ -211,7 +211,7 @@ The design system exists before any feature does, or every feature invents its o
 - Motion tokens and the three springs
 - Haptic mapping
 - `NavShell` with the single platform branch and density provider
-- The lint rules: no literal `#F2C200` outside `theme.ts`; no `job_completions` or `service_contracts` in dispatcher repository code; no `location_pings` or `location_requests` there either — and, since 2026-09-15, a fourth, `no-device-storage`, which allows device storage only in the token store and the GPS ping buffer
+- The lint rules: no literal `#F2C200` outside `theme.ts`; no `job_completions` in dispatcher repository code; no `location_pings` or `location_requests` there either — and, since 2026-09-15, a fourth, `no-device-storage`, which allows device storage only in the token store and the GPS ping buffer
 - The nav-map / permission-matrix cross-check test — every route in a role's tab map is permitted, and every permitted route has a tab (`PLAN-FRONTEND.md` §3)
 
 **A rendered gallery of every component in every state** is the Phase 0 deliverable that makes the rest of this document enforceable. Without it, `loading` and `error` get invented per screen and the app looks like four different products by Phase 4.

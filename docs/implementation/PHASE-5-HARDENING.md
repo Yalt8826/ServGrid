@@ -130,11 +130,12 @@ CREATE ROLE servgrid_dispatcher NOLOGIN;
 GRANT USAGE ON SCHEMA public TO servgrid_dispatcher;
 GRANT SELECT, INSERT, UPDATE ON job_cards, customers, job_events TO servgrid_dispatcher;
 GRANT SELECT ON v_job_cards_dispatcher, v_technician_load TO servgrid_dispatcher;
-GRANT SELECT ON v_contract_visits_dispatcher TO servgrid_dispatcher;
+GRANT SELECT, INSERT, UPDATE ON service_contracts TO servgrid_dispatcher;
+GRANT SELECT ON v_contracts TO servgrid_dispatcher;
 GRANT SELECT ON v_employee_tracking_health TO servgrid_dispatcher;
 REVOKE ALL ON job_completions, payments, sales_cards, sales_card_items,
-              cash_reconciliations, service_contracts, v_company_balances,
-              v_employee_expected_cash, v_contracts_expiring FROM servgrid_dispatcher;
+              cash_reconciliations, v_company_balances,
+              v_employee_expected_cash FROM servgrid_dispatcher;
 REVOKE ALL ON location_pings, location_requests FROM servgrid_dispatcher;
 ```
 

@@ -77,7 +77,7 @@ Sort: Today by `scheduled_for` ascending, **overdue first**. Completed by `compl
 
 ### Content
 
-Each card: rail · customer + area · job number (mono, right) · service + unit · scheduled time · chips (`Overdue`, `In warranty`, `AMC n of m`) · status pill.
+Each card: rail · customer + area · job number (mono, right) · service + unit · scheduled time · chips (`Overdue`, `In warranty`, `AMC`) · status pill.
 
 A search field appears in the header only when the tab holds more than 12 jobs — a technician with six jobs does not need search, and an always-present empty field is clutter he has to scroll past.
 
@@ -116,7 +116,7 @@ No filter bar (that is the dispatcher's screen). No bulk actions. No map. No amo
 │ Sunrise Apartments, Kormangala 3rd Blk │  h1
 │ 14:30 today · Battery swap             │
 │ [In warranty · to 14 Mar 2027]         │
-│ [AMC-2627-0031 · visit 3 of 4 · prepaid]│
+│ [AMC · until 14 Sep 2027]               │
 ├────────────────────────────────────────┤
 │ THE UNIT                               │
 │ UPS 850VA · Luminous · SN LM8842219    │
@@ -134,7 +134,7 @@ No filter bar (that is the dispatcher's screen). No bulk actions. No map. No amo
 
 - **Stepper** at the top — position in the day's work is the first thing.
 - **Unit** (`job_cards.customer_product_id`) with serial. Warranty chip carries the expiry date.
-- **Contract chip** when present — the word **prepaid** is the load-bearing part.
+- **AMC chip** when the job is under the customer's AMC — *AMC · until 14 Sep 2027*. Never a price.
 - **Call** dials; **Navigate** deep-links to `google.navigation:q=lat,lng`. There is no map in the technician app.
 - **Timeline** from `job_events`, collapsed, `occurred_at` times.
 
@@ -190,7 +190,7 @@ No amount, ever, after completion. No customer history. No other technicians' jo
 
 ### The conditional behaviours
 
-- **Prepaid contract visit:** the amount field and the Paid-by segments are **absent** — not zero, not disabled. The `ContractChip` reading "prepaid" sits in their place. A field showing ₹0 invites a tap, and the server rejects a non-zero cost on a prepaid visit anyway.
+- **AMC job:** two segments above the money — **Free under AMC** (selected) and **Charge**. On Free the amount field and the Paid-by segments are **absent** — not zero, not disabled — and nothing is collected. Charge brings the ordinary money fields back for extra work the customer pays for.
 - **In-warranty unit with a charge entered:** one confirmation on submit — *"This unit is under warranty until 14 Mar 2027. Charge anyway?"* A prompt, not a block. **The only dialog on this sheet**, which is what keeps it meaningful.
 - **Discount:** the disclosure opens amount **and** reason together, and the database refuses the row without a reason.
 - **Three segments, five enum values, and `none` is not one of the three.** `collection_mode` carries `cash | upi | card | bank_transfer | none`. `bank_transfer` does not happen at a doorstep — that is a company paying an invoice, which is the rep's `payments` flow.
@@ -248,15 +248,11 @@ Rises from the button, `spring.sheet` 300ms, stepper visible above. Disclosures 
 
 Reason code — a list of large tappable rows, **not a dropdown** (`customer_unavailable`, `no_access`, `parts_unavailable`, …) · note (required for `other`) · **Reschedule to** date picker, skippable.
 
-### The contract case
+### AMC jobs
 
-When the job is a contract visit, above the date picker, in `body` not `caption`:
+No warning and no special case: an AMC carries no visit count, so cancelling spends nothing, and a new date raises a successor still linked to the AMC.
 
-> **Skipping without a date spends one of this customer's 4 visits.**
-
-Plain words. This is the one place in the app where a technician is warned about a *default* rather than trusted to know it, because the consequence is invisible and lands on the customer (`PLAN.md` §4).
-
-`rescheduleTo` is bounded: not in the past, not beyond the contract's end date.
+`rescheduleTo` is bounded: not in the past.
 
 ### Motion
 

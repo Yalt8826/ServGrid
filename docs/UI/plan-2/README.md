@@ -12,7 +12,7 @@ Extends `docs/PLAN.md` §8 and §9 and `docs/PLAN-FRONTEND.md`. Nothing here ove
 | `03-COMPONENTS.md` | The seven states, every primitive and domain component, the five signature "tells" |
 | `04-TECHNICIAN.md` | 7 screens — dashboard, jobs, detail, complete, cancel, handover, profile |
 | `05-DISPATCHER.md` | 6 screens — including Job Logs, the screen phone-first actually costs something |
-| `06-SALES-REP.md` | 7 screens — sales, payments, companies, contracts, handover |
+| `06-SALES-REP.md` | 6 screens — sales, payments, companies, handover |
 | `07-OWNER.md` | 9 areas across two layouts — dashboard, cash queue, location console, jobs, employees |
 | `08-SHARED-SCREENS.md` | Login, consent, permission ladder, the five universal states, nav shell, accessibility |
 
@@ -84,7 +84,7 @@ Non-negotiable, and each traceable to a decision already taken:
 - **IBM Plex Sans**, Condensed for large figures. Tabular figures everywhere numbers appear.
 - **52pt tap targets** in `field` density. Gloves, moving vehicle.
 - **The same job is a card on a phone and a table row on desktop.** A review checkpoint on every owner screen.
-- **Dispatchers never see money** — no completion figures, no `contract_value`. Verified by CI, not by memory.
+- **Dispatchers never see job money** — no completion figures. Verified by CI, not by memory. (The AMC price is theirs by decision, 2026-09-15.)
 - **No blur, no shadows on Android list items, no shimmer, no continuous animation.**
 - **English only**, `en-IN` number formatting.
 
@@ -97,7 +97,7 @@ Non-negotiable, and each traceable to a decision already taken:
 | 0 | Tokens, primitives, the seven states, motion tokens, `NavShell`, **a rendered component gallery** |
 | 1 | Technician — 7 screens, the stepper, the permission ladder (built with an outbox UI, removed 2026-09-15) |
 | 2 | Dispatcher — 6 screens, Job Logs at `console` density, multi-select |
-| 2B | Contracts — chips, visit schedule, the reschedule path on the cancel sheet |
+| 2B | AMC — the dispatcher's AMC tab and form, the dispatch AMC option, the technician's Free/Charge choice |
 | 3 | Sales rep — 7 screens, online, with sale-line discounts and photo-only payment evidence |
 | 4 | Owner — both layouts, `DataTable`, the map, the cash queue |
 | 5 | Field validation — sunlight legibility, gloved tap accuracy, **dropped frames on the roster's slowest handset** |

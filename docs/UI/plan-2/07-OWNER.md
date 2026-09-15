@@ -45,7 +45,7 @@ Ordered by consequence, not recency:
 2. Cash variances
 3. Overdue jobs
 4. Tracking health: stale or permission-missing
-5. Contracts expiring inside 30 days
+5. AMCs ending within 7 days
 
 Each row links straight to the thing. **If this section is empty, say so explicitly** — *"Nothing needs attention."* An empty section that renders as blank space reads as a broken screen, and the owner needs to know the difference between "no problems" and "not loaded".
 
@@ -204,15 +204,11 @@ Job history on a customer uses `JobRow` at `desk` density and carries the amount
 
 ---
 
-## O6. Contracts
+## O6. Contracts (AMC)
 
-**Phone:** cards with visits used. **Desktop:** table plus a visit schedule in the side detail.
+The dispatcher's AMC screens (`05-DISPATCHER.md` §D5) with the owner's layouts. **Phone:** the same three sections as cards. **Desktop:** a table — number · customer · start · end · price · state · next due — with the linked jobs in the side detail.
 
-Columns: number · site · billing · visits used/included · start · end · value · sold by.
-
-**Renewals** is a filtered view, not a separate screen: expiring within 60 days, sorted by days remaining. Each row shows visits used, because a spent visit reduces what the renewal is worth.
-
-The visit schedule in the detail shows every visit with its status and, where a visit produced multiple job cards, **all the attempts**. A visit on its third attempt is the thing the owner wants to see when a customer complains.
+The attention feed (§O1, item 5) carries AMCs ending within 7 days.
 
 ---
 

@@ -191,23 +191,47 @@ Search over name and phone · results as two-line rows. Detail: name, phones (ta
 
 ---
 
-## D5. Contracts — read-only
+## D5. AMC — its own tab
 
-**Purpose.** Know that a job is a contract visit, and what number visit it is, when the customer rings about it.
+**Purpose.** Know which AMC customers are due for a visit, which AMCs are about to end, and record new ones — the dispatcher's AMC work, as the owner decided on 2026-09-15 (`docs/decisions/2026-09-15-amc-contracts.md`).
+
+**Worst moment.** A customer rings: "we paid for an AMC, why has nobody come since May?"
 
 ### Anatomy
 
-List of active contracts by site: contract number (mono) · customer · `visit 3 of 4` · next due date · `attempt_count` when above 1.
+```
+┌────────────────────────────────────────┐
+│ AMC                          [ + New ] │
+├────────────────────────────────────────┤
+│ DUE FOR A VISIT                        │
+│ Sunrise Apartments     due since 3 Sep │
+│ last service 3 May       [ Dispatch ]  │
+├────────────────────────────────────────┤
+│ ENDING WITHIN 7 DAYS                   │
+│ Nandi Motors · AMC-…0031      4 days   │
+│ ₹18,000                     [ Renew ]  │
+├────────────────────────────────────────┤
+│ ALL AMCs                    [ search ] │
+└────────────────────────────────────────┘
+```
 
-Detail: the visit schedule as a vertical list with status per visit, and the job cards under each.
+### Content
 
-### The hard constraint
+- **Due for a visit** — active AMCs whose customer's last completed job, of any kind, was four months ago or more, and who has nothing booked. Most overdue first. *Dispatch* opens D3 on that customer with the AMC option ticked.
+- **Ending within 7 days** — fewest days first, with the price, and *Renew*, which opens the AMC form prefilled: start the day after the old end, 12 months, the same price.
+- **All AMCs** — number (mono), customer, end date, state, next due. Searchable.
 
-**No `contract_value`. Anywhere.** Reads come from `v_contract_visits_dispatcher`, which has no value column, and the Phase 2B CI assertion verifies no dispatcher payload carries one (`PLAN-DATA-MODEL.md` §4).
+**Detail:** number, customer, start and end, price, state, last service, next due, notes, and every job linked to the AMC. Actions: *Edit* · *Renew* · *Cancel* (reason required).
 
-The dispatcher can move a visit's due date (`PATCH /v1/contracts/visits/:id`) — the office-side reschedule, for when the customer phones ahead. The technician's on-site version lives on his cancel sheet.
+**Form:** customer (search), start (today), end (start + 12 months − 1 day), price (`MoneyField`), notes. An overlap with an existing AMC renders its number **as a link**, not an error code.
 
-**`attempt_count` above 1 is surfaced deliberately.** A visit on its third attempt is a site worth ringing before sending anyone again, and that is invisible unless the view counts it.
+**The dispatch form (D3)** offers *AMC job · AMC-2627-00031 · until 14 Sep 2027* when the customer's AMC covers today — **ticked**. Unticked, the job is an ordinary job.
+
+### States
+
+- **Empty (nothing due):** *"No AMC customer is due for a visit."* — good news, stated.
+- **Offline:** the full-screen *No connection* gate.
+- **Loading:** skeleton rows after 200ms.
 
 ---
 
