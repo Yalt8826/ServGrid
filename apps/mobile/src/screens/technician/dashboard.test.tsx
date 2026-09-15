@@ -237,7 +237,7 @@ describe('DashboardScreen (§T1)', () => {
       i === 0
         ? {
             ...v,
-            job: { ...v.job, contract: { number: 'AMC-2627-0031', billing: 'per_visit' as const, visitsRemaining: 3 } },
+            job: { ...v.job, contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } },
           }
         : v,
     );

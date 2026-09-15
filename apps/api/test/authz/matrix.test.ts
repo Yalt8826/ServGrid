@@ -559,6 +559,29 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'POST /v1/jobs',
+    method: 'POST',
+    url: '/v1/jobs',
+    // The dispatcher's create door (T2B.3, §6.3): dispatcher and owner —
+    // `job` × `create` at scope `all`, so a technician's `own` never
+    // raises jobs and a rep's `none` is refused outright. Behind
+    // `dispatch.console` (lit for the office roles in beforeAll); the
+    // body parses after requireAuth, so `anon` is 401, not 422.
+    probe: (actor) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/jobs',
+        headers: bearer(actor),
+        payload: { customerId, serviceId, priority: 'normal' },
+      }),
+    expect: { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED },
+    assertOk: (_actor, res) => {
+      const card = res.json<{ jobNumber: string; status: string; title: string }>();
+      expect(card.jobNumber).toMatch(/^JC-\d{4}-\d{5}$/);
+      expect(card.status).toBe('unassigned');
+    },
+  },
+  {
     name: 'GET /v1/jobs/:id',
     method: 'GET',
     url: '/v1/jobs/:id',

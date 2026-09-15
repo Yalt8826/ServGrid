@@ -217,11 +217,39 @@ export const jobRescheduleSchema = z
   })
   .strict();
 
+/**
+ * POST /v1/jobs (PLAN-BACKEND.md §6.3) — the dispatcher's create door. The
+ * server allocates the number and the title (the service's name); the
+ * card starts `unassigned`, and assignment is the separate assign call
+ * under If-Match. `contractId` links the job to the customer's AMC — the
+ * dispatch form's ticked AMC option (decision 2026-09-15).
+ */
+export const jobCreateSchema = z
+  .object({
+    customerId: uuid,
+    serviceId: uuid,
+    customerProductId: uuid.nullable().optional(),
+    priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+    scheduledFor: isoDateTime.nullable().optional(),
+    contactName: z.string().trim().max(200).nullable().optional(),
+    contactPhone: z.string().trim().max(40).nullable().optional(),
+    description: z.string().trim().max(4000).nullable().optional(),
+    contractId: uuid.nullable().optional(),
+  })
+  .strict();
+export type JobCreate = z.infer<typeof jobCreateSchema>;
+
 export type JobCancel = z.infer<typeof jobCancelSchema>;
 export type JobReschedule = z.infer<typeof jobRescheduleSchema>;
 export type JobCompletionAmendRequest = z.infer<typeof jobCompletionAmendSchema>;
 
 // ── job card responses — one schema per role, no optional-field overlaps ────
+
+/** The AMC behind a technician's job — its number and end, never its price (decision 2026-09-15). */
+export const jobContractRefSchema = z
+  .object({ number: z.string(), endDate: z.string().date() })
+  .strict();
+export type JobContractRef = z.infer<typeof jobContractRefSchema>;
 
 export const JobCardTechnicianSchema = z
   .object({
@@ -235,13 +263,7 @@ export const JobCardTechnicianSchema = z
     contactName: z.string().nullable(),
     contactPhone: z.string().nullable(),
     description: z.string().nullable(),
-    contract: z
-      .object({
-        number: z.string(),
-        billing: z.enum(['upfront', 'per_visit']),
-        visitsRemaining: z.number().int(),
-      })
-      .nullable(),
+    contract: jobContractRefSchema.nullable(),
     version: z.number().int(),
   })
   .strict();

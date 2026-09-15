@@ -18,12 +18,12 @@
  *   (`GET /v1/jobs/:id/events`, money-free). Every event that moved the
  *   job's status becomes a line, in the order the server recorded them.
  * - **The chips** (`warrantyChipOf`, `detailContractChipOf`): the
- *   warranty chip carries the expiry date, and the contract chip leads
- *   with **prepaid** when the billing is upfront — the load-bearing
- *   word (§T3, §T4).
+ *   warranty chip carries the expiry date, and the contract chip names
+ *   the AMC and its end — never a price (decision 2026-09-15).
  */
 import type { JobStatus, JobTimelineDispatcherResponse } from '@servgrid/shared';
 
+import { formatDateWithYear } from '../../components/ui/DatePicker';
 import { istDateKey, istTimeLabel, statusPillOf, type JobView, type UnitView } from './jobView';
 
 // ── the stepper's shape ──────────────────────────────────────────────────────
@@ -179,16 +179,14 @@ export function warrantyChipOf(unit: UnitView | null | undefined, now: Date): st
 }
 
 /**
- * The contract chip, detail edition. The word **prepaid** is the
- * load-bearing part (§T3): an upfront-billed contract visit is the one
- * where the complete sheet will show no amount field at all, and the
- * technician must be able to see that BEFORE he opens the sheet.
+ * The contract chip, detail edition. "AMC · until 14 Sep 2027" — the AMC
+ * behind the job; never a price (decision 2026-09-15). The end date is
+ * the load-bearing part: it is what tells the technician whether this
+ * visit is the term's last.
  */
 export function detailContractChipOf(contract: JobView['job']['contract']): string | null {
   if (contract === null) return null;
-  const visits = `${contract.visitsRemaining} visit${contract.visitsRemaining === 1 ? '' : 's'} left`;
-  const prepaid = contract.billing === 'upfront' ? ' · prepaid' : '';
-  return `${contract.number} · ${visits}${prepaid}`;
+  return `AMC · until ${formatDateWithYear(contract.endDate)}`;
 }
 
 // ── labels ───────────────────────────────────────────────────────────────────

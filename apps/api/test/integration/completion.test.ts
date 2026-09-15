@@ -846,11 +846,50 @@ describe('the request itself', () => {
   });
 });
 
-describe('§6.2 step 7 — contract visits', () => {
-  it.skip('a contract visit flips contract_visits.status to completed', async () => {
-    // Phase 2B: `contract_visits` is created by migration 015, which also
-    // adds job_cards.contract_visit_id's FOREIGN KEY. The hook
-    // (onContractVisitCompleted in modules/jobs/service.ts) is where the
-    // flip happens; this test is written then, against that table.
+describe('an AMC job completes like any other (§6.2, decision 2026-09-15)', () => {
+  it('completing an AMC job with cost omitted and collectionMode none is accepted — the reminder reads v_contracts', async () => {
+    // The AMC behind the job, covering today.
+    const amcId = (
+      await db.query<{ id: string }>(
+        `INSERT INTO service_contracts
+           (contract_number, customer_id, start_date, end_date, contract_value, created_by)
+         VALUES ($1, $2, $3::date, $4::date, '12000.00', $5) RETURNING id`,
+        [
+          `AMC-T16-${randomBytes(4).toString('hex')}`,
+          customerId,
+          new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() - 10 * 86_400_000)),
+          new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() + 355 * 86_400_000)),
+          DISPATCHER.id,
+        ],
+      )
+    ).rows[0]!.id;
+    const jobId = await seedJobWithContract(amcId);
+
+    // No cost, no mode — the absent-means-zero shape a Free completion sends.
+    const res = await postComplete(TECH_A.token, jobId, completeBody({ collectionMode: 'none' }));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().status).toBe('completed');
+    const money = await moneyRow(jobId);
+    expect(money).not.toBeNull();
+    expect(money!.cost).toBe('0.00');
+    expect(money!.collection_mode).toBe('none');
+
+    // §6.2 step 7 removed 2026-09-15: there is no hook to assert — the
+    // AMC's reminder derives from the completed job itself (v_contracts:
+    // last_service_date is any completed job at the customer).
+    const lastService = await db.query<{ last_service_date: string }>(
+      `SELECT last_service_date::text FROM v_contracts WHERE id = $1`,
+      [amcId],
+    );
+    expect(lastService.rows[0]!.last_service_date).toBe(
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()),
+    );
   });
 });
+
+/** The seedJob card, linked to an AMC — the only extra column this suite needs. */
+async function seedJobWithContract(contractId: string): Promise<string> {
+  const jobId = await seedJob('in_progress');
+  await db.query('UPDATE job_cards SET contract_id = $2 WHERE id = $1', [jobId, contractId]);
+  return jobId;
+}

@@ -35,12 +35,13 @@ import { istTimeLabel, railColorOf, statusPillOf, type JobView } from '../../scr
 
 export const RAIL_WIDTH = 4;
 
-/** The contract chip from the job card's contract context (§T3:
- * "visit n of m" — the card carries `visitsRemaining`; the remaining
- * count is the load-bearing half, so that is what reads). */
-export function contractChipLabel(visitsRemaining: number | null): string | null {
-  if (visitsRemaining === null) return null;
-  return `AMC · ${visitsRemaining} visit${visitsRemaining === 1 ? '' : 's'} left`;
+/** The contract chip from the job card's contract context (§T2 chip is
+ * `[AMC]`): the word AMC alone on the card — the detail screen carries
+ * the end date, the card only the fact that the work is AMC work
+ * (decision 2026-09-15). */
+export function contractChipLabel(contract: { number: string; endDate: string } | null): string | null {
+  if (contract === null) return null;
+  return 'AMC';
 }
 
 export interface JobCardProps {
@@ -67,7 +68,7 @@ export function JobCard({ view, compact = false, onPress, actions, arrivedFromSy
   const pill = statusPillOf(job.status);
   const rail = railColorOf(job.status);
   const rejected = view.rejectedMessage !== null;
-  const contract = contractChipLabel(job.contract?.visitsRemaining ?? null);
+  const contract = contractChipLabel(job.contract);
 
   // The 140ms sync entrance — opacity + a 16pt rise. Runs once on mount,
   // and only when the list flags the row as genuinely new.

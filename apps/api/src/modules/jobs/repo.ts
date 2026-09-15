@@ -49,15 +49,18 @@ const VARIANT_DEFS: Readonly<Record<CardVariant, VariantDef>> = {
   technician: {
     columns: `jc.id, jc.job_number, jc.title, jc.status, jc.priority,
       jc.scheduled_for, jc.customer_id, jc.assigned_to, jc.contact_name,
-      jc.contact_phone, jc.description, jc.version`,
-    joins: '',
+      jc.contact_phone, jc.description, jc.version,
+      amc.contract_number AS contract_number, amc.end_date::text AS contract_end_date`,
+    // Only a live AMC reaches the phone: a job whose AMC was cancelled
+    // afterwards shows no chip and no Free option (decision 9).
+    joins: ' LEFT JOIN service_contracts amc ON amc.id = jc.contract_id AND amc.cancelled_at IS NULL',
   },
   owner: {
     columns: `jc.id, jc.job_number, jc.title, jc.status, jc.priority,
       jc.scheduled_for, jc.customer_id, c.name AS customer_name,
       jc.assigned_to,
       ${OVERDUE_SQL} AS is_overdue,
-      (jc.contract_visit_id IS NOT NULL) AS is_contract_visit,
+      (jc.contract_id IS NOT NULL) AS is_contract_visit,
       jc.version,
       done.cost::text AS cost,
       done.discount_amount::text AS discount_amount,
@@ -90,6 +93,9 @@ export interface TechnicianCardRow extends CardRowBase {
   contact_name: string | null;
   contact_phone: string | null;
   description: string | null;
+  /** The live AMC's number and end (IST date text) — null when the job has none, or its AMC was cancelled. */
+  contract_number: string | null;
+  contract_end_date: string | null;
 }
 
 export interface OwnerCardRow extends DispatcherCardRow {
@@ -271,8 +277,6 @@ export interface JobCompletionLockRow {
   assigned_to: string | null;
   /** Stack changes belong to the job's site (§6.2 step 5). */
   customer_id: string;
-  /** Non-null only on a contract visit — Phase 2B flips the visit's status (§6.2 step 7). */
-  contract_visit_id: string | null;
 }
 
 /**
@@ -282,7 +286,7 @@ export interface JobCompletionLockRow {
  */
 export async function lockJobForCompletion(db: Db, jobId: string): Promise<JobCompletionLockRow | null> {
   const r = await db.query<JobCompletionLockRow>(
-    `SELECT id, status, assigned_to, customer_id, contract_visit_id
+    `SELECT id, status, assigned_to, customer_id
      FROM job_cards WHERE id = $1 FOR UPDATE`,
     [jobId],
   );
@@ -590,8 +594,8 @@ export interface JobCancelLockRow {
   id: string;
   status: JobStatus;
   assigned_to: string | null;
-  /** Non-null only on a contract visit — Phase 2B flips the visit's status instead (§6.3). */
-  contract_visit_id: string | null;
+  /** The job's AMC, when it is linked to one — the successor inherits it if the AMC covers the new day (decision 2026-09-15). */
+  contract_id: string | null;
   // The fields the successor card copies (§6.3: same customer, same service).
   customer_id: string;
   service_id: string;
@@ -611,7 +615,7 @@ export interface JobCancelLockRow {
  */
 export async function lockJobForCancellation(db: Db, jobId: string): Promise<JobCancelLockRow | null> {
   const r = await db.query<JobCancelLockRow>(
-    `SELECT id, status, assigned_to, contract_visit_id, customer_id, service_id,
+    `SELECT id, status, assigned_to, contract_id, customer_id, service_id,
             customer_product_id, title, description, priority, contact_name, contact_phone
      FROM job_cards WHERE id = $1 FOR UPDATE`,
     [jobId],
@@ -656,7 +660,7 @@ export async function cancelJobCard(db: Db, jobId: string, closedAt: string): Pr
   ]);
 }
 
-export interface SuccessorJobInsert {
+export interface JobCardInsert {
   jobNumber: string;
   customerId: string;
   serviceId: string;
@@ -664,26 +668,34 @@ export interface SuccessorJobInsert {
   title: string;
   description: string | null;
   priority: 'low' | 'normal' | 'high' | 'urgent';
-  /** The cancelled job's `rescheduleTo`, at IST midnight so `business_date` lands on the day asked for. */
-  scheduledFor: string;
+  /**
+   * The card's IST instant — for a successor, the cancelled job's
+   * `rescheduleTo` at IST midnight so `business_date` lands on the day
+   * asked for; for a dispatcher's create, the form's datetime or null (a
+   * job without a day is allowed — the dispatcher may not know yet).
+   */
+  scheduledFor: string | null;
   contactName: string | null;
   contactPhone: string | null;
-  /** The canceller — a human raised this card, unlike the generator's system cards (§3.4). */
+  /** The raiser — a human raised this card, unlike the generator's system cards (§3.4). */
   createdBy: string;
+  /** The customer's AMC behind the job, when raised under one (decision 2026-09-15). */
+  contractId: string | null;
 }
 
 /**
- * The successor card (§6.3): same customer, same service, new date,
- * `unassigned` — `job_assignment_coherent` holds because both sides of
- * the assignment pair start NULL. Returns the id the cancellation row
- * links as `replacement_job_id`.
+ * The card insert (§6.3): same shape for the dispatcher's create door and
+ * the cancellation's successor — same customer, same service,
+ * `unassigned`, `job_assignment_coherent` holds because both sides of the
+ * assignment pair start NULL. Returns the id the caller links
+ * (`replacement_job_id`) or reads the card back from.
  */
-export async function insertSuccessorJob(db: Db, s: SuccessorJobInsert): Promise<string> {
+export async function insertJobCard(db: Db, s: JobCardInsert): Promise<string> {
   const r = await db.query<{ id: string }>(
     `INSERT INTO job_cards
        (job_number, customer_id, service_id, customer_product_id, title, description,
-        priority, status, scheduled_for, contact_name, contact_phone, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'unassigned', $8, $9, $10, $11)
+        priority, status, scheduled_for, contact_name, contact_phone, created_by, contract_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'unassigned', $8, $9, $10, $11, $12)
      RETURNING id`,
     [
       s.jobNumber,
@@ -697,9 +709,66 @@ export async function insertSuccessorJob(db: Db, s: SuccessorJobInsert): Promise
       s.contactName,
       s.contactPhone,
       s.createdBy,
+      s.contractId,
     ],
   );
   return r.rows[0]!.id;
+}
+
+// ── create (§6.3 POST /v1/jobs) ─────────────────────────────────────────────
+
+/** The active service the form named — the title the card carries is its name. */
+export async function findActiveService(db: Db, serviceId: string): Promise<{ id: string; name: string } | null> {
+  const r = await db.query<{ id: string; name: string }>(
+    'SELECT id, name FROM services WHERE id = $1 AND is_active',
+    [serviceId],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** The active customer the job is raised for. */
+export async function findActiveCustomer(db: Db, customerId: string): Promise<{ id: string } | null> {
+  const r = await db.query<{ id: string }>(
+    'SELECT id FROM customers WHERE id = $1 AND is_active',
+    [customerId],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** Does the named unit stand at this customer's site — active, so the soft-deleted ones cannot be attached to? */
+export async function unitBelongsTo(db: Db, unitId: string, customerId: string): Promise<boolean> {
+  const r = await db.query<{ ok: number }>(
+    'SELECT 1 AS ok FROM customer_products WHERE id = $1 AND customer_id = $2 AND is_active',
+    [unitId, customerId],
+  );
+  return r.rows.length > 0;
+}
+
+/** The AMC a `contractId` names — the service checks customer, cancellation and term against it. */
+export interface ContractForJobRow {
+  id: string;
+  customer_id: string;
+  start_date: string;
+  end_date: string;
+  cancelled_at: Date | null;
+}
+
+export async function findContractForJob(db: Db, contractId: string): Promise<ContractForJobRow | null> {
+  const r = await db.query<ContractForJobRow>(
+    `SELECT id, customer_id, start_date::text, end_date::text, cancelled_at
+     FROM service_contracts WHERE id = $1`,
+    [contractId],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** The IST business date of the job's slot — or of now, when the form sent no date. */
+export async function businessDateOf(db: Db, at: string | null): Promise<string> {
+  const r = await db.query<{ d: string }>(
+    'SELECT business_date(COALESCE($1::timestamptz, now()))::text AS d',
+    [at],
+  );
+  return r.rows[0]!.d;
 }
 
 export interface JobRescheduleLockRow {

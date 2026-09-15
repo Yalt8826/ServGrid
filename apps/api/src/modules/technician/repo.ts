@@ -44,14 +44,19 @@ export interface WorkJobRow {
   version: number;
   /** When the job was completed or cancelled — dates "done today" on his dashboard. */
   closed_at: Date | null;
+  /** The live AMC's number and end (IST date text) — null when the job has none, or its AMC was cancelled. */
+  contract_number: string | null;
+  contract_end_date: string | null;
 }
 
 export async function workJobs(db: Db, actorId: string, windowDays: number, limit: number): Promise<WorkJobRow[]> {
   const r = await db.query<WorkJobRow>(
     `SELECT jc.id, jc.job_number, jc.title, jc.status::text AS status, jc.priority::text AS priority,
             jc.scheduled_for, jc.customer_id, jc.contact_name, jc.contact_phone, jc.description, jc.version,
-            jc.closed_at
+            jc.closed_at,
+            amc.contract_number AS contract_number, amc.end_date::text AS contract_end_date
        FROM job_cards jc
+       LEFT JOIN service_contracts amc ON amc.id = jc.contract_id AND amc.cancelled_at IS NULL
       WHERE jc.assigned_to = $1
         AND ${WINDOW_CLAUSE}
       ORDER BY jc.job_number

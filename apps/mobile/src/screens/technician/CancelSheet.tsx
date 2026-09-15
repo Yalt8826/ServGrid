@@ -20,15 +20,12 @@
  *   guard (`rescheduleDateErrorOf`) refuses before state, so a clamp has
  *   no path in and the DatePicker's own fallback date cannot sneak one
  *   through either.
- * - **The contract warning slot is built, and renders nothing pre-2B**
- *   (the "Done when"): `contractWarningOf` is null without a contract,
- *   which pre-2B is every job. When 2B arrives, the warning stands above
- *   the date picker in body weight — the one place the app warns a
- *   technician about a default, because the spent visit lands on the
- *   customer, invisibly.
+ * - **An AMC job cancels like any other — AMCs carry no visit count
+ *   (decision 2026-09-15).** The pre-2B "spends a visit" warning slot is
+ *   gone: there is nothing spent to warn about.
  * - **Skippable is honest.** No date is a valid submission (§6.3: an
- *   ordinary job is simply cancelled; a contract visit becomes
- *   `skipped`). Submit demands a reason — never a date.
+ *   ordinary job is simply cancelled). Submit demands a reason — never a
+ *   date.
  * - **Submit is never disabled for a network reason.** Like the complete
  *   sheet: the write is the route's job (§5); a failure keeps the sheet
  *   open with everything he chose — never lose the record of a wasted trip.
@@ -51,7 +48,6 @@ import { messageOfWriteError } from '../../lib/intentWrite';
 import { istDateKey, type JobView } from './jobView';
 import {
   cancelPayloadOf,
-  contractWarningOf,
   rescheduleConfirmLine,
   rescheduleDateErrorOf,
   rescheduleWindow,
@@ -89,9 +85,6 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const blocker = submitBlockerOf({ reasonCode, note });
-  // Phase 2B's warning in its Phase 1 slot: above the date picker, body
-  // weight — and nothing at all until a contract exists (§T5 Done when).
-  const warning = contractWarningOf(view.job.contract);
 
   /** The entry guard behind the picker AND the field: a refused date
    * never reaches state, so "not silently clamped" holds by construction
@@ -192,15 +185,6 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
         testID="cancel-note"
       />
 
-      {/* THE CONTRACT WARNING SLOT (§T5) — above the date picker, in body
-          not caption. Renders nothing pre-2B: the slot exists, the copy
-          waits for contracts to exist. */}
-      {warning !== null ? (
-        <Text testID="cancel-contract-warning" style={styles.warning}>
-          {warning}
-        </Text>
-      ) : null}
-
       {/* Reschedule to — a date picker, skippable (§T5). The field shows
           the choice; the rows below offer today and the next fortnight,
           so every tappable day is a legal one. */}
@@ -283,11 +267,6 @@ const styles = StyleSheet.create({
     backgroundColor: SEMANTIC.bg.raised,
   },
   reasonRowSelected: { backgroundColor: SEMANTIC.bg.dark, borderColor: SEMANTIC.bg.dark },
-  warning: {
-    ...textStyle('bodyStrong'), // body weight, never caption (§T5)
-    color: SEMANTIC.text.primary,
-    marginTop: SPACE[4],
-  },
   picker: {
     alignSelf: 'stretch',
     borderWidth: 1,

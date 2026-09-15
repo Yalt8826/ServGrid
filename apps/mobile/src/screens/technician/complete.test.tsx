@@ -40,7 +40,6 @@ import {
   amountAfterDiscountOf,
   chargeApplies,
   equipmentDefaultFor,
-  isPrepaidVisit,
   partLineOf,
   payloadOf,
   submitBlockerOf,
@@ -480,24 +479,21 @@ describe('CompleteSheet (§T4)', () => {
     expect(input!.props.value).toBe('Battery swap.');
   });
 
-  it('9 · a prepaid contract visit hides the amount field AND the Paid-by segments', async () => {
+  it('9 · an AMC job completes like any other — the money fields stand', async () => {
+    // 2B: no prepaid branch (decision 2026-09-15). The Free/Charge choice
+    // is T2B.5's; until then an AMC job closes through the same fields.
     const deps = baseDeps({
-      view: viewOf({ contract: { number: 'AMC-2627-0031', billing: 'upfront', visitsRemaining: 3 } }),
+      view: viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }),
     });
     const renderer = await create(<CompleteSheet {...deps} />);
     let tree = toJson(renderer);
 
-    // Absent — not zero, not disabled. There is no field to tap.
-    expect(findByTestID(tree, 'complete-amount')).toBeUndefined();
-    expect(findByTestID(tree, 'complete-paid-by')).toBeUndefined();
-    expect(findByTestID(tree, 'complete-discount-toggle')).toBeUndefined();
+    // The ordinary money half is present for an AMC job too.
+    expect(findByTestID(tree, 'complete-amount')).toBeDefined();
+    expect(findByTestID(tree, 'complete-paid-by')).toBeUndefined(); // nothing charged yet — "No payment taken"
+    expect(findByTestID(tree, 'complete-prepaid')).toBeUndefined();
 
-    // The chip that says why sits in their place, and it says prepaid.
-    const chip = findByTestID(tree, 'complete-prepaid-chip');
-    expect(chip).toBeDefined();
-    expect(allText(chip ?? null).join(' ')).toContain('prepaid');
-
-    // The rest of the sheet is untouched — work done, parts, submit.
+    // Submitting free: no cost key, mode none — the honest zeros.
     await typeInto(tree, 'complete-work-done', 'Quarterly service.');
     tree = toJson(renderer);
     await trySubmit(tree);
@@ -506,8 +502,7 @@ describe('CompleteSheet (§T4)', () => {
     expect(payload.collectionMode).toBe('none');
     expect(payload.cost).toBeUndefined();
     expect(payload.discountAmount).toBeUndefined();
-    expect(isPrepaidVisit(deps.view)).toBe(true);
-    expect(chargeApplies('', '', true)).toBe(false);
+    expect(chargeApplies('', '')).toBe(false);
   });
 });
 
@@ -650,9 +645,9 @@ describe('CompleteSheet — Done when (§T4)', () => {
     expect(amountAfterDiscountOf('500', '')).toBe(500);
     expect(amountAfterDiscountOf('500', '500')).toBe(0);
     expect(amountAfterDiscountOf('', '')).toBeNull();
-    expect(chargeApplies('500', '500', false)).toBe(false); // zero after discount
-    expect(chargeApplies('', '', false)).toBe(false); // empty
-    expect(chargeApplies('500', '200', false)).toBe(true);
+    expect(chargeApplies('500', '500')).toBe(false); // zero after discount
+    expect(chargeApplies('', '')).toBe(false); // empty
+    expect(chargeApplies('500', '200')).toBe(true);
 
     // Submit blockers are validation facts only — no network-shaped
     // input exists to disable submit for a network reason (§T4 Never).

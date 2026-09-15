@@ -20,6 +20,14 @@ export function formatDateEnIN(iso: string, nowYear: number): string {
   return Number(y) === nowYear ? `${Number(d)} ${month}` : `${Number(d)} ${month} ${y}`;
 }
 
+/** `14 Sep 2027`, always with the year — the AMC chip's date format: an
+ * AMC term spans years, so the year is the fact (decision 2026-09-15). */
+export function formatDateWithYear(iso: string): string {
+  const [y = '', m = '', d = ''] = iso.split('-');
+  const month = MONTHS[Number(m) - 1] ?? m;
+  return `${Number(d)} ${month} ${y}`;
+}
+
 export interface DatePickerProps {
   label: string;
   /** ISO `YYYY-MM-DD`, or null for no date yet. */

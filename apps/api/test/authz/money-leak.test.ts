@@ -125,6 +125,9 @@ const ROUTE_TABLE: RouteEntry[] = [];
  */
 const DISPATCHER_MANIFEST: ReadonlyArray<{ method: string; url: string }> = [
   { method: 'GET', url: '/v1/jobs' },
+  // T2B.3: the create door — dispatcher and owner; walked like the rest
+  // (the card response is money-free by construction).
+  { method: 'POST', url: '/v1/jobs' },
   // T2.7: the dashboard figures — same view, counted server-side.
   { method: 'GET', url: '/v1/jobs/summary' },
   { method: 'GET', url: '/v1/jobs/:id' },

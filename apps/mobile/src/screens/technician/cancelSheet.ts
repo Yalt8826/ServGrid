@@ -18,22 +18,14 @@
  *   nobody agreed to. `rescheduleDateErrorOf` carries the refusal; the
  *   screen applies a date only when the refusal is null.
  * - **Skippable reschedule.** No `rescheduleTo` is an honest outcome —
- *   an ordinary job is simply cancelled; a contract visit becomes
- *   `skipped` and the customer has spent it (§6.3). Submit never demands
- *   a date.
- * - **The contract warning is Phase 2B, the slot is now.**
- *   `contractWarningOf` returns null without a contract — which pre-2B
- *   is every job — so the slot renders nothing. When 2B lands, the
- *   warning sits above the date picker in body weight: the one place the
- *   app warns a technician about a default rather than trusting him to
- *   know it, because the consequence (a spent visit) lands on the
- *   customer.
+ *   an ordinary job is simply cancelled, and an AMC job with it: AMCs
+ *   carry no visit count, so nothing is spent (decision 2026-09-15).
+ *   Submit never demands a date.
  * - **The `other` note is the server's rule, asked early.** The DB CHECK
  *   and `jobCancelSchema` both refuse an `other` without a note, so the
  *   sheet blocks submit with the why instead of failing the technician
  *   at the door of the drain.
  */
-import type { JobView } from './jobView';
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -78,20 +70,6 @@ export interface CancelSheetPayload {
   reasonCode: CancelReasonCode;
   reasonNote?: string;
   rescheduleTo?: string;
-}
-
-// ── the contract warning (Phase 2B copy, Phase 1 slot) ───────────────────────
-
-/**
- * The one warning about a default in the app (§T5). Null without a
- * contract — pre-2B that is every job, so the slot above the date picker
- * renders nothing. The count is the customer's remaining visits: the
- * number the technician's decision spends.
- */
-export function contractWarningOf(contract: JobView['job']['contract']): string | null {
-  if (contract === null) return null;
-  const visits = `${contract.visitsRemaining} visit${contract.visitsRemaining === 1 ? '' : 's'}`;
-  return `Skipping without a date spends one of this customer's ${visits}.`;
 }
 
 // ── the reschedule date ──────────────────────────────────────────────────────

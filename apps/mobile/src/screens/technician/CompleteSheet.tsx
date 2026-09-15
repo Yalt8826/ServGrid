@@ -14,10 +14,8 @@
  *   segments. The action prop is required and spelled here — a gate
  *   defaulting to `read` would hide the amount field from the
  *   technician filling it in, whose `job.money` read scope is `none`.
- * - **Prepaid contract visit** — the amount field and the Paid-by
- *   segments are ABSENT (not zero, not disabled); the contract chip
- *   reading **prepaid** sits in their place. The payload carries no
- *   money fields, which is the server's honest 0/0/none shape.
+ * - **AMC job — the Free/Charge choice arrives in T2B.5; until then an
+ *   AMC job completes like any other.**
  * - **No charge → "No payment taken"** in the segments' place, a single
  *   non-interactive line; `collection_mode: 'none'` is submitted. A
  *   warranty job is never asked how he was paid for work that was free.
@@ -62,12 +60,10 @@ import { TextField } from '../../components/ui/TextField';
 import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
 import { messageOfWriteError } from '../../lib/intentWrite';
-import { detailContractChipOf } from './jobDetail';
 import type { JobView } from './jobView';
 import {
   chargeApplies,
   inWarranty,
-  isPrepaidVisit,
   partLineOf,
   payloadOf,
   submitBlockerOf,
@@ -86,7 +82,7 @@ export const CONTEXT_STRIP_PT = 140;
 export const CONTEXT_STRIP_EXTRA_PT = CONTEXT_STRIP_PT - 64;
 
 export interface CompleteSheetDeps {
-  /** The job being completed — status, contract (prepaid), the unit (warranty). */
+  /** The job being completed — status, contract, the unit (warranty). */
   view: JobView;
   /** The product catalogue for the parts picker, from the work read. */
   products: readonly PartProduct[];
@@ -107,7 +103,6 @@ type PickerMode = 'closed' | 'catalogue';
 
 export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   const { view } = deps;
-  const prepaid = isPrepaidVisit(view);
 
   const [workSummary, setWorkSummary] = useState('');
   const [amount, setAmount] = useState('');
@@ -131,9 +126,8 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   const [warrantyAcked, setWarrantyAcked] = useState(false);
 
   const blocker = submitBlockerOf({ workSummary, amount, discountAmount, discountReason, lines });
-  const charged = chargeApplies(amount, discountAmount, prepaid);
+  const charged = chargeApplies(amount, discountAmount);
   const warranty = inWarranty(view, deps.now);
-  const contractChip = detailContractChipOf(view.job.contract);
 
   function patchLine(localId: string, patch: Partial<PartLine>): void {
     setLines((current) => current.map((line) => (line.localId === localId ? { ...line, ...patch } : line)));
@@ -221,93 +215,79 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
         />
 
         {/* The money half lives behind the gate whose action is spelled
-            out — create, the write-once cell the technician holds. */}
+            out — create, the write-once cell the technician holds. An AMC
+            job completes like any other until T2B.5 adds Free/Charge. */}
         <MoneyGate role={deps.role} action="create" testID="complete-money-gate">
-          {prepaid ? (
-            // The prepaid branch: the money fields are ABSENT, and the
-            // chip that says why sits in their place (§T4).
-            <View testID="complete-prepaid" style={styles.prepaidBox}>
-              <Text testID="complete-prepaid-chip" style={styles.chip}>
-                {contractChip}
-              </Text>
-              <Text style={[styles.caption, { marginTop: SPACE[2] }]}>
-                Covered by the contract — nothing is collected on this visit.
-              </Text>
+          <MoneyField
+            label="Amount collected"
+            value={amount}
+            onChangeText={setAmount}
+            helperText="Leave empty when nothing is charged."
+            testID="complete-amount"
+          />
+
+          {/* The discount is a secondary disclosure that opens
+              amount AND reason together (§T4) — the database refuses
+              the row without a reason, so the sheet asks for both at
+              once instead of failing the technician later. */}
+          {discountOpen ? (
+            <View testID="complete-discount" style={styles.block}>
+              <MoneyField label="Discount amount" value={discountAmount} onChangeText={setDiscountAmount} testID="complete-discount-amount" />
+              <TextField
+                label="Reason"
+                value={discountReason}
+                onChangeText={setDiscountReason}
+                placeholder="Why the amount was reduced"
+                helperText="Required — a discount is filed with its reason."
+                testID="complete-discount-reason"
+              />
+              <Button
+                label="Remove discount"
+                variant="ghost"
+                onPress={() => {
+                  setDiscountOpen(false);
+                  setDiscountAmount('');
+                  setDiscountReason('');
+                }}
+                testID="complete-discount-remove"
+              />
             </View>
           ) : (
-            <>
-              <MoneyField
-                label="Amount collected"
-                value={amount}
-                onChangeText={setAmount}
-                helperText="Leave empty when nothing is charged."
-                testID="complete-amount"
-              />
+            <Button label="+ Add discount" variant="secondary" onPress={() => setDiscountOpen(true)} testID="complete-discount-toggle" />
+          )}
 
-              {/* The discount is a secondary disclosure that opens
-                  amount AND reason together (§T4) — the database refuses
-                  the row without a reason, so the sheet asks for both at
-                  once instead of failing the technician later. */}
-              {discountOpen ? (
-                <View testID="complete-discount" style={styles.block}>
-                  <MoneyField label="Discount amount" value={discountAmount} onChangeText={setDiscountAmount} testID="complete-discount-amount" />
-                  <TextField
-                    label="Reason"
-                    value={discountReason}
-                    onChangeText={setDiscountReason}
-                    placeholder="Why the amount was reduced"
-                    helperText="Required — a discount is filed with its reason."
-                    testID="complete-discount-reason"
-                  />
-                  <Button
-                    label="Remove discount"
-                    variant="ghost"
-                    onPress={() => {
-                      setDiscountOpen(false);
-                      setDiscountAmount('');
-                      setDiscountReason('');
-                    }}
-                    testID="complete-discount-remove"
-                  />
-                </View>
-              ) : (
-                <Button label="+ Add discount" variant="secondary" onPress={() => setDiscountOpen(true)} testID="complete-discount-toggle" />
-              )}
-
-              {/* Paid by — three segments, not five (§T4). Zero or empty
-                  replaces them IN PLACE with the honest line. */}
-              {charged ? (
-                <View style={styles.block}>
-                  <Text style={styles.sectionLabel}>Paid by</Text>
-                  <View testID="complete-paid-by" style={styles.segments}>
-                    {PAYMENT_SEGMENTS.map((segment) => {
-                      const selected = selectedMode === segment.mode;
-                      return (
-                        <Pressable
-                          key={segment.mode}
-                          testID={`complete-segment-${segment.mode}`}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected }}
-                          onPress={() => {
-                            haptic('pickerSelect');
-                            setSelectedMode(segment.mode);
-                          }}
-                          style={[styles.segment, selected ? styles.segmentSelected : null]}
-                        >
-                          <Text style={{ ...textStyle('label'), color: selected ? SEMANTIC.text.onDark : SEMANTIC.text.primary }}>
-                            {segment.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-              ) : (
-                <Text testID="complete-no-payment" style={styles.noPayment}>
-                  No payment taken
-                </Text>
-              )}
-            </>
+          {/* Paid by — three segments, not five (§T4). Zero or empty
+              replaces them IN PLACE with the honest line. */}
+          {charged ? (
+            <View style={styles.block}>
+              <Text style={styles.sectionLabel}>Paid by</Text>
+              <View testID="complete-paid-by" style={styles.segments}>
+                {PAYMENT_SEGMENTS.map((segment) => {
+                  const selected = selectedMode === segment.mode;
+                  return (
+                    <Pressable
+                      key={segment.mode}
+                      testID={`complete-segment-${segment.mode}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => {
+                        haptic('pickerSelect');
+                        setSelectedMode(segment.mode);
+                      }}
+                      style={[styles.segment, selected ? styles.segmentSelected : null]}
+                    >
+                      <Text style={{ ...textStyle('label'), color: selected ? SEMANTIC.text.onDark : SEMANTIC.text.primary }}>
+                        {segment.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          ) : (
+            <Text testID="complete-no-payment" style={styles.noPayment}>
+              No payment taken
+            </Text>
           )}
         </MoneyGate>
 
@@ -498,18 +478,6 @@ const styles = StyleSheet.create({
   block: { alignSelf: 'stretch', gap: SPACE[3], marginTop: SPACE[4] },
   sectionLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
   caption: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
-  prepaidBox: { alignSelf: 'stretch', gap: SPACE[1] },
-  chip: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
-    borderWidth: 1,
-    borderColor: SEMANTIC.line.default,
-    borderRadius: RADII.control,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    alignSelf: 'flex-start',
-    overflow: 'hidden',
-  },
   segments: { flexDirection: 'row', gap: SPACE[2] },
   segment: {
     flex: 1,
