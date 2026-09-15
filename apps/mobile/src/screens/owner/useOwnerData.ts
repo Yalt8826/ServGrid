@@ -9,12 +9,9 @@
  * create, deactivate, catalogue deactivation) run directly with an
  * idempotency key per intent, the rep's rule.
  *
- * The contracts surface (§O6) is Phase 2B's backend — GET /v1/contracts,
- * /v1/contracts/expiring, /v1/contracts/:id — which does not exist yet;
- * the hooks call the planned endpoints and a 404 surfaces as the list's
- * honest error banner. The screens' tests inject the rows, so the spec's
- * assertions (visits with all attempts, renewals window) hold now and
- * the wiring lands unchanged when 2B ships.
+ * The contracts surface (§O6) is shared now — its hooks live in
+ * `src/screens/contracts/useContracts.ts` (T2B.4), serving the owner and
+ * the dispatcher from the same seam.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -32,9 +29,8 @@ import type {
 } from '@servgrid/shared';
 import { api } from '../../lib/api';
 import { uuid } from '../../lib/uuid';
-import { istBusinessDate } from '../technician/HandoverScreen';
 import { sumMoney } from '../rep/money';
-import type { BlockingRow, ContractRow, ContractVisitRow, EmployeeListRow, OwnerCompanyRow, OwnerPaymentRow, OwnerSaleRow, SecondOwner } from './model';
+import type { BlockingRow, EmployeeListRow, OwnerCompanyRow, OwnerPaymentRow, OwnerSaleRow, SecondOwner } from './model';
 
 // ── api helpers (the rep seam's rules) ─────────────────────────────────────
 
@@ -431,129 +427,10 @@ export function useOwnerCompanyLedger(companyId: string): {
   return { company, ownerRepName, shared, ledger, error, loading, reload };
 }
 
-// ── O6 contracts (the 2B endpoints; screens inject until it lands) ─────────
-
-/** The planned 2B wire shapes, in miniature — the screens' rows. */
-export interface ContractWire {
-  id: string;
-  contractNumber: string | null;
-  site: string;
-  billing: 'upfront' | 'on_visit';
-  visitsUsed: number;
-  visitsIncluded: number;
-  startDate: string;
-  endDate: string;
-  value: string;
-  soldByName: string | null;
-  status: string;
-}
-
-export interface ContractDetailWire {
-  contract: ContractWire;
-  visits: {
-    id: string;
-    ordinal: number;
-    dueDate: string;
-    status: string;
-    attempts: { jobId: string; jobNumber: string; status: string; technicianName: string | null }[];
-  }[];
-}
-
-function contractRowOf(w: ContractWire): ContractRow {
-  return {
-    id: w.id,
-    contractNumber: w.contractNumber,
-    site: w.site,
-    billing: w.billing,
-    visitsUsed: w.visitsUsed,
-    visitsIncluded: w.visitsIncluded,
-    startDate: w.startDate,
-    endDate: w.endDate,
-    value: w.value,
-    soldByName: w.soldByName,
-    status:
-      w.status === 'draft' || w.status === 'active' || w.status === 'expired' || w.status === 'cancelled'
-        ? w.status
-        : 'active',
-  };
-}
-
-export function useOwnerContracts(): {
-  rows: ContractRow[];
-  error: string | null;
-  loading: boolean;
-  reload: () => void;
-} {
-  const [rows, setRows] = useState<ContractRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [tick, setTick] = useState(0);
-  const reload = useCallback(() => setTick((t) => t + 1), []);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    void (async () => {
-      try {
-        const wire = await listOf<ContractWire>('/v1/contracts');
-        if (!alive) return;
-        setRows(wire.map(contractRowOf));
-        setError(null);
-      } catch (e) {
-        if (!alive) return;
-        setError(messageOf(e, 'The contracts could not be loaded.'));
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [tick]);
-
-  return { rows, error, loading, reload };
-}
-
-export function useOwnerContractDetail(contractId: string): {
-  contract: ContractRow | null;
-  visits: ContractVisitRow[];
-  error: string | null;
-  loading: boolean;
-  reload: () => void;
-} {
-  const [contract, setContract] = useState<ContractRow | null>(null);
-  const [visits, setVisits] = useState<ContractVisitRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [tick, setTick] = useState(0);
-  const reload = useCallback(() => setTick((t) => t + 1), []);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    void (async () => {
-      try {
-        const detail = await apiGet<ContractDetailWire>(`/v1/contracts/${contractId}`);
-        if (!alive) return;
-        setContract(contractRowOf(detail.contract));
-        setVisits(detail.visits);
-        setError(null);
-      } catch (e) {
-        if (!alive) return;
-        setContract(null);
-        setVisits([]);
-        setError(messageOf(e, 'The contract could not be loaded.'));
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [contractId, tick]);
-
-  return { contract, visits, error, loading, reload };
-}
+// ── O6 contracts ───────────────────────────────────────────────────────────
+// The old O6 hooks (the contract list and detail reads) are gone: the AMC
+// surface is shared — `src/screens/contracts/useContracts.ts` (T2B.4)
+// serves the owner and the dispatcher from one seam.
 
 // ── O7 employees ───────────────────────────────────────────────────────────
 
@@ -837,11 +714,6 @@ export function useOtherOwners(): {
     };
   }, []);
   return { others, error };
-}
-
-/** Today's IST business date — the renewals window is relative to it. */
-export function ownerToday(): string {
-  return istBusinessDate(new Date());
 }
 
 /** Re-exported for the routes' running-total footers, if they need it. */

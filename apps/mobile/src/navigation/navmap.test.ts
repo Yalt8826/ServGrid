@@ -59,7 +59,7 @@ describe('route tree ↔ guard table — one of each, no orphans', () => {
     expect(TREE.length).toBeGreaterThan(15);
     expect(TREE).toContain('/dashboard');
     expect(TREE).toContain('/cash/handover');
-    expect(TREE).toContain('/contracts/renewals');
+    expect(TREE).not.toContain('/contracts/renewals');
   });
 
   it('every static route has exactly one guard entry', () => {
@@ -85,10 +85,16 @@ describe('cross-check, direction A — every tab leads somewhere permitted', () 
     expect(flattenedRoutes('technician')).toContain('/cash/handover');
   });
 
-  it('sales rep map carries no contract route — reps have no part in AMCs (decision 2026-09-15)', () => {
+  it('sales rep map has no AMC routes — reps have no part in AMCs (decision 2026-09-15)', () => {
     const routes = flattenedRoutes('sales_rep');
     expect(routes).not.toContain('/contracts');
     expect(routes).not.toContain('/contracts/renewals');
+    expect(isRoutePermitted('sales_rep', '/contracts')).toBe(false);
+  });
+
+  it('the dispatcher reaches /contracts from the AMC tab', () => {
+    const amc = groupMapFor('dispatcher').find((g) => g.key === 'amc');
+    expect(amc?.routes).toContain('/contracts');
   });
 });
 
@@ -104,10 +110,10 @@ describe('cross-check, direction B — every permitted destination has a tab', (
   }
 });
 
-describe('tab counts — technician 4 · dispatcher 3 · sales rep 4 · owner 5', () => {
+describe('tab counts — technician 4 · dispatcher 4 · sales rep 5 · owner 5', () => {
   const EXPECTED: Record<Role, number> = {
     technician: 4,
-    dispatcher: 3,
+    dispatcher: 4,
     sales_rep: 5,
     owner: 5,
   };

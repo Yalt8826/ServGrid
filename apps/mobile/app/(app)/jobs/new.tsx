@@ -11,6 +11,7 @@
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { DispatchJobScreen } from '../../../src/screens/dispatcher/dispatch';
@@ -23,7 +24,12 @@ const styles = StyleSheet.create({
 
 export default function Screen() {
   const flags = useDispatchJobLogsFlags();
-  const deps = useDispatchForm();
+  // The AMC tab's Dispatch deep-link (`/jobs/new?customerId=…`) lands
+  // with the customer already chosen; the plain Operations entry has no
+  // param and starts from an empty search.
+  const params = useLocalSearchParams<{ customerId?: string | string[] }>();
+  const initialCustomerId = Array.isArray(params.customerId) ? params.customerId[0] : params.customerId;
+  const deps = useDispatchForm({ initialCustomerId: initialCustomerId ?? null });
 
   if (!flags.consoleOn) {
     // Dark without the flag — the honest placeholder, nothing spinning.

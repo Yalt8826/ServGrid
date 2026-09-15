@@ -15,7 +15,7 @@
  *   language — never a filled pill (no accent background anywhere in
  *   the rail, no radius on any item);
  * - the shell sets density `desk` on this branch and only here;
- * - no collapse control exists — 15 route links, nothing else
+ * - no collapse control exists — 14 route links, nothing else
  *   pressable, and no collapse notion in the source.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -56,12 +56,14 @@ const NAV_SHELL_SOURCE = readFileSync(join(fileURLToPath(new URL('./', import.me
 /** The owner's rail, top to bottom (07-OWNER.md): five sections matching
  * the phone's five groups exactly, expanded to individual routes. The
  * Dashboard section is a bare item — no heading repeated under itself —
- * and Operations names the dispatch form "Dispatch". The probe renders
- * nothing, so these are all the texts there are. */
+ * and Operations names the dispatch form "Dispatch" and the AMC list
+ * "AMC". Renewals is gone (decision 2026-09-15: ending-soon is a section
+ * of the AMC screen). The probe renders nothing, so these are all the
+ * texts there are. */
 const OWNER_RAIL_TEXTS = [
   'Dashboard',
-  'Operations', 'Jobs', 'Dispatch', 'Customers', 'Contracts',
-  'Sales', 'Sales', 'Payments', 'Companies', 'Renewals',
+  'Operations', 'Jobs', 'Dispatch', 'Customers', 'AMC',
+  'Sales', 'Sales', 'Payments', 'Companies',
   'People', 'Employees', 'Location', 'Cash queue',
   'Profile', 'Profile', 'Products', 'Services',
 ];
@@ -114,8 +116,8 @@ describe('NavShell desk branch — the 240px rail at ≥1024px', () => {
     const tree = toJson(renderer);
     expect(findByTestID(tree, 'desk-rail')).toBeTruthy();
     expect(allText(tree)).toEqual(OWNER_RAIL_TEXTS);
-    // 15 individual routes: 1 + 4 + 4 + 3 + 3.
-    expect(railLinks(tree)).toHaveLength(15);
+    // 14 individual routes: 1 + 4 + 3 + 3 + 3.
+    expect(railLinks(tree)).toHaveLength(14);
     // The phone presentation is gone on this branch.
     expect(findByTestID(tree, 'nav-underline')).toBeUndefined();
     expect(findAll(tree, (n) => n.props.accessibilityRole === 'tab')).toEqual([]);
@@ -181,10 +183,10 @@ describe('NavShell active state — the 2px accent bar, never a filled pill', ()
 
   it('a rail press navigates to its route', async () => {
     const renderer = await mountShell();
-    const contracts = railLinks(toJson(renderer)).find((n) => n.props.accessibilityLabel === 'Contracts');
-    expect(contracts).toBeTruthy();
+    const amc = railLinks(toJson(renderer)).find((n) => n.props.accessibilityLabel === 'AMC');
+    expect(amc).toBeTruthy();
     void act(() => {
-      (contracts?.props.onPress as () => void)();
+      (amc?.props.onPress as () => void)();
     });
     expect(route.navigated).toBe('/contracts');
   });
@@ -200,11 +202,11 @@ describe('no collapse control exists', () => {
     expect(/collaps/i.test(NAV_SHELL_CODE)).toBe(false);
   });
 
-  it('the rail is 15 route links and nothing else pressable', async () => {
+  it('the rail is 14 route links and nothing else pressable', async () => {
     const renderer = await mountShell();
     const rail = findByTestID(toJson(renderer), 'desk-rail');
     const pressables = findAll(rail ?? null, (n) => n.type === 'Pressable');
-    expect(pressables).toHaveLength(15);
+    expect(pressables).toHaveLength(14);
     expect(pressables.every((n) => n.props.accessibilityRole === 'link')).toBe(true);
   });
 });

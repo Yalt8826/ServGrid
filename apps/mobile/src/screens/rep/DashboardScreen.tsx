@@ -4,7 +4,8 @@
  * often mid-conversation about money.
  *
  * Anatomy: name · the two figures (sold this month, outstanding) · *New
- * sale* · OWES THE MOST · RENEWING SOON · RECENT PAYMENTS.
+ * sale* · OWES THE MOST · RECENT PAYMENTS. The old RENEWING SOON section
+ * is gone — reps have no part in AMCs (decision 2026-09-15).
  *
  * The figures are the server's, read online — nothing waits on the phone
  * behind them (online-only, decision 2026-09-15).
@@ -12,11 +13,6 @@
  * Motion: figures cross-fade on change, 140ms (`MoneyFigure`). **No
  * count-up** — a money figure animating in front of a customer looks like
  * a slot machine.
- *
- * Renewing soon comes from `v_contracts_expiring` through the loader the
- * route supplies (`RenewingContract[]`, days remaining — urgency is the
- * point, not a date). The contracts backend is a later phase; an empty
- * list renders the section's empty line, never a spinner.
  *
  * Pure UI over injected data (`RepDashboardScreenProps`); `useRepDashboard`
  * owns the reads.
@@ -28,7 +24,7 @@ import { Button, EmptyState } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, MoneyFigure } from './money';
-import type { OwedRow, PaymentRow, RenewalRow } from './model';
+import type { OwedRow, PaymentRow } from './model';
 
 export interface RepDashboardScreenProps {
   name: string;
@@ -39,8 +35,6 @@ export interface RepDashboardScreenProps {
   /** `sales.payments` off — dues and collections render turned off. */
   paymentsOff: boolean;
   owesTheMost: OwedRow[];
-  renewingSoon: RenewalRow[];
-  renewalsError: string | null;
   recentPayments: PaymentRow[];
   paymentsError: string | null;
   companyNames: Record<string, string>;
@@ -141,29 +135,6 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
         })
       )}
 
-      <Text style={styles.sectionLabel}>RENEWING SOON</Text>
-      {props.renewalsError !== null ? (
-        <Text style={styles.errorText} testID="dashboard-renewals-error">
-          {props.renewalsError}
-        </Text>
-      ) : props.renewingSoon.length === 0 ? (
-        <Text style={styles.emptyLine} testID="dashboard-renewals-empty">
-          Nothing renewing in the next 60 days.
-        </Text>
-      ) : (
-        props.renewingSoon.map((row) => (
-          <View key={row.id} style={styles.listRow} testID={`dashboard-renewal-${row.id}`}>
-            <View style={styles.renewalMain}>
-              <Text style={styles.rowPrimary}>{`${row.site} · ${row.contractNumber}`}</Text>
-              <Text style={styles.rowSecondary} testID={`dashboard-renewal-days-${row.id}`}>
-                {row.daysRemaining === 1 ? '1 day' : `${row.daysRemaining} days`}
-              </Text>
-            </View>
-            <Text style={styles.rowMoney}>{`₹${formatMoneyEnIN(row.contractValue)}`}</Text>
-          </View>
-        ))
-      )}
-
       <Text style={styles.sectionLabel}>RECENT PAYMENTS</Text>
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-payments-off">
@@ -186,7 +157,7 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             style={styles.listRow}
             testID={`dashboard-payment-${row.id}`}
           >
-            <View style={styles.renewalMain}>
+            <View style={styles.rowMain}>
               <Text style={styles.rowPrimary}>{props.companyNames[row.companyId] ?? row.companyName}</Text>
               <Text style={styles.rowSecondary}>{`${row.paymentNumber} · ${row.mode} · ${formatDateEnIN(
                 row.businessDate,
@@ -273,7 +244,7 @@ const styles = StyleSheet.create({
     ...textStyle('label'),
     color: SEMANTIC.text.secondary,
   },
-  renewalMain: {
+  rowMain: {
     flex: 1,
     gap: 2,
   },

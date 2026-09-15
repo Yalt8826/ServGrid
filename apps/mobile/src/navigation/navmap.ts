@@ -36,6 +36,7 @@ export type NavGroupKey =
   | 'dashboard'
   | 'jobs'
   | 'operations'
+  | 'amc'
   | 'sales'
   | 'companies'
   | 'cash'
@@ -51,12 +52,12 @@ export interface NavGroup {
 
 /**
  * The map per role — one literal per role, transcribed from
- * PLAN-FRONTEND.md §3. Tab counts: technician 4 · dispatcher 3 ·
+ * PLAN-FRONTEND.md §3. Tab counts: technician 4 · dispatcher 4 ·
  * sales rep 5 · owner 5. `/cash` moves by role rather than being hidden:
  * the owner's reconciliation queue under People, the field roles' own
- * handover as its own tab. `/contracts` is operational for a dispatcher
- * and commercial for the owner — reps have no part in AMCs (decision
- * 2026-09-15), so their map carries no contract route at all.
+ * handover as its own tab. `/contracts` is the dispatcher's own AMC tab
+ * and an Operations entry for the owner; reps have none (decision
+ * 2026-09-15).
  */
 export const NAV_GROUPS: Record<Role, NavGroup[]> = {
   technician: [
@@ -67,7 +68,8 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
   ],
   dispatcher: [
     { key: 'dashboard', label: 'Dashboard', routes: ['/dashboard'] },
-    { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts'] },
+    { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers'] },
+    { key: 'amc', label: 'AMC', routes: ['/contracts', '/contracts/new'] },
     { key: 'profile', label: 'Profile', routes: ['/profile'] },
   ],
   sales_rep: [
@@ -88,7 +90,7 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
   owner: [
     { key: 'dashboard', label: 'Dashboard', routes: ['/dashboard'] },
     { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts'] },
-    { key: 'sales', label: 'Sales', routes: ['/sales', '/payments', '/companies', '/contracts/renewals'] },
+    { key: 'sales', label: 'Sales', routes: ['/sales', '/payments', '/companies'] },
     { key: 'people', label: 'People', routes: ['/employees', '/location', '/cash'] },
     { key: 'profile', label: 'Profile', routes: ['/profile', '/products', '/services'] },
   ],
@@ -145,9 +147,8 @@ export const ROUTE_GUARDS: Record<string, RouteGuard> = {
   '/companies': { kind: 'matrix', resource: 'company', action: 'read', landing: ['all', 'own'] },
   '/companies/new': { kind: 'matrix', resource: 'company', action: 'create', landing: ['all', 'own'] },
 
-  '/contracts': { kind: 'matrix', resource: 'contract', action: 'read', landing: ['all', 'own'] },
-  '/contracts/new': { kind: 'matrix', resource: 'contract', action: 'create', landing: ['all', 'own'] },
-  '/contracts/renewals': { kind: 'matrix', resource: 'contract', action: 'read', landing: ['all', 'own'] },
+  '/contracts': { kind: 'matrix', resource: 'contract', action: 'read', landing: ['all'] },
+  '/contracts/new': { kind: 'matrix', resource: 'contract', action: 'create', landing: ['all'] },
 
   '/products': { kind: 'ownerOnly' },
   '/services': { kind: 'ownerOnly' },
@@ -251,9 +252,8 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/payments/new': 'Record payment',
   '/companies': 'Companies',
   '/companies/new': 'New account',
-  '/contracts': 'Contracts',
-  '/contracts/new': 'New contract',
-  '/contracts/renewals': 'Renewals',
+  '/contracts': 'AMC',
+  '/contracts/new': 'New AMC',
   '/products': 'Products',
   '/services': 'Services',
   '/employees': 'Employees',

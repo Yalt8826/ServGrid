@@ -38,6 +38,8 @@ export class WriteNotSaved extends Error {
     /** 0 when the server was never reached. */
     readonly status: number,
     readonly code: string | null,
+    /** The server's `details`, when it sent any — e.g. DUPLICATE_ENTITY's `existing`. */
+    readonly details: unknown = null,
   ) {
     super(message);
     this.name = 'WriteNotSaved';
@@ -62,10 +64,15 @@ export function createIntentWriter(request: IntentRequest): IntentWriter {
         return res.data;
       }
       if (res.status === 0 || res.status >= 500 || res.error?.code === 'NETWORK') {
-        throw new WriteNotSaved(res.status === 0 || res.error?.code === 'NETWORK' ? NOT_REACHED_MESSAGE : REFUSED_MESSAGE, res.status, res.error?.code ?? null);
+        throw new WriteNotSaved(
+          res.status === 0 || res.error?.code === 'NETWORK' ? NOT_REACHED_MESSAGE : REFUSED_MESSAGE,
+          res.status,
+          res.error?.code ?? null,
+          res.error?.details ?? null,
+        );
       }
       key = null;
-      throw new WriteNotSaved(res.error?.message ?? REFUSED_MESSAGE, res.status, res.error?.code ?? null);
+      throw new WriteNotSaved(res.error?.message ?? REFUSED_MESSAGE, res.status, res.error?.code ?? null, res.error?.details ?? null);
     },
     pendingKey: () => key,
   };

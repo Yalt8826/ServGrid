@@ -6,7 +6,9 @@
  *
  * Reads (§6.4, all live since T2.4):
  * - **search** — `GET /v1/customers?q=` over name and phone, debounced
- *   250ms so mid-call typing fires one request per pause, not per key.
+ *   250ms so mid-call typing fires one request per pause, not per key
+ *   (the search itself lives in `useCustomerSearch`, shared with the
+ *   AMC form).
  * - **stack** — `GET /v1/customers/:id/stack` for the chosen site, the
  *   unit picker's options, labelled through the catalogue read
  *   (`GET /v1/products`) so a unit reads `UPS 850VA · SN LM8842219`.
@@ -14,23 +16,28 @@
  * - **roster** — `GET /v1/technicians/load` joined with
  *   `GET /v1/location/health` via the dashboard's `loadRowsOf`, so the
  *   picker's availability reads the same source D1 does.
+ * - **the customer's AMC** — `GET /v1/contracts?…&limit=1` for the
+ *   chosen customer, while `contracts.manage` is on (decision 2: the
+ *   form OFFERS the AMC option, already ticked; decision 3's reminder
+ *   gap is the server's word, not this hook's).
  *
  * Submit (PLAN-BACKEND.md §6.3): `POST /v1/jobs` — dispatcher, owner;
- * the server allocates the `JC-…` number — and, when the dispatcher
- * named a technician, `POST /v1/jobs/:id/assign` with the `If-Match`
- * version the create just returned. Both doors on this one screen; the
- * toast carries the allocated number either way it ends. NOTE: the
- * create door is the one §6.3 endpoint not yet built api-side ("later
- * tasks on the same module" — jobs/routes.ts); the request/response
- * here is the shape the table and the endpoint table already fix:
- * `job_cards` columns in, `JobCardDispatcher` out.
+ * the server allocates the `JC-…` number; the body carries
+ * `contractId` when the customer has an active AMC and the box is
+ * ticked — through an intent writer (lib/intentWrite), one key per
+ * submit intent pinned WITH its body, so a retry after a dropped
+ * connection replays instead of repeating (an edited form is a new
+ * intent — the server would 422 a changed body under an old key). And,
+ * when the dispatcher named a technician, `POST /v1/jobs/:id/assign`
+ * with the `If-Match` version the create just returned. Both doors on
+ * this one screen; the toast carries the allocated number either way it
+ * ends.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 
 import type {
-  CustomerDispatcher,
   CustomerStackItem,
   JobCardDispatcher,
   ProductRecord,
@@ -39,22 +46,23 @@ import type {
   TrackingHealth,
 } from '@servgrid/shared';
 import { api } from '../../lib/api';
+import {
+  CONTRACTS_KEY,
+  useActiveContractFor,
+} from '../contracts/useContracts';
+import { amcOptionLabel } from '../contracts/model';
+import { createIntentWriter, type IntentWriter } from '../../lib/intentWrite';
+import { isFlagOn } from '../../state/featureFlags';
 import { istBusinessDate, loadRowsOf, useIsOnline } from './useDispatcherDashboard';
+import { useCustomerSearch } from './useCustomerSearch';
 import {
   unitLabelOf,
-  type DispatchCustomerOption,
   type DispatchJobFields,
   type DispatchServiceOption,
   type DispatchTechnician,
   type DispatchUnitOption,
 } from './dispatchForm';
 import type { DispatchJobDeps } from './dispatch';
-
-/** One keystroke pause worth of debounce — mid-call typing searches on
- * the pause, not on every character. */
-const SEARCH_DEBOUNCE_MS = 250;
-/** A phone-screen of results; the dispatcher is narrowing, not browsing. */
-const SEARCH_LIMIT = 20;
 
 async function fetchJson<T>(path: string): Promise<T> {
   const res = await api.request<T>('GET', path);
@@ -64,44 +72,22 @@ async function fetchJson<T>(path: string): Promise<T> {
   return res.data;
 }
 
-interface CustomerListEnvelope {
-  items: CustomerDispatcher[];
-  nextCursor: string | null;
+/** One pinned submit intent: the writer holds the key, the JSON holds
+ * the body it was minted for. */
+interface PinnedSubmit {
+  writer: IntentWriter;
+  bodyJson: string;
 }
 
-function customerOptionOf(row: CustomerDispatcher): DispatchCustomerOption {
-  return {
-    id: row.id,
-    name: row.name,
-    phone: row.phone,
-    addressLabel: row.addressLine1 ?? row.city ?? null,
-  };
-}
-
-export function useDispatchForm(): DispatchJobDeps {
+export function useDispatchForm(options?: { initialCustomerId?: string | null }): DispatchJobDeps {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const offline = !useIsOnline();
 
-  // The one field that is both search and create (§D3).
-  const [customerQuery, setCustomerQuery] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState<DispatchCustomerOption | null>(null);
-
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(customerQuery), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [customerQuery]);
-
-  const searchActive = selectedCustomer === null && debouncedQuery.trim() !== '';
-
-  const search = useQuery({
-    queryKey: ['dispatch', 'customer-search', debouncedQuery.trim()],
-    queryFn: () =>
-      fetchJson<CustomerListEnvelope>(
-        `/v1/customers?q=${encodeURIComponent(debouncedQuery.trim())}&limit=${SEARCH_LIMIT}`,
-      ),
-    enabled: searchActive,
-  });
+  // The one field that is both search and create (§D3) — shared with the
+  // AMC form; `initialCustomerId` preselects the deep-linked customer.
+  const customerSearch = useCustomerSearch(options);
+  const selectedCustomer = customerSearch.selected;
 
   const stack = useQuery({
     queryKey: ['dispatch', 'customer-stack', selectedCustomer?.id],
@@ -160,66 +146,88 @@ export function useDispatchForm(): DispatchJobDeps {
     [services.data],
   );
 
+  // ── the AMC option (decision 2) ─────────────────────────────────────────
+  const contractsOn = isFlagOn('contracts.manage');
+  const activeAmc = useActiveContractFor(selectedCustomer?.id ?? null, contractsOn);
+  const [amcTicked, setAmcTicked] = useState(true);
+  // Ticked for every NEWLY picked customer — the reset rides the
+  // customer's id alone, so a manual untick survives any other re-render.
+  useEffect(() => {
+    setAmcTicked(true);
+  }, [selectedCustomer?.id]);
+
   // ── submit: raise, then assign — both without leaving the screen ────────
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<{ jobNumber: string; technicianName: string | null } | null>(null);
+  const submitIntent = useRef<PinnedSubmit | null>(null);
 
   const submit = useCallback(
     async (fields: DispatchJobFields): Promise<void> => {
       if (selectedCustomer === null || fields.serviceId === null) return;
+      const body = {
+        customerId: selectedCustomer.id,
+        serviceId: fields.serviceId,
+        customerProductId: fields.unitId,
+        priority: fields.priority,
+        scheduledFor: fields.scheduledFor,
+        contactName: fields.contactName === '' ? null : fields.contactName,
+        contactPhone: fields.contactPhone === '' ? null : fields.contactPhone,
+        description: fields.notes === '' ? null : fields.notes,
+        contractId: activeAmc !== null && amcTicked ? activeAmc.id : null,
+      };
+      const bodyJson = JSON.stringify(body);
+      if (submitIntent.current === null || submitIntent.current.bodyJson !== bodyJson) {
+        submitIntent.current = { writer: createIntentWriter((method, path, opts) => api.request(method, path, opts)), bodyJson };
+      }
+      const pinned = submitIntent.current;
       setSubmitting(true);
       setSubmitError(null);
       setSubmitted(null);
       try {
-        const created = await api.request<JobCardDispatcher>('POST', '/v1/jobs', {
-          body: {
-            customerId: selectedCustomer.id,
-            serviceId: fields.serviceId,
-            customerProductId: fields.unitId,
-            priority: fields.priority,
-            scheduledFor: fields.scheduledFor,
-            contactName: fields.contactName === '' ? null : fields.contactName,
-            contactPhone: fields.contactPhone === '' ? null : fields.contactPhone,
-            description: fields.notes === '' ? null : fields.notes,
-          },
-        });
-        if (!created.ok || created.data === null) {
-          setSubmitError(created.error?.message ?? 'The job could not be raised. Try again.');
+        const created = (await pinned.writer.send('POST', '/v1/jobs', body)) as JobCardDispatcher;
+        if (created === null || created === undefined) {
+          setSubmitError('The job could not be raised. Try again.');
           return;
         }
-        const card = created.data;
+        submitIntent.current = null; // accepted — the next submit is a new intent
+        // The customer now has an open job — the AMC tab's due list must
+        // let him go the next time it reads.
+        void queryClient.invalidateQueries({ queryKey: CONTRACTS_KEY });
         let assigneeName: string | null = null;
         if (fields.technicianId !== null) {
           // §6.3: assign carries the `If-Match` version the create just
           // returned — the same guard the queue's assign uses.
-          const assigned = await api.request<JobCardDispatcher>('POST', `/v1/jobs/${card.id}/assign`, {
+          const assigned = await api.request<JobCardDispatcher>('POST', `/v1/jobs/${created.id}/assign`, {
             body: { technicianId: fields.technicianId },
-            headers: { 'If-Match': String(card.version) },
+            headers: { 'If-Match': String(created.version) },
           });
           if (!assigned.ok || assigned.data === null) {
             setSubmitError(
-              `JC raised as ${card.jobNumber}, but the assignment was refused: ${assigned.error?.message ?? 'try again from the job card.'}`,
+              `JC raised as ${created.jobNumber}, but the assignment was refused: ${assigned.error?.message ?? 'try again from the job card.'}`,
             );
             return;
           }
           assigneeName = technicians.find((technician) => technician.employeeId === fields.technicianId)?.name ?? null;
         }
-        setSubmitted({ jobNumber: card.jobNumber, technicianName: assigneeName });
+        setSubmitted({ jobNumber: created.jobNumber, technicianName: assigneeName });
       } catch (error) {
+        // A definite refusal is a finished intent; a dropped connection
+        // keeps it, so the retry replays under the same key.
+        if (pinned.writer.pendingKey() === null) submitIntent.current = null;
         setSubmitError(error instanceof Error ? error.message : 'The job could not be raised. Try again.');
       } finally {
         setSubmitting(false);
       }
     },
-    [selectedCustomer, technicians],
+    [selectedCustomer, technicians, activeAmc, amcTicked, queryClient],
   );
 
   return {
     offline,
-    customerQuery,
-    customers: search.data === undefined ? null : (search.data.items.map(customerOptionOf) as DispatchCustomerOption[]),
-    customerError: search.isError ? (search.error?.message ?? 'The search did not go through. Try again.') : null,
+    customerQuery: customerSearch.query,
+    customers: customerSearch.results,
+    customerError: customerSearch.error,
     selectedCustomer,
     stack: selectedCustomer === null ? null : stackUnits,
     services: serviceOptions,
@@ -228,13 +236,13 @@ export function useDispatchForm(): DispatchJobDeps {
     submitting,
     submitError,
     submitted,
-    onCustomerQueryChange: setCustomerQuery,
-    onSelectCustomer: (customer) => {
-      setSelectedCustomer(customer);
-      setCustomerQuery('');
-    },
+    amc: activeAmc === null ? null : { contractId: activeAmc.id, label: amcOptionLabel(activeAmc) },
+    amcTicked,
+    onCustomerQueryChange: customerSearch.setQuery,
+    onSelectCustomer: (customer) => customerSearch.select(customer),
     onNewCustomer: () => router.push('/customers/new'),
-    onClearCustomer: () => setSelectedCustomer(null),
+    onClearCustomer: () => customerSearch.clear(),
+    onToggleAmc: () => setAmcTicked((t) => !t),
     onSubmit: (fields) => void submit(fields),
     onDismissToast: () => {
       setSubmitted(null);

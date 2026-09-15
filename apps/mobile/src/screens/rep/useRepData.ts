@@ -34,14 +34,11 @@ import {
   istToday,
   outstandingOf,
   owesTheMostOf,
-  renewalRowOf,
   sortSalesRows,
   soldThisMonthOf,
   type CompanyRow,
   type OwedRow,
   type PaymentRow,
-  type RenewalRow,
-  type RenewingContract,
   type SaleRow,
 } from './model';
 import { sumMoney } from './money';
@@ -152,14 +149,12 @@ export interface RepDashboardData {
   soldThisMonth: string;
   outstanding: string;
   owesTheMost: OwedRow[];
-  renewingSoon: RenewalRow[];
   recentPayments: PaymentRow[];
 }
 
 export interface RepDashboardErrors {
   figures: string | null;
   payments: string | null;
-  renewals: string | null;
 }
 
 export interface RepDashboard {
@@ -177,15 +172,13 @@ export interface RepDashboard {
  * S1's data. Reads skip when their flag is off (`sales.cards`,
  * `sales.payments`): the section renders "turned off", and no doomed
  * request fires. Failed reads stay honest: figures fail together (they
- * are the money), renewals and recent payments fail alone. `sold this
- * month` needs today's IST month — computed here, not the screen's.
+ * are the money), recent payments fail alone. `sold this month` needs
+ * today's IST month — computed here, not the screen's.
  */
-export function useRepDashboard(
-  loadRenewals: () => Promise<RenewingContract[]> = async () => [],
-): RepDashboard {
+export function useRepDashboard(): RepDashboard {
   const flags = useRepFlags();
   const [data, setData] = useState<RepDashboardData | null>(null);
-  const [errors, setErrors] = useState<RepDashboardErrors>({ figures: null, payments: null, renewals: null });
+  const [errors, setErrors] = useState<RepDashboardErrors>({ figures: null, payments: null });
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
 
@@ -199,13 +192,12 @@ export function useRepDashboard(
       const month = istMonthOf(istToday());
       const paymentsOn = flags.payments;
       const cardsOn = flags.cards;
-      const nextErrors: RepDashboardErrors = { figures: null, payments: null, renewals: null };
-      const [balancesR, salesR, paymentsR, companiesR, renewalsR] = await Promise.allSettled([
+      const nextErrors: RepDashboardErrors = { figures: null, payments: null };
+      const [balancesR, salesR, paymentsR, companiesR] = await Promise.allSettled([
         paymentsOn ? listOf<CompanyBalance>('/v1/companies/balances') : Promise.resolve(null),
         cardsOn ? listOf<SaleRecord>('/v1/sales') : Promise.resolve(null),
         paymentsOn ? listOf<PaymentRecord>('/v1/payments') : Promise.resolve(null),
         listOf<Company>('/v1/companies'),
-        loadRenewals(),
       ]);
       const balances = balancesR.status === 'fulfilled' ? balancesR.value : null;
       const sales = salesR.status === 'fulfilled' ? salesR.value : null;
@@ -228,19 +220,11 @@ export function useRepDashboard(
             ? paymentsR.reason.message
             : 'Recent payments could not be loaded.';
       }
-      if (renewalsR.status === 'rejected') {
-        nextErrors.renewals =
-          renewalsR.reason instanceof Error ? renewalsR.reason.message : 'Renewals could not be loaded.';
-      }
       if (!alive) return;
       setData({
         soldThisMonth: sales === null ? '0' : soldThisMonthOf(sales, month),
         outstanding: balances === null ? '0' : outstandingOf(balances),
         owesTheMost: balances === null ? [] : owesTheMostOf(balances),
-        renewingSoon:
-          renewalsR.status === 'fulfilled'
-            ? renewalsR.value.map((c) => renewalRowOf(c, istToday()))
-            : [],
         recentPayments:
           payments === null
             ? []
@@ -260,7 +244,7 @@ export function useRepDashboard(
     return () => {
       alive = false;
     };
-  }, [tick, loadRenewals, flags.ready, flags.cards, flags.payments]);
+  }, [tick, flags.ready, flags.cards, flags.payments]);
 
   return {
     data,

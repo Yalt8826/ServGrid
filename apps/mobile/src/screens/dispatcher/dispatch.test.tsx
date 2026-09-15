@@ -107,10 +107,13 @@ function baseDeps(overrides: Partial<DispatchJobDeps> = {}): DispatchJobDeps {
     submitting: false,
     submitError: null,
     submitted: null,
+    amc: null,
+    amcTicked: true,
     onCustomerQueryChange: vi.fn(),
     onSelectCustomer: vi.fn(),
     onNewCustomer: vi.fn(),
     onClearCustomer: vi.fn(),
+    onToggleAmc: vi.fn(),
     onSubmit: vi.fn(),
     onDismissToast: vi.fn(),
     ...overrides,
@@ -390,6 +393,77 @@ describe('DispatchJobScreen (§D3)', () => {
     const tree = JSON.stringify(toJson(renderer)).toLowerCase();
     expect(tree).not.toContain('company');
     expect(tree).not.toContain('companyid');
+  });
+
+  it('a customer with an active AMC gets the offer, already ticked (decision 2)', async () => {
+    const renderer = await create(
+      <DispatchJobScreen
+        {...baseDeps({
+          selectedCustomer: SUNRISE,
+          stack: STACK,
+          amc: { contractId: 'amc-1', label: 'AMC job · AMC-2627-00031 · until 14 Sep 2027' },
+          amcTicked: true,
+        })}
+      />,
+    );
+
+    const option = findID(renderer, 'dispatch-amc-option');
+    expect(option).toBeDefined();
+    expect(normText(allText(option!).join(' '))).toContain('AMC-2627-00031');
+    const state = option!.props.accessibilityState as { checked?: boolean };
+    expect(state.checked).toBe(true);
+
+    // Pressing it unticks — the toggle belongs to the hook, the screen
+    // only renders what it is handed.
+    const onToggleAmc = vi.fn();
+    await act(async () => {
+      renderer.update(
+        <DispatchJobScreen
+          {...baseDeps({
+            selectedCustomer: SUNRISE,
+            stack: STACK,
+            amc: { contractId: 'amc-1', label: 'AMC job · AMC-2627-00031 · until 14 Sep 2027' },
+            amcTicked: true,
+            onToggleAmc,
+          })}
+        />,
+      );
+    });
+    press(findID(renderer, 'dispatch-amc-option')!);
+    expect(onToggleAmc).toHaveBeenCalledTimes(1);
+
+    // …and unticked, the checkbox reads unchecked.
+    const unticked = await create(
+      <DispatchJobScreen
+        {...baseDeps({
+          selectedCustomer: SUNRISE,
+          stack: STACK,
+          amc: { contractId: 'amc-1', label: 'AMC job · AMC-2627-00031 · until 14 Sep 2027' },
+          amcTicked: false,
+        })}
+      />,
+    );
+    const untickedState = findID(unticked, 'dispatch-amc-option')!.props.accessibilityState as { checked?: boolean };
+    expect(untickedState.checked).toBe(false);
+  });
+
+  it('a customer without an AMC gets no offer at all', async () => {
+    const renderer = await create(
+      <DispatchJobScreen {...baseDeps({ selectedCustomer: SUNRISE, stack: STACK, amc: null })} />,
+    );
+    expect(findID(renderer, 'dispatch-amc-option')).toBeUndefined();
+  });
+
+  it('no customer selected → no AMC option even with one in hand', async () => {
+    const renderer = await create(
+      <DispatchJobScreen
+        {...baseDeps({
+          selectedCustomer: null,
+          amc: { contractId: 'amc-1', label: 'AMC job · AMC-2627-00031 · until 14 Sep 2027' },
+        })}
+      />,
+    );
+    expect(findID(renderer, 'dispatch-amc-option')).toBeUndefined();
   });
 
   it('submit toast contains the allocated job number', async () => {

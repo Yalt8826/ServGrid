@@ -13,8 +13,15 @@
  * Anatomy, exactly:
  *
  * - **Customer search-or-create is one field.** Typing searches; the
- *   results render inline under it; no match offers *+ New customer*
- *   inline — the offer lives in the form, not behind a mode switch.
+ *   results render inline under it (the shared `CustomerSearchRows`,
+ *   the same rows the AMC form searches with); no match offers *+ New
+ *   customer* inline — the offer lives in the form, not behind a mode
+ *   switch.
+ * - **A customer with an active AMC gets the offer, already ticked**
+ *   (decision 2026-09-15): *AMC job · AMC-2627-00031 · until 14 Sep
+ *   2027* sits between the chosen customer and the unit reveal; a
+ *   checkbox, not a call to action. Unticked, the job is an ordinary
+ *   job.
  * - **Selecting a customer collapses the search to one line and reveals
  *   the unit picker** — the one progressive-disclosure moment (220ms,
  *   `base`). The reveal animates opacity/translate only (02-MOTION.md
@@ -52,6 +59,7 @@ import { Banner, Button, DatePicker, Sheet, TextField } from '../../components/u
 import { haptic } from '../../components/ui/haptics';
 import { useArrival } from '../../components/ui/motion';
 import { textStyle } from '../../fonts/textStyle';
+import { CustomerSearchRows } from './CustomerSearchRows';
 import {
   PRIORITY_SEGMENTS,
   TIME_SLOTS,
@@ -95,10 +103,16 @@ export interface DispatchJobDeps {
   submitError: string | null;
   /** The raised card, as the toast reads it back. */
   submitted: { jobNumber: string; technicianName: string | null } | null;
+  /** The selected customer's active AMC, or null when he has none (or the
+   * flag is off) — the checkbox offer (decision 2). */
+  amc: { contractId: string; label: string } | null;
+  /** Ticked for every newly picked customer; unticking sends no contractId. */
+  amcTicked: boolean;
   onCustomerQueryChange(query: string): void;
   onSelectCustomer(customer: DispatchCustomerOption): void;
   onNewCustomer(): void;
   onClearCustomer(): void;
+  onToggleAmc(): void;
   onSubmit(fields: DispatchJobFields): void;
   onDismissToast(): void;
 }
@@ -339,6 +353,22 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
                 <Text style={styles.selectedClearLabel}>Change</Text>
               </Pressable>
             </View>
+            {/* The AMC offer sits between the chosen customer and the
+            unit reveal: it is about THIS customer, read before the work
+            is specified (decision 2). No accent — a checkbox, not a CTA. */}
+            {deps.amc !== null ? (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: deps.amcTicked }}
+                onPress={deps.onToggleAmc}
+                hitSlop={hitSlop}
+                style={styles.amcRow}
+                testID="dispatch-amc-option"
+              >
+                <Text style={styles.amcBox}>{deps.amcTicked ? '☑' : '☐'}</Text>
+                <Text style={styles.amcLabel}>{deps.amc.label}</Text>
+              </Pressable>
+            ) : null}
             {/* The one progressive-disclosure moment (220ms, opacity/translate). */}
             <Animated.View style={reveal} testID="dispatch-unit-reveal">
               <View style={styles.fieldWrap}>
@@ -380,29 +410,11 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
               ) : null}
             </View>
             {searching ? (
-              <View style={styles.results}>
-                {deps.customers!.map((customer) => (
-                  <Pressable
-                    key={customer.id}
-                    testID={`dispatch-customer-result-${customer.id}`}
-                    accessibilityRole="button"
-                    hitSlop={hitSlop}
-                    onPress={() => {
-                      haptic('pickerSelect');
-                      deps.onSelectCustomer(customer);
-                    }}
-                    style={styles.resultRow}
-                  >
-                    <Text numberOfLines={1} style={styles.resultName}>
-                      {customer.name}
-                    </Text>
-                    <Text numberOfLines={1} style={styles.resultMeta}>
-                      {customer.phone}
-                      {customer.addressLabel === null ? '' : ` · ${customer.addressLabel}`}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
+              <CustomerSearchRows
+                results={deps.customers!}
+                onSelect={deps.onSelectCustomer}
+                testIDPrefix="dispatch-customer-result"
+              />
             ) : null}
             {noMatch ? (
               <Pressable
@@ -621,17 +633,17 @@ const styles = StyleSheet.create({
   fieldWrap: { marginTop: SPACE[3] },
   fieldLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 },
   fieldError: { ...textStyle('caption'), color: SEMANTIC.feedback.danger, marginTop: 4 },
-  results: { marginTop: SPACE[1], borderWidth: 1, borderColor: SEMANTIC.line.default, borderRadius: 4 },
-  resultRow: {
-    minHeight: 56,
-    justifyContent: 'center',
-    paddingHorizontal: SPACE[3],
-    borderTopWidth: 1,
-    borderTopColor: SEMANTIC.line.default,
-    backgroundColor: SEMANTIC.bg.raised,
+  // The AMC checkbox row — box/label copied from CompleteSheet's
+  // "Customer confirmed" row; at least TAP tall; no accent anywhere.
+  amcRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    minHeight: TAP.console,
+    paddingVertical: SPACE[1],
   },
-  resultName: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
-  resultMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  amcBox: { ...textStyle('body'), color: SEMANTIC.text.primary },
+  amcLabel: { ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 },
   newCustomerRow: {
     minHeight: TAP.min,
     justifyContent: 'center',

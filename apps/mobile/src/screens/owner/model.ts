@@ -18,7 +18,6 @@ import { formatMoneyEnIN } from '@servgrid/shared';
 import { formatDateEnIN } from '../../components/ui';
 import type { PaymentMode, ProductRecord, ServiceRecord } from '@servgrid/shared';
 import { sumMoney } from '../rep/money';
-import { daysUntil } from '../rep/model';
 
 // ── wire shapes (mirror of the api module's schemas — see header) ─────────
 
@@ -322,79 +321,10 @@ export function sortOwnerCompanies(rows: readonly OwnerCompanyRow[]): OwnerCompa
 }
 
 // ── O6 contracts ───────────────────────────────────────────────────────────
-
-export type ContractBilling = 'upfront' | 'on_visit';
-export type ContractStatus = 'draft' | 'active' | 'expired' | 'cancelled';
-
-/** One contract row (§O6 columns): number · site · billing · visits
- * used/included · start · end · value · sold by. */
-export interface ContractRow {
-  id: string;
-  contractNumber: string | null;
-  site: string;
-  billing: ContractBilling;
-  visitsUsed: number;
-  visitsIncluded: number;
-  startDate: string;
-  endDate: string;
-  value: string;
-  soldByName: string | null;
-  status: ContractStatus;
-}
-
-/** Contract list order: end date ascending — the thing running out is
- * the thing the owner needs on top. */
-export function sortContractsByEnd(rows: readonly ContractRow[]): ContractRow[] {
-  return [...rows].sort((a, b) => (a.endDate < b.endDate ? -1 : a.endDate > b.endDate ? 1 : 0));
-}
-
-export interface ContractRowWithDays extends ContractRow {
-  daysRemaining: number;
-}
-
-/**
- * **Renewals is a filtered view, not a separate screen** (§O6): expiring
- * within 60 days, sorted by days remaining. Each row keeps its visits
- * used — a spent visit reduces what the renewal is worth.
- */
-export const RENEWALS_WINDOW_DAYS = 60;
-
-export function renewalsOf(rows: readonly ContractRow[], today: string): ContractRowWithDays[] {
-  return rows
-    .map((r) => ({ ...r, daysRemaining: daysUntil(r.endDate, today) }))
-    .filter((r) => r.daysRemaining >= 0 && r.daysRemaining <= RENEWALS_WINDOW_DAYS)
-    .sort((a, b) => a.daysRemaining - b.daysRemaining);
-}
-
-/** One visit in the detail's schedule, with EVERY attempt the visit
- * produced (§O6): a visit on its third attempt is the thing the owner
- * wants to see when a customer complains. */
-export interface ContractVisitAttempt {
-  jobId: string;
-  jobNumber: string;
-  status: string;
-  technicianName: string | null;
-}
-
-export interface ContractVisitRow {
-  id: string;
-  /** The schedule's own ordinal — "visit 3 of 12". */
-  ordinal: number;
-  dueDate: string;
-  status: string;
-  attempts: ContractVisitAttempt[];
-}
-
-/** "Visit N" label — the schedule reads as a schedule, not a job list. */
-export function visitLabel(visit: ContractVisitRow): string {
-  return `Visit ${visit.ordinal}`;
-}
-
-/** True when the visit produced more than one job card — the multi-
- * attempt visits the detail exists to surface. */
-export function isMultiAttempt(visit: ContractVisitRow): boolean {
-  return visit.attempts.length > 1;
-}
+// The old O6 block (the contract rows, the renewals window, the visit
+// schedule) is gone: the AMC surface is shared now —
+// `src/screens/contracts/` (T2B.4) serves the owner and the dispatcher
+// from the same screens, and 07-OWNER.md §O6 points there.
 
 // ── O7 employees ───────────────────────────────────────────────────────────
 
