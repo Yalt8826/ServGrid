@@ -2,17 +2,16 @@
  * Job detail route (UI/plan-2/04-TECHNICIAN.md §T3, T1.18; the owner's
  * copy §O4, T4.11). Role split:
  *
- * - **Technician branch:** the mirror-backed `JobDetailScreen` behind
- *   `tech.jobs`; an id the mirror does not hold shows the placeholder
- *   rather than a fake docket.
+ * - **Technician branch:** `JobDetailScreen` behind `tech.jobs`, fed by
+ *   the server's work read and the job's own trail; an id his work read
+ *   does not hold shows the placeholder rather than a fake docket.
  * - **Owner branch (T4.11):** the pushed detail screen — the full
  *   `job_events` timeline, the completion with its figures and parts,
  *   and the amend action. The phone frame of the same detail the desk
  *   table opens as a side pane.
  *
- * The two rejection-banner actions (`PLAN-FRONTEND.md` §5) both end at
- * the drain: this device's only copy is the mirror row, and the delta
- * overwrite IS the office version arriving.
+ * The two rejection-banner actions both read the server again: the
+ * refusal is cleared and the office's version of the job arrives.
  */
 import { Linking, Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,7 +19,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { JobDetailScreen } from '../../../../src/screens/technician/JobDetailScreen';
-import { useTechJobsFlag, useTechnicianMirror } from '../../../../src/screens/technician/useTechnicianMirror';
+import { useJobTimeline, useTechJobsFlag, useTechnicianWork } from '../../../../src/screens/technician/useTechnicianWork';
 import { OwnerJobDetailBody } from '../../../../src/screens/owner/JobDetailBody';
 import { useOwnerAmendFlag, useOwnerJobCard, useOwnerJobDetail } from '../../../../src/screens/owner/useOwnerJobs';
 import { useSessionStore } from '../../../../src/state/sessionStore';
@@ -60,7 +59,8 @@ export default function Screen() {
   const jobId = Array.isArray(params.id) ? params.id[0] : params.id;
   const actor = useSessionStore((s) => s.actor);
   const flag = useTechJobsFlag();
-  const deps = useTechnicianMirror(actor);
+  const deps = useTechnicianWork(actor);
+  const events = useJobTimeline(actor?.role === 'technician' && jobId !== undefined ? jobId : null);
 
   if (actor !== null && actor.role === 'owner' && jobId !== undefined) {
     return <OwnerJobDetailRoute jobId={jobId} />;
@@ -80,7 +80,7 @@ export default function Screen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
       <JobDetailScreen
         view={view}
-        events={deps.eventsByJobId[view.job.id] ?? []}
+        events={events}
         completedAt={deps.completedAtById[view.job.id] ?? null}
         onBack={() => router.back()}
         onCall={(v) => {

@@ -53,19 +53,8 @@ export function parseErrorEnvelope(body: unknown): ErrorEnvelope['error'] | null
   };
 }
 
-/** Roles from PLAN.md §3. Connectivity shape for the shell. */
+/** Roles from PLAN.md §3. Every role works online (PLAN-FRONTEND.md §4). */
 export type Role = 'technician' | 'dispatcher' | 'sales_rep' | 'owner';
-
-/**
- * Connectivity shape per role (PLAN-FRONTEND.md §4): offline roles keep
- * queues and read mirrors; online roles surface a failed fetch immediately.
- */
-export const ROLE_CAPABILITIES: Record<Role, { offline: boolean; networkMode: 'offlineFirst' | 'online' }> = {
-  technician: { offline: true, networkMode: 'offlineFirst' },
-  sales_rep: { offline: true, networkMode: 'offlineFirst' },
-  dispatcher: { offline: false, networkMode: 'online' },
-  owner: { offline: false, networkMode: 'online' },
-};
 
 /** The actor record `GET /v1/auth/me` returns. */
 export interface StoredActor {

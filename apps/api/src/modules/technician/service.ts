@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { JobCardTechnician, TechnicianWork } from '@servgrid/shared';
+import type { TechnicianWork, TechnicianWorkJob } from '@servgrid/shared';
 import { getPool } from '../../db/pool.js';
 import * as repo from './repo.js';
 
@@ -32,15 +32,15 @@ async function withReadSnapshot<T>(fn: (client: PoolClient) => Promise<T>): Prom
 
 // ── row → wire mappers; each returns exactly its schema's keys ──────────────
 
-function toJob(row: repo.WorkJobRow): JobCardTechnician {
+function toJob(row: repo.WorkJobRow): TechnicianWorkJob {
   // `contract` needs migration 015 (Phase 2B): null, not absent — the
   // screens already render the contract-bearing shape.
   return {
     id: row.id,
     jobNumber: row.job_number,
     title: row.title,
-    status: row.status as JobCardTechnician['status'],
-    priority: row.priority as JobCardTechnician['priority'],
+    status: row.status as TechnicianWorkJob['status'],
+    priority: row.priority as TechnicianWorkJob['priority'],
     scheduledFor: row.scheduled_for === null ? null : row.scheduled_for.toISOString(),
     customerId: row.customer_id,
     contactName: row.contact_name,
@@ -48,6 +48,7 @@ function toJob(row: repo.WorkJobRow): JobCardTechnician {
     description: row.description,
     contract: null,
     version: row.version,
+    closedAt: row.closed_at === null ? null : row.closed_at.toISOString(),
   };
 }
 

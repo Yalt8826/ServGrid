@@ -211,6 +211,9 @@ describe('GET /v1/technician/work — his working set, read online', () => {
     expect(jobIds).toContain(hisClosed);
     expect(jobIds).not.toContain(theirs);
     expect(body.jobs.every((j) => j.contract === null)).toBe(true); // Phase 2B shape, present and null
+    // closedAt dates "done today" now that nothing is stamped on the handset.
+    expect(body.jobs.find((j) => j.id === hisClosed)!.closedAt).not.toBeNull();
+    expect(body.jobs.find((j) => j.id === hisOpen)!.closedAt).toBeNull();
 
     const customerIds = body.customers.map((c) => c.id);
     expect(customerIds).toContain(CUSTOMER_A.id);

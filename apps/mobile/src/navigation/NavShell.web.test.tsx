@@ -45,9 +45,6 @@ vi.mock('expo-router', () => ({
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-vi.mock('../sync/MirrorProvider', () => ({
-  useMirrorSession: () => null,
-}));
 
 import { NavShell } from './NavShell';
 import { useSessionStore } from '../state/sessionStore';

@@ -42,12 +42,15 @@ export interface WorkJobRow {
   contact_phone: string | null;
   description: string | null;
   version: number;
+  /** When the job was completed or cancelled — dates "done today" on his dashboard. */
+  closed_at: Date | null;
 }
 
 export async function workJobs(db: Db, actorId: string, windowDays: number, limit: number): Promise<WorkJobRow[]> {
   const r = await db.query<WorkJobRow>(
     `SELECT jc.id, jc.job_number, jc.title, jc.status::text AS status, jc.priority::text AS priority,
-            jc.scheduled_for, jc.customer_id, jc.contact_name, jc.contact_phone, jc.description, jc.version
+            jc.scheduled_for, jc.customer_id, jc.contact_name, jc.contact_phone, jc.description, jc.version,
+            jc.closed_at
        FROM job_cards jc
       WHERE jc.assigned_to = $1
         AND ${WINDOW_CLAUSE}

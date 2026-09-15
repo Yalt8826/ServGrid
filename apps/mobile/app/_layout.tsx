@@ -12,6 +12,7 @@ import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import { api } from '../src/lib/api';
+import { dropLegacyMirror } from '../src/lib/legacyMirrorCleanup';
 import { fieldRoleRefusedHere } from '../src/screens/LoginScreen';
 import { armLocationTracking } from '../src/location/trackingGate';
 import { initPush } from '../src/push/notifications';
@@ -34,6 +35,11 @@ initPush();
 // was away). Native only; the web bundle resolves a no-op stub and never
 // imports the task module (PLAN-FRONTEND.md §6).
 armLocationTracking();
+
+// Online-only since 2026-09-15: drop the old mirror's tables once, so no
+// job copy or queued work stays on the handset. Tables only — the GPS
+// buffer shares the file. A no-op on web and on a clean install.
+void dropLegacyMirror();
 
 // Best-effort: a double-call or missing native module must not crash
 // start-up — the splash is presentation, not state.

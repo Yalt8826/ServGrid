@@ -2,9 +2,8 @@
  * Jobs route (UI/plan-2/04-TECHNICIAN.md §T2; the owner's copy §O4,
  * T4.11). Role split:
  *
- * - **Technician branch:** the mirror-backed `JobsScreen` behind
- *   `tech.jobs` — the seam where the pure screen meets the mirror and
- *   the session; nothing here spins, the mirror is local.
+ * - **Technician branch:** `JobsScreen` behind `tech.jobs`, fed by the
+ *   server's work read (`useTechnicianWork`, online-only).
  * - **Owner branch (T4.11):** the same job, the owner's surface — the
  *   schema-shaped list (`JobCardOwner` carries the amount the
  *   dispatcher's schema never will), the dispatcher's filter bar on the
@@ -18,7 +17,7 @@ import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { JobsScreen } from '../../../src/screens/technician/JobsScreen';
-import { useTechJobsFlag, useTechnicianMirror } from '../../../src/screens/technician/useTechnicianMirror';
+import { useTechJobsFlag, useTechnicianWork } from '../../../src/screens/technician/useTechnicianWork';
 import { OwnerJobsScreen } from '../../../src/screens/owner/JobsScreen';
 import { useOwnerJobDetail, useOwnerJobs } from '../../../src/screens/owner/useOwnerJobs';
 import { useSessionStore } from '../../../src/state/sessionStore';
@@ -72,7 +71,7 @@ export default function Screen() {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
   const flag = useTechJobsFlag();
-  const deps = useTechnicianMirror(actor);
+  const deps = useTechnicianWork(actor);
 
   if (actor !== null && actor.role === 'owner') {
     return <OwnerJobsRoute />;
