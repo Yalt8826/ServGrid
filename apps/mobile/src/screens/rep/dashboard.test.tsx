@@ -8,13 +8,14 @@
  *   `money.test.tsx`; here the figure text IS the value).
  * - The owed rows read "… · owes ₹85,000", descending — a rep's day is
  *   this list in order.
- * - Renewing soon shows days remaining, not a date.
+ * - **The rep dashboard has no AMC section** — reps have no part in
+ *   AMCs (decision 2026-09-15).
  * - Empty: "No sales yet this month."
  */
 import { describe, expect, it } from 'vitest';
 
 import type { CompanyBalance, PaymentRecord, SaleRecord } from '@servgrid/shared';
-import { allText, create, findByTestID, toJson } from '../../components/ui/testing';
+import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
 import { RepDashboardScreen, owedRowText } from './DashboardScreen';
 import { outstandingOf, owesTheMostOf, soldThisMonthOf } from './model';
 
@@ -82,8 +83,6 @@ function baseProps(overrides: Partial<Parameters<typeof RepDashboardScreen>[0]> 
     owesTheMost: [
       { companyId: COMPANY_ID, name: 'Sterling Industries', balance: '85000.00' },
     ],
-    renewingSoon: [],
-    renewalsError: null,
     recentPayments: [],
     paymentsError: null,
     companyNames: {},
@@ -157,28 +156,11 @@ describe('RepDashboardScreen (§S1)', () => {
     expect(outstandingOf([balance({ balance: '85000' }), balance({ balance: '-500' })])).toBe('85000');
   });
 
-  it('renewing soon shows days remaining — urgency is the point, not a date', async () => {
-    const r = await create(
-      <RepDashboardScreen
-        {...baseProps({
-          renewingSoon: [
-            {
-              id: 'k1000000-0000-4000-8000-000000000001',
-              site: 'Kormangala 3rd Blk',
-              contractNumber: 'AMC-2627-0031',
-              endDate: '2026-10-01',
-              visitsUsed: 3,
-              visitsIncluded: 4,
-              contractValue: '18000',
-              daysRemaining: 17,
-            },
-          ],
-        })}
-      />,
-    );
-    const tree = toJson(r);
-    expect(findByTestID(tree, 'dashboard-renewal-days-k1000000-0000-4000-8000-000000000001')).toBeDefined();
-    expect(allText(tree)).toContain('17 days');
+  it('the rep dashboard has no AMC section — reps have no part in AMCs (decision 2026-09-15)', async () => {
+    const tree = toJson(await create(<RepDashboardScreen {...baseProps()} />));
+    const renewals = findAll(tree, (n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('dashboard-renewal'));
+    expect(renewals).toEqual([]);
+    expect(allText(tree).join(' | ')).not.toContain('RENEWING SOON');
   });
 
   it('the empty month says so plainly — no illustration', async () => {

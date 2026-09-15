@@ -18,6 +18,17 @@ const CLOSED: ApiResult<unknown> = {
   data: null,
   error: { code: 'JOB_ALREADY_CLOSED' as never, message: 'This job was cancelled by the office at 14:32.', requestId: 'r' },
 };
+const DUPLICATE: ApiResult<unknown> = {
+  ok: false,
+  status: 409,
+  data: null,
+  error: {
+    code: 'DUPLICATE_ENTITY' as never,
+    message: 'AMC-2627-00031 already covers this customer.',
+    requestId: 'r',
+    details: { existing: { id: 'x' } },
+  },
+};
 
 function requestReturning(...results: ApiResult<unknown>[]) {
   const request = vi.fn<IntentRequest>(async () => results.shift() ?? OK);
@@ -65,5 +76,16 @@ describe('createIntentWriter', () => {
     expect(writer.pendingKey()).toBeNull();
     await writer.send('POST', '/v1/jobs/j1/complete', {});
     expect(keyOf(request, 1)).not.toBe(keyOf(request, 0));
+  });
+
+  it('a 409 carries the server’s details (the existing AMC) and clears the key — the link, not the code', async () => {
+    const request = requestReturning(DUPLICATE, OK);
+    const writer = createIntentWriter(request);
+    const refusal = await writer.send('POST', '/v1/contracts', { customerId: 'c1' }).catch((e: unknown) => e);
+    expect(refusal).toBeInstanceOf(WriteNotSaved);
+    expect((refusal as WriteNotSaved).status).toBe(409);
+    expect((refusal as WriteNotSaved).code).toBe('DUPLICATE_ENTITY');
+    expect((refusal as WriteNotSaved).details).toEqual({ existing: { id: 'x' } });
+    expect(writer.pendingKey()).toBeNull();
   });
 });

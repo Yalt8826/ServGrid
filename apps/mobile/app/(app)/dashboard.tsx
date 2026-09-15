@@ -14,8 +14,8 @@
  *   technician's session never mounts a dispatcher query.
  * - **sales rep** (T3.7) — online reads through `useRepDashboard`, with
  *   the per-flag darks the hook computes (`salesOff` / `paymentsOff`).
- *   Renewing soon comes from the loader below — the contracts backend
- *   is a later phase, so today it honestly returns [].
+ *   The old renewing-soon loader is gone — reps have no part in AMCs
+ *   (decision 2026-09-15).
  * - **owner** (T4.8) — online-only reads through `useOwnerDashboard`
  *   (the figures and attention feed have no sync working set); the door
  *   is the api's permission gate, which 403s every role but the owner,
@@ -67,8 +67,6 @@ function RepDashboardRoute(): React.ReactNode {
         salesOff={dashboard.salesOff}
         paymentsOff={dashboard.paymentsOff}
         owesTheMost={dashboard.data?.owesTheMost ?? []}
-        renewingSoon={dashboard.data?.renewingSoon ?? []}
-        renewalsError={dashboard.errors.renewals}
         recentPayments={dashboard.data?.recentPayments ?? []}
         paymentsError={dashboard.errors.payments}
         companyNames={{}}

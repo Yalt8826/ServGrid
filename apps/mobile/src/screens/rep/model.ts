@@ -59,23 +59,6 @@ export interface PaymentRow {
   businessDate: string;
 }
 
-/** What the dashboard's renewals section needs — `v_contracts_expiring`'s
- * shape in miniature. The contracts backend is a later phase; the route
- * supplies the loader, and today it has nothing honest to return but []. */
-export interface RenewingContract {
-  id: string;
-  site: string;
-  contractNumber: string;
-  endDate: string;
-  visitsUsed: number | null;
-  visitsIncluded: number | null;
-  contractValue: string;
-}
-
-export interface RenewalRow extends RenewingContract {
-  daysRemaining: number;
-}
-
 // ── derived figures (§S1) ──────────────────────────────────────────────────
 
 /** The IST month `YYYY-MM` a plain business date falls in. */
@@ -164,10 +147,6 @@ export function daysUntil(iso: string, today: string): number {
   const [y = 1970, m = 1, d = 1] = iso.split('-').map(Number);
   const [ty = 1970, tm = 1, td = 1] = today.split('-').map(Number);
   return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(ty, tm - 1, td)) / 86_400_000);
-}
-
-export function renewalRowOf(contract: RenewingContract, today: string): RenewalRow {
-  return { ...contract, daysRemaining: daysUntil(contract.endDate, today) };
 }
 
 // ── the payment sheet's rules (§S3) ────────────────────────────────────────
