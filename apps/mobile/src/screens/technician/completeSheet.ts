@@ -154,10 +154,14 @@ export function warrantyDateLabel(expiry: string): string {
  * The sheet's one dialog (§T4: the only one, which is what keeps it
  * meaningful). In-warranty unit, a charge entered — the technician is
  * about to charge for covered work, so he is asked once, with the date.
- * A prompt, not a block.
+ * A prompt, not a block. The dialog only opens when `inWarranty` is
+ * true, but this string is built on every render of the sheet — with no
+ * unit or no expiry there is no date to name, so the question stands
+ * alone rather than formatting an empty one.
  */
 export function warrantyConfirmMessageOf(view: JobView): string {
-  const expiry = view.unit?.warrantyExpiresOn ?? '';
+  const expiry = view.unit?.warrantyExpiresOn ?? null;
+  if (expiry === null) return 'Charge anyway?';
   return `This unit is under warranty until ${warrantyDateLabel(expiry)}. Charge anyway?`;
 }
 

@@ -309,6 +309,24 @@ describe('CompleteSheet (§T4)', () => {
     expect(deps.onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  it('3c · a unit with no warranty expiry still renders the sheet — the dialog message degrades to the bare question', async () => {
+    // Regression: the dialog message is built on EVERY render of the
+    // sheet, and a null `warrantyExpiresOn` reached
+    // `new Date('T00:00:00Z')` — RangeError, red screen, no sheet. Real
+    // units routinely carry no warranty date; the fixtures always had one.
+    const deps = baseDeps({
+      view: viewOf({}, { unit: { name: 'UPS 850VA', brand: null, serialNumber: 'LM8842219', warrantyExpiresOn: null } }),
+    });
+    const renderer = await create(<CompleteSheet {...deps} />);
+    expect(toJson(renderer)).toBeDefined();
+    expect(warrantyConfirmMessageOf(deps.view)).toBe('Charge anyway?');
+
+    // No unit at all — same sentence, still nothing to format.
+    const noUnit = baseDeps({ view: viewOf({}, { unit: undefined }) });
+    await create(<CompleteSheet {...noUnit} />);
+    expect(warrantyConfirmMessageOf(noUnit.view)).toBe('Charge anyway?');
+  });
+
   it('4 · the parts list never shows a subtotal and never changes the figure', async () => {
     const deps = baseDeps();
     const renderer = await create(<CompleteSheet {...deps} />);
