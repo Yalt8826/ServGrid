@@ -55,7 +55,8 @@ export interface NavGroup {
  * sales rep 5 · owner 5. `/cash` moves by role rather than being hidden:
  * the owner's reconciliation queue under People, the field roles' own
  * handover as its own tab. `/contracts` is operational for a dispatcher
- * and commercial for a rep and the owner.
+ * and commercial for the owner — reps have no part in AMCs (decision
+ * 2026-09-15), so their map carries no contract route at all.
  */
 export const NAV_GROUPS: Record<Role, NavGroup[]> = {
   technician: [
@@ -74,7 +75,7 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
     {
       key: 'sales',
       label: 'Sales',
-      routes: ['/sales', '/payments', '/contracts', '/contracts/renewals'],
+      routes: ['/sales', '/payments'],
     },
     {
       key: 'companies',

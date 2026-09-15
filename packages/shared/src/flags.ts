@@ -17,8 +17,7 @@ export const FEATURE_FLAGS = [
   'dispatch.console', // 2 — dispatcher dashboard, dispatch form, job logs
   'dispatch.bulk', // 2 — multi-select bulk reassign only; the risky half, separate on purpose
   'dispatch.overdue', // 2 — overdue filter and dashboard count
-  'contracts.manage', // 2B — contract screens and CRUD
-  'contracts.generate', // 2B — the nightly visit generator alone; unattended, separate on purpose
+  'contracts.manage', // 2B — AMC tab, AMC API and the dispatch form's AMC option
   'sales.cards', // 3 — sales cards and line items
   'sales.payments', // 3 — payment capture and the pending/collected tabs
   'sales.cash', // 3 — the sales rep's cash handover

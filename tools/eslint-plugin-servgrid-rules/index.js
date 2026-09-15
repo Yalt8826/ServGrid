@@ -3,7 +3,10 @@
  * Loaded as the `servgrid-rules` plugin from .eslintrc.cjs and proven by
  * the fixtures under packages/shared/src/__fixtures__/lint-violations/
  * plus tools/lint-proof.mjs. These are not style rules: rule 1 is the
- * accent-erosion defence, rule 2 the revenue-leak defence, rule 3 keeps
+ * accent-erosion defence, rule 2 the revenue-leak defence — narrowed by
+ * decision 2026-09-15 to `job_completions` alone, because the AMC price
+ * (`service_contracts.contract_value`) is now the dispatcher's own figure,
+ * while job revenue never is — rule 3 keeps
  * the `location.health` / `location.read` split from eroding, and rule 4
  * keeps business data off the phone (online-only, decision 2026-09-15).
  */
@@ -99,9 +102,9 @@ function makeNoSqlTablesRule(tableNameSet, messageText) {
   };
 }
 
-const MONEY_TABLES = new Set(['job_completions', 'service_contracts']);
+const MONEY_TABLES = new Set(['job_completions']);
 const MONEY_MESSAGE =
-  'repo.dispatcher.ts must not reference job_completions or service_contracts — dispatcher queries read the dispatcher views only (revenue-leak defence).';
+  'repo.dispatcher.ts must not reference job_completions — dispatcher queries read the dispatcher views only (revenue-leak defence). The AMC price is the dispatcher\'s by decision (2026-09-15); job revenue never is.';
 
 const LOCATION_TABLES = new Set(['location_pings', 'location_requests']);
 const LOCATION_MESSAGE =

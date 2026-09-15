@@ -85,10 +85,10 @@ describe('cross-check, direction A — every tab leads somewhere permitted', () 
     expect(flattenedRoutes('technician')).toContain('/cash/handover');
   });
 
-  it('sales rep map contains /contracts and /contracts/renewals', () => {
+  it('sales rep map carries no contract route — reps have no part in AMCs (decision 2026-09-15)', () => {
     const routes = flattenedRoutes('sales_rep');
-    expect(routes).toContain('/contracts');
-    expect(routes).toContain('/contracts/renewals');
+    expect(routes).not.toContain('/contracts');
+    expect(routes).not.toContain('/contracts/renewals');
   });
 });
 
