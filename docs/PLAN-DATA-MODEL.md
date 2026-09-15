@@ -8,7 +8,7 @@ Nothing here overrides `PLAN.md`. Where `PLAN.md` left something open, this docu
 - Postgres 15+. Money is `NUMERIC(12,2)`, line totals `NUMERIC(14,2)`.
 - All timestamps `timestamptz`. Business dates are the Asia/Kolkata calendar day.
 - Primary keys are `uuid` (`gen_random_uuid()`) except append-only logs, which use `bigint` identity.
-- Every mutable table carries `version integer`, `created_at`, `updated_at`. `version` drives optimistic concurrency for offline sync.
+- Every mutable table carries `version integer`, `created_at`, `updated_at`. `version` drives optimistic concurrency (`If-Match`).
 - Soft delete via `is_active boolean`, never `DELETE`.
 
 ---
@@ -40,7 +40,7 @@ Migrations are numbered and forward-only. This ordering respects FK dependencies
 | 018 | `views_money` | `v_sales_card_totals`, `v_company_balances`, `v_employee_expected_cash`, `v_cash_reconciliation_queue` | 3 |
 | 019 | `sale_discounts` | `sales_card_items.list_price`, `discount_pct` and the CHECK that the discount explains `unit_price` | ON |
 
-Migrations 006–010 land in Phase 1 even though only the technician app consumes them, because the technician app is the thing that exercises offline sync and location while scope is still small.
+Migrations 006–010 land in Phase 1 even though only the technician app consumes them, because the technician app is the thing that exercises idempotent writes and location while scope is still small.
 
 **`v_employee_tracking_health` ships with 009, in Phase 1, not with the other ops views.** It was originally grouped with `v_job_cards_dispatcher` and `v_technician_load` under a migration marked “Phase 2–4”, which is wrong by a whole phase: the tracking-health chip is a Phase 1 deliverable on the technician's own profile (`PLAN-FRONTEND.md` §6), and Phase 1's exit criteria require it to have shown a **true red** in the field. A chip whose view does not exist until Phase 2 cannot do that, and the failure would surface as a missing relation on the first day of Phase 1 rather than as a design question. It depends only on `employees`, `devices` (003) and `location_pings` (009), so it can be created the moment 009 runs.
 
@@ -73,7 +73,7 @@ They are free only because nothing has run yet; the same corrections after Phase
 
 Declared `IMMUTABLE` so it can appear in generated columns and index expressions. This is technically a lie — the tz database can change — but Asia/Kolkata has had no transition since 1945 and none is proposed. The alternative is storing a redundant `business_date` column the application must remember to set, which is the class of bug this whole model is trying to avoid. **Document the assumption in the migration comment.**
 
-**`touch_updated_at()`** trigger sets `updated_at = now()` and increments `version` on every `UPDATE` where the caller did not already change it. Attached to every mutable table. `updated_at` is indexed on the sync-relevant tables and is the cursor for delta sync.
+**`touch_updated_at()`** trigger sets `updated_at = now()` and increments `version` on every `UPDATE` where the caller did not already change it. Attached to every mutable table. `updated_at` is indexed on the tables whose lists sort or filter by recency. (It was also the delta-sync cursor until the online-only decision of 2026-09-15 removed delta sync.)
 
 ### 2.1 Enum catalogue
 
@@ -137,7 +137,7 @@ This is the **generic** trail; `job_events` (migration 007) is the *job* trail a
 
 **`held_notifications`** (migration 011, Phase 2): `employee_id → employees` (cascade), `job_card_id → job_cards` (nullable, set null), `trigger_kind` (`assigned | reassigned | cancelled | priority_escalated`, a `text` + `CHECK` rather than an enum), `priority` as it was at hold time, `held_at`, `released_at`. Partial index on `held_at WHERE released_at IS NULL`.
 
-This implements decision B1 in `docs/decisions/2026-09-12-phase-2-entry-decisions.md`: **hold, don't drop.** A wake triggered outside the 09:00–19:00 IST work window for a job that is not `urgent` gets a row here, and the window-open release sends one collapsed wake per technician and stamps `released_at`. Urgent jobs and in-window changes push straight away and write no row. The row holds no job content, because the push carries none: the push only wakes the app, and delta sync fetches the job.
+This implements decision B1 in `docs/decisions/2026-09-12-phase-2-entry-decisions.md`: **hold, don't drop.** A wake triggered outside the 09:00–19:00 IST work window for a job that is not `urgent` gets a row here, and the window-open release sends one collapsed wake per technician and stamps `released_at`. Urgent jobs and in-window changes push straight away and write no row. The row holds no job content, because the push carries none: the push only wakes the app, and the app refetches the technician's work read.
 
 **`employee_flag_overrides`** (migration 016, Phase 1): `(employee_id, flag)` primary key, `enabled`, `updated_by → employees`, `updated_at`. The table holds **only per-person overrides**. Role defaults live in code (`packages/shared` flags, all off), and `GET /v1/auth/me` returns the evaluated result. This is what makes the T0 rollback tier a data change ("turn `tech.jobs` off for that person") rather than a rebuild. `flag` has no `CHECK`: the service validates names against the shared registry, and evaluation ignores unknown names, so adding a flag needs no migration. Written through `PUT /v1/employees/:id/flags` (`PLAN-BACKEND.md` §4.1).
 
@@ -251,7 +251,7 @@ Separate from `job_completions` rather than a nullable block on `job_cards`, so 
 
 **`job_events`** — append-only, never updated, never deleted. `bigint` identity PK, `job_card_id`, `event_type`, `actor_id` (NULL for system), `occurred_at`, `recorded_at`, `from_status`, `to_status`, `source` (`mobile | web | system`), `idempotency_key`, `payload jsonb`.
 
-`occurred_at` vs `recorded_at` is the offline seam: a technician who completes a job underground at 14:10 and syncs at 16:40 gets `occurred_at = 14:10, recorded_at = 16:40`. Reports use `occurred_at`; sync debugging uses the gap.
+`occurred_at` vs `recorded_at` keeps the two clocks apart: `occurred_at` is when the person did it (the device's clamped time, pinned when he pressed submit), `recorded_at` is when the server accepted it. Online, the gap is normally seconds — a submit retried after a dropped connection keeps its original `occurred_at`. Reports use `occurred_at`; a large gap is worth a look.
 
 ### 3.5 Sales and payments
 
@@ -472,7 +472,7 @@ Indexes are listed with the query each exists for. Anything not on this list sho
 | | `(status, scheduled_date DESC)` | dispatcher Job Logs filter, Overdue |
 | | `(customer_id, created_at DESC)` | customer history |
 | | `(customer_product_id)` partial not null | unit service history, warranty check |
-| | `(updated_at)` | delta sync cursor |
+| | `(updated_at)` | recency lists |
 | `job_completions` | `(completed_by, business_date)` partial `collection_mode='cash'` | expected-cash view |
 | | `(business_date DESC)` | owner revenue dashboard |
 | `payments` | `(received_by, business_date)` partial `mode='cash'` | expected-cash view, payments side |
@@ -488,7 +488,7 @@ Indexes are listed with the query each exists for. Anything not on this list sho
 | | `(business_date, employee_id)` | day view across staff |
 | `payments` | `(company_id, received_at DESC)` | company ledger |
 | | `(received_by, business_date DESC)` | rep's collected tab |
-| `sales_cards` | `(company_id, sale_date DESC)`, `(sales_rep_id, sale_date DESC)`, `(updated_at)` | ledger, rep list, sync |
+| `sales_cards` | `(company_id, sale_date DESC)`, `(sales_rep_id, sale_date DESC)`, `(updated_at)` | ledger, rep list |
 | `customer_products` | `(customer_id)` partial active | site stack |
 | | unique `lower(serial_number)` partial active | serial cannot be in two places |
 | `customers` | `(phone)`, GIN on `to_tsvector(name)` | dispatcher search |
@@ -496,16 +496,15 @@ Indexes are listed with the query each exists for. Anything not on this list sho
 
 ---
 
-## 6. Delta sync contract
+## 6. Concurrency and soft-delete contract
 
-The offline mirror (`PLAN.md` §6) pulls by `updated_at` cursor. Three requirements the schema must meet, all satisfied above:
+Every role reads and writes the API online (`PLAN.md` §6). There is no client mirror and no delta sync — both were removed by the online-only decision (`docs/decisions/2026-09-15-online-only.md`). Three requirements the schema still meets, all satisfied above:
 
-1. Every syncable table has an indexed `updated_at` maintained by trigger, not by application code.
-2. Soft delete (`is_active = false`) rather than `DELETE`, so a tombstone reaches the client through the same cursor. Hard deletes would require a separate deletions log.
-3. `version` increments on every update, so the client can send `If-Match: version` and the server can reject a stale write with 409 rather than last-write-wins.
-4. **A row leaving a client's scope must reach that client as a tombstone too.** Soft delete is not the only way a row stops being the technician's business: a job reassigned from Ravi to Anitha is still `is_active`, still updated, and simply no longer in Ravi's scope — so a delta query filtered by scope returns nothing about it and Ravi's mirror keeps a job that is not his, indefinitely, showing on his dashboard and in his job count. The same happens to a rep when the owner reassigns a company.
+1. `version` increments on every update (`touch_updated_at()`), so a client can send `If-Match: version` and the server rejects a stale write with 409 rather than last-write-wins.
+2. Soft delete (`is_active = false`) rather than `DELETE`, so history keeps its references and a deactivated row stays explainable.
+3. `updated_at` is maintained by trigger, not by application code.
 
-   This is the classic scope-exit bug in a delta protocol and it does not announce itself: nothing errors, the row simply never leaves. The fix is a server-side one and it belongs here rather than in the client, because only the server knows the scope changed. `PLAN-BACKEND.md` §7 specifies how the delta response carries it.
+**Scope exit asks nothing of the schema any more.** A job reassigned from Ravi to Anitha is simply absent from Ravi's next read (`PLAN-BACKEND.md` §7). The delta protocol needed a tombstone for every row leaving a client's scope, because a mirror otherwise kept it forever; with no mirror there is nothing to forget.
 
 Descriptive fields resolve last-write-wins; status transitions are validated server-side. That validation is application logic (`docs/PLAN-BACKEND.md` §6), not a database constraint — the database cannot know that "completed" is illegal *because the office cancelled it while the technician was underground*, only that both are valid enum values.
 

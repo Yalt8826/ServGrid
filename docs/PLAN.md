@@ -12,16 +12,16 @@ Companion documents: `PLAN-DATA-MODEL.md`, `PLAN-BACKEND.md` and `PLAN-FRONTEND.
 
 Android is the primary surface for all four roles. The owner additionally gets a desktop web build.
 
-| Role | Phone layout | Desktop layout | Offline outbox | Sends location |
+| Role | Phone layout | Desktop layout | Web sign-in | Sends location |
 |---|---|---|---|---|
-| Technician | yes | — | yes | yes |
-| Dispatcher | yes | — | no | no |
-| Sales Rep | yes | — | yes | yes |
-| Owner | yes | yes | no | no |
+| Technician | yes | — | no | yes |
+| Dispatcher | yes | — | yes | no |
+| Sales Rep | yes | — | no | yes |
+| Owner | yes | yes | yes | no |
 
 Two consequences worth holding onto:
 
-**Offline need is independent of platform.** Dispatchers are on Android but sit at a desk on office wifi, so they get online-only behaviour with clear error states. The outbox is a technician and sales-rep feature. These two facts will want to get conflated once code is being written; they shouldn't be.
+**Every role works online, and where a role may sign in is a separate rule.** Since 2026-09-15 no role keeps business data on a device (§6, `docs/decisions/2026-09-15-online-only.md`); the old split — an outbox for technicians and reps, error states for dispatchers — is gone. Technicians and sales reps use the Android app only, and a web sign-in by either is refused after authentication. Dispatchers and the owner may also use the web build. These two facts will want to get conflated once code is being written; they shouldn't be.
 
 **The owner is the only role needing two layouts.** So the work is "phone layouts for everything, plus desktop layouts for fourteen owner screens" — two nearly disjoint sets, not a responsive matrix across every screen.
 
@@ -49,7 +49,7 @@ One seam. Background location cannot run in a browser — no browser can do it, 
 
 Two seams from the earlier plan have dissolved:
 
-**Offline storage** — the only web user is the owner, who doesn't need an outbox. `expo-sqlite` on Android, nothing on web. The IndexedDB path is gone.
+**Offline storage** — gone for every role (§6). The login token (Keystore on Android, `localStorage` on web) and the Android GPS ping buffer are the only things written to a device; `expo-sqlite` survives for that buffer alone. The IndexedDB path is gone.
 
 **Maps** — the technician's "Navigate" action deep-links to Google Maps, which has traffic, voice guidance and offline tiles nothing in-app would match. That leaves the owner's location console as the only map in the system, and it's on web. `react-native-maps` drops out entirely; one web map library remains.
 
@@ -69,7 +69,7 @@ Money is `NUMERIC(12,2)`. Timestamps are `timestamptz`, business dates come from
 
 **Cash handover** — `cash_reconciliations`, one row per **employee** per day. Technicians collect cash at completion and sales reps occasionally collect it from companies; both hand it over, so the table is keyed on the employee rather than the role.
 
-**Location** — `location_pings` and `location_requests` (an on-demand fix is a persisted request, not a fire-and-forget push). **Sync** — `idempotency_keys`, `sequences`.
+**Location** — `location_pings` and `location_requests` (an on-demand fix is a persisted request, not a fire-and-forget push). **Write plumbing** — `idempotency_keys`, `sequences`.
 
 ### Four structural decisions
 
@@ -139,7 +139,7 @@ Three things the table alone doesn't carry:
 
 **Deactivating an employee is refused while he still holds open jobs, owns companies, or has cash the owner has not confirmed**, with the blocking rows named so the owner can reassign and retry. On success every refresh token is revoked, his devices are marked inactive and he leaves the tracking-health view. History is untouched — `is_active` was never a delete.
 
-The cash precondition is the one that is easy to leave out and expensive to leave out. Open jobs and owned companies are visible; an unconfirmed handover is a row in a queue the owner may not have reached yet, and deactivating the person is how a real discrepancy becomes an unanswerable one — the only person who could explain it can no longer log in and is probably no longer employed. **Changing an employee's role is gated the same way**, for the same reason plus one: a technician promoted to dispatcher loses offline capability at his next login, so his queue must have drained first.
+The cash precondition is the one that is easy to leave out and expensive to leave out. Open jobs and owned companies are visible; an unconfirmed handover is a row in a queue the owner may not have reached yet, and deactivating the person is how a real discrepancy becomes an unanswerable one — the only person who could explain it can no longer log in and is probably no longer employed. **Changing an employee's role is gated the same way**, for the same reason. (A fourth condition — an undrained outbox — went with the outbox on 2026-09-15; the new role applies at the next sign-in.)
 
 **A dispatcher sees tracking health but never a position.** He is the person who will notice a technician has stopped reporting and the person who will ring him, so his dashboard carries the warning inline. Where someone actually *is* — coordinates, the day's trail, the map — remains the owner's alone. `PLAN-BACKEND.md` §5 splits these as `location.health` and `location.read`; without the split the choice was between handing the desk a live map of eight people or leaving the dispatcher's warning reading data the matrix forbids.
 
@@ -261,7 +261,7 @@ The one rule that matters for the owner's dual layout: **the same job is a card 
 | Phase | What |
 |---|---|
 | 0 | Monorepo, schema, permission matrix, auth, tokens |
-| 1 | Technician app — exercises offline and location while scope is small |
+| 1 | Technician app — exercises idempotent writes and location while scope is small |
 | 2 | Dispatcher — phone-native Job Logs and load-aware assignment |
 | 2B | Service contracts — AMC agreements, visit generation, renewal view |
 | 3 | Sales Rep — sales cards, balances, payments with proof upload |

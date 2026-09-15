@@ -56,7 +56,7 @@ A drag that continues into a settle is a spring — the motion is a continuation
 
 1. **Two animated properties per element, maximum** — `transform` and `opacity`. Never both a translate and a scale and a colour and a rotation.
 2. **Stagger exists in exactly one place**: the status stepper's segments. Nowhere else in the product.
-3. **Lists never animate on mount.** They animate on *change*: an item entering because a sync delivered it gets a 140ms height-and-opacity entrance, because that is information. `PLAN.md` §9's "no entrance animation on every card" is about the load case, and it stands.
+3. **Lists never animate on mount.** They animate on *change*: an item entering because a refetch delivered it gets a 140ms height-and-opacity entrance, because that is information. `PLAN.md` §9's "no entrance animation on every card" is about the load case, and it stands.
 4. **Nothing animates off-screen.** Every animated component checks `useIsFocused` and parks.
 5. **One `overlay` at a time** (`01-FOUNDATIONS.md` §4).
 6. **Interruptible.** Every animation accepts a new gesture mid-flight. Reanimated springs take over from current velocity; a user who changes their mind never waits for a transition to finish.
@@ -86,12 +86,12 @@ This is the one orchestrated moment `PLAN.md` §9 allows, and it is spent on the
 **Timing:** `considered` 300ms, `spring.sheet`. Scrim 220ms `enter`.
 **Dismiss:** drag down, `spring.snap` carrying velocity; a fast flick dismisses below the usual threshold. `base` 220ms `exit` if dismissed by button.
 
-### 5.3 The pending badge drain
+### 5.3 Sending → accepted
 
-**When:** the outbox drains.
-**What:** the count decrements with a `quick` 140ms tick per item — the number changes with tabular figures so nothing shifts. At zero, the badge scales to 0 with `spring.press` and a `Success` haptic.
+**When:** a submit is in flight.
+**What:** the action's label becomes *Sending…* at once, and the card or job header takes the 2px dashed inset until the server answers. On acceptance the inset clears with a `quick` 140ms fade, the new state cross-fades in, and a `Success` haptic fires.
 
-This is the visible proof that queued work left the device. `PLAN.md` §6 asks for the badge; animating the drain is what turns it from a number into reassurance. **A badge that only goes up is a sync failure**, and making the downward motion satisfying is what makes its absence noticeable.
+This replaced the pending-badge drain, retired with the outbox on 2026-09-15. The point is the same — visible proof that the work left the device — but the proof is now the server's answer in front of the person, not a count going down later.
 
 ### 5.4 Long-press pick-up
 
@@ -109,7 +109,7 @@ The one place stagger is allowed outside the stepper — and it earns it, becaus
 
 ### 5.6 The rejection banner
 
-**When:** a queued operation is rejected (`JOB_ALREADY_CLOSED` and friends).
+**When:** a submit is refused (`JOB_ALREADY_CLOSED` and friends).
 **What:** drops from the top with weight — `considered` 300ms, `spring.sheet`, slight overshoot. `Warning` haptic. Does not auto-dismiss.
 
 The only "attention" motion in the product. It is allowed to be assertive because it is rare and because the alternative — a technician not noticing his completion was refused — is the failure `PLAN.md` §6 works hardest to prevent.
@@ -128,7 +128,7 @@ Not signature, but they are most of what a user feels.
 | Chip toggle | Fill and border change, `quick` 140ms. `Selection` haptic |
 | Screen push | Slide 24pt from trailing edge + fade, `considered` 300ms `enter` |
 | Screen pop | Reverse, `base` 220ms `exit` |
-| Pull to refresh | Custom: the pending badge becomes the indicator. No platform spinner |
+| Pull to refresh | Refetches the screen's read. The pending badge that used to be the indicator is gone; the platform spinner stands in until the UI overhaul chooses a replacement |
 | Field focus | Border → `line.focus` 2px, `quick` 140ms. No glow, no shadow |
 | Row expand | Height + opacity, `base` 220ms `standard` |
 | Toast | Rise 16pt + fade, `base`. Auto-dismiss 4s. Never for errors — errors are banners |
@@ -143,7 +143,7 @@ Not signature, but they are most of what a user feels.
 - **200ms delay before appearing.** A response under 200ms shows nothing — no flash, no flicker. The best skeleton in this app is one nobody sees.
 - **Minimum 400ms once shown**, so a skeleton that does appear does not strobe.
 - Skeletons match the real layout's geometry exactly. A skeleton that reflows on load is worse than a spinner.
-- **Never a skeleton for offline-first content.** Technician and rep screens read the local mirror; there is nothing to wait for. A skeleton there would be a lie about the architecture.
+- **Skeletons on every role's cold first load.** The mirror that once made technician and rep screens instant is gone (2026-09-15); a first read waits on the network like any other, and the in-memory cache makes a revisit instant.
 
 ---
 
@@ -157,9 +157,8 @@ Not signature, but they are most of what a user feels.
 | Segmented control / picker | `Selection` |
 | Long-press threshold armed | `Selection` |
 | Job status advanced | `ImpactLight` |
-| Completion synced | `NotificationSuccess` |
-| Outbox fully drained | `NotificationSuccess` |
-| Sync rejected | `NotificationWarning` |
+| Completion accepted by the server | `NotificationSuccess` |
+| Submit refused | `NotificationWarning` |
 | Destructive confirmed | `ImpactMedium` |
 | Validation failure on submit | `NotificationError` |
 

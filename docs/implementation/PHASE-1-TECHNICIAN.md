@@ -1,5 +1,7 @@
 # Phase 1 — Technician
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 **Size XL · ~7 weeks · Risk: high**
 
 The largest phase and the one that decides the project. Idempotency, the sync protocol and the location service are all painful to retrofit, and **this is the only phase where the surface is small enough to get them right.**
@@ -1102,22 +1104,25 @@ Take the descope **before Phase 2 starts, not during**: give dispatchers the des
 **Depends on:** all of Phase 1
 **Tier:** T0 per flag
 
+*Checklist rewritten for the online-only app on 2026-09-15; the run is still pending.*
+
 **Build** nothing. **Run the app in the field and measure.**
 
 **2 weeks, 2 technicians, then 1 week all 8.** The old process remains the record of truth. Cutover is a separate, announced decision, and the owner can call it off.
 
-**Tests** — the field is the test. Collect daily: ping delivery per handset, outbox rejection counts by error code, and **any moment a technician fell back to paper**. The last is qualitative and is the most useful thing in the set.
+**Tests** — the field is the test. Collect daily: ping delivery per handset, failed submits by error code (and *not reached* counts), and **any moment a technician fell back to paper**. The last is qualitative and is the most useful thing in the set.
 
 **Done when** — all of the following, measured over the final week, numbers written down:
 
 - [ ] **Ping delivery ≥ 90%** of expected in-window pings on the two field handsets
-- [ ] **Outbox rejection rate < 2%**, excluding legitimate conflicts
+- [ ] **Submit failure rate < 2%**, excluding legitimate conflicts (office cancellations)
 - [ ] **Zero duplicate job cards** attributable to replay
 - [ ] **Zero completions with an unexplained shortfall** — the constraint held in the field, not just in tests
 - [ ] Both technicians completed a full day **without falling back to the old process**
 - [ ] **Basement recovery observed in the wild** — a gap that filled in on reconnect rather than staying a gap
 - [ ] **The health chip showed a true red at least once and the technician acted on it.** A chip that has only ever been green is untested
-- [ ] **No queued work lost across a logout**, including at least one deliberate end-of-shift handset handover
+- [ ] **No submitted work silently lost** — every failed submit was seen and retried or recorded, including across at least one deliberate end-of-shift handset handover
+- [ ] **The *No connection* screen seen in the wild at least once**, and the half-typed sheet was intact when signal returned
 - [ ] Parts recorded on real completions, and **no technician asked why the amount did not change** — if anyone did, the sheet implies a bill it does not produce
 
 **If it fails**
@@ -1127,7 +1132,7 @@ Nothing here is undone by reverting a branch — the app is on people's phones a
 | Scenario | Tier | Action |
 |---|---|---|
 | A technician screen is wrong | T0 | `tech.jobs` off for that person |
-| Outbox misbehaving | T0 | `tech.offline` off — online-only, queued items preserved and drained on re-enable |
+| Submits failing in the field | T0 | `tech.jobs` off for that person; the old process resumes, and nothing is stored on the phone to recover |
 | Location draining battery | T0 | `tech.location` off; server stops accepting, device stops the task on next foreground |
 | Logic bug in the app | T1 | previous EAS update, ~5 min |
 | API bug | T2 | previous image, ~2 min |

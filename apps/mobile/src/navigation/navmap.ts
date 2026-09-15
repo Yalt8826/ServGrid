@@ -52,7 +52,7 @@ export interface NavGroup {
 /**
  * The map per role — one literal per role, transcribed from
  * PLAN-FRONTEND.md §3. Tab counts: technician 4 · dispatcher 3 ·
- * sales rep 4 · owner 5. `/cash` moves by role rather than being hidden:
+ * sales rep 5 · owner 5. `/cash` moves by role rather than being hidden:
  * the owner's reconciliation queue under People, the field roles' own
  * handover as its own tab. `/contracts` is operational for a dispatcher
  * and commercial for a rep and the owner.

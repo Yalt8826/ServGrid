@@ -2,7 +2,7 @@
 
 **Two layouts.** Density `field` on Android (five tab groups), `desk` on web (left rail). One route tree, two presentations — `NavShell` branches once, on `Platform.OS === 'web' && width >= 1024`.
 
-One user, Phase 4. Online-only: no mirror, no outbox.
+One user, Phase 4. Online-only, like every role.
 
 **The role's condition:** at a desk with a laptop most of the time, on a phone the rest. Not rushed. Wants to *verify* rather than operate — the recurring question is "is this right, and if not, who do I ask?"
 
@@ -58,7 +58,7 @@ No pie charts. No donuts. No gradient fills. No animated draw-in on every visit 
 ### States
 
 - **Loading:** skeletons at exact geometry, 200ms delay.
-- **Offline (web):** danger banner, figures to `text.disabled`.
+- **Offline:** the full-screen *No connection* gate, web and Android.
 - **Empty (new deployment):** each figure shows `0` with a caption naming what would populate it.
 
 ---
@@ -91,7 +91,7 @@ No pie charts. No donuts. No gradient fills. No animated draw-in on every visit 
 
 **The default date range includes days with no submission.** `missing_submission` is the row the entire feature exists to catch, and a default filter of "submitted handovers" would hide exactly it. Default: **the last 14 days ending yesterday**, all flags, `missing_submission` sorted first regardless of date.
 
-**Ending yesterday, because today's figures are not final.** Cash collected in a basement is stamped with the day it was collected, not the day it syncs (`PLAN-BACKEND.md` §10), so a technician who declares at 19:10 and syncs on the drive in next morning produces, for a few hours, a row with a declaration and no expected cash — flagged `no_expected_cash`, which reads exactly like a problem it is not. Today is still reachable, one tap away, and carries a caption: *“Today — still syncing. Figures settle overnight.”* An owner who learns the flags lie on the current day learns to discount the flags, and that costs more than a one-day delay ever will.
+**Ending yesterday, because today's figures are not final.** Cash is stamped with the day it was collected, not the day it reached the server (`PLAN-BACKEND.md` §10), so a declaration made before the day's last completion was submitted produces, for a few hours, a row with a declaration and no expected cash — flagged `no_expected_cash`, which reads exactly like a problem it is not. Today is still reachable, one tap away, and carries a caption: *“Today — still syncing. Figures settle overnight.”* An owner who learns the flags lie on the current day learns to discount the flags, and that costs more than a one-day delay ever will.
 
 **Every variance is real.** There is no expenses column, because technicians do not spend from collections. Nothing on this screen lets a shortfall be explained away — the only actions are confirm, dispute, or go look.
 

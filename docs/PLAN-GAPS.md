@@ -1,5 +1,7 @@
 # Gap Register — Amendments to the Plan
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 Found by reading `PLAN.md`, `PLAN-DATA-MODEL.md`, `PLAN-BACKEND.md`, `PLAN-FRONTEND.md` and `PLAN-EXECUTION.md` against each other and against the working day they describe.
 
 **Timing matters here.** Nothing has been built. Every amendment below is a free edit to a migration that has not run and an endpoint that does not exist. The same corrections after Phase 1 ships are expand/contract cycles, data backfills and a second APK. That is the entire argument for doing this pass now.

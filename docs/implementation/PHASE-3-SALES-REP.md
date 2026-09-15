@@ -1,5 +1,7 @@
 # Phase 3 — Sales Rep
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 **Size M · ~4 weeks · Risk: medium — it is money**
 
 Two users, offline-first, **reusing the Phase 1 outbox unchanged.**
@@ -437,6 +439,8 @@ The first must be green with the Phase 1 tests exactly as they were. The second 
 **Depends on:** all of Phase 3
 **Tier:** T0 per flag
 
+*Checklist rewritten for the online-only app on 2026-09-15; the run is still pending.*
+
 **Build** nothing. **Run a month of real selling and collecting.**
 
 **One full month-end cycle.** Not two weeks — the thing being tested is whether the balances match the books, and that only happens at month end.
@@ -446,7 +450,9 @@ The first must be green with the Phase 1 tests exactly as they were. The second 
 **Done when**
 
 - [ ] **Month-end balances match the owner's manual figures to the rupee, across every company**
-- [ ] **The outbox required zero modification.** If it did need changes, record what and why
+- [ ] **No rep submit silently lost** — every failed sale or payment was seen and retried or recorded
+- [ ] At least one **discounted sale line** recorded on real data, and the sale detail showed list price, discount and final price the way the rep agreed it with the customer
+- [ ] **Proof photos uploaded for real payments**, and the owner found them sufficient evidence without a reference number — if not, that is a decision to revisit, not a field to quietly re-add
 - [ ] Both reps recorded a full month of sales and collections in-app
 - [ ] At least one **void exercised on real data**, balance verified afterwards
 - [ ] Neither rep saw the other's accounts, and neither reported the split getting in their way — **if it did, house accounts are the release valve, not a code change**
@@ -468,7 +474,7 @@ The first must be green with the Phase 1 tests exactly as they were. The second 
 
 Sales tables are additive; a rollback to Phase 2 leaves them unwritten.
 
-**Descope** — if the outbox does not generalise, ship reps **online-only**. See T3.8.
+**Descope** — ~~if the outbox does not generalise, ship reps online-only~~: taken for every role on 2026-09-15.
 
 **Commits**
 `chore(start): T3.9 month-end run` → `docs(ops): phase 3 exit criteria measured, balances reconciled to the rupee`

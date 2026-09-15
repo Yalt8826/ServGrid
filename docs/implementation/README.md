@@ -14,8 +14,8 @@ Eight files. This one carries the rules that apply to every task; the other seve
 |---|---|---|
 | `../PLAN.md` | The settled design. Roles, platform, permissions, scope decisions | Always, once, before Phase 0 |
 | `../PLAN-DATA-MODEL.md` | Every table, constraint, view, index, migration order | Any task touching the schema |
-| `../PLAN-BACKEND.md` | Modules, endpoints, plugins, sync protocol, background jobs | Any task in `apps/api` |
-| `../PLAN-FRONTEND.md` | Routes, state layers, outbox, location client, components | Any task in `apps/mobile` |
+| `../PLAN-BACKEND.md` | Modules, endpoints, plugins, online reads and writes, background jobs | Any task in `apps/api` |
+| `../PLAN-FRONTEND.md` | Routes, state layers, connection handling, location client, components | Any task in `apps/mobile` |
 | `../PLAN-EXECUTION.md` | Phase gates, exit criteria, rollback tiers, feature flags, risks | Phase start and phase end |
 | `../PLAN-GAPS.md` | Why things are the way they are. Two gap passes, 47 resolutions | When a decision looks arbitrary |
 | `../UI/plan-2/` | Design philosophy, tokens, motion, components, every screen | Any task rendering pixels |
@@ -50,25 +50,24 @@ Every task in every phase file has the same eight parts. Nothing is optional.
 
 ## 3. Git protocol
 
-**Branch per task.** `git checkout -b t/<task-id>-<slug>` off `main`. Example: `t/1.14-outbox-drain`.
+**Branch per task.** `git checkout -b t/<task-id>-<slug>` off `main`. Example: `t/on.3-technician-online`.
 
 **Two commits minimum per task, and the first is empty.**
 
 ```bash
 # before any work
-git commit --allow-empty -m "chore(start): T1.14 outbox drain manager"
+git commit --allow-empty -m "chore(start): TON.3 technician screens online"
 
 # ... build, test ...
 
 git add -A
-git commit -m "feat(mobile): outbox drain with two transports
+git commit -m "feat(mobile): technician jobs read and write the API directly
 
-JSON operations batch to /v1/sync/batch; attachments upload
-individually to /v1/attachments after their parent resolves.
-Idempotency keys generated once at enqueue and reused across
-every retry.
+The work read replaces the mirror; complete, cancel and status
+changes post directly with one idempotency key per submit intent,
+reused across every retry.
 
-Task: T1.14
+Task: TON.3
 Refs: PLAN-FRONTEND.md §5, PLAN-BACKEND.md §7"
 ```
 
@@ -89,7 +88,7 @@ Make the marker **before** you stage anything, and prove it landed empty:
 
 ```bash
 git status --porcelain          # must be empty
-git commit --allow-empty -m "chore(start): T1.14 outbox drain manager"
+git commit --allow-empty -m "chore(start): TON.3 technician screens online"
 git show --stat HEAD | grep -c '|'   # must print 0
 ```
 
@@ -183,7 +182,7 @@ Each task names what it is **Parallel with**. The rule behind those lists:
 - **Migrations are serial.** Two agents writing migration files at once produces two files claiming the same number. One agent owns the migration sequence per phase.
 - **`packages/shared` is serial within a phase.** It is imported by both sides; concurrent edits to the permission matrix or the error union are merge conflicts in the one file that must not be wrong.
 - **API modules are parallel across modules**, serial within one. `modules/jobs/` and `modules/location/` never touch the same file.
-- **Screens are parallel once the primitives exist.** Which is why the Phase 0 component gallery is a gate rather than a nicety: without it, two agents invent `stale` twice.
+- **Screens are parallel once the primitives exist.** Which is why the Phase 0 component gallery is a gate rather than a nicety: without it, two agents invent `error` twice.
 - **Anything touching `NavShell`, `theme.ts` or the route tree is serial.** These are the three files where a conflict is silent rather than textual.
 
 When two tasks must share a file, the later one depends on the earlier — that is what **Depends on** records.

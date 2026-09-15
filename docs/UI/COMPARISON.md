@@ -1,5 +1,7 @@
 # UI Plans — Comparative Report
 
+> **Superseded in part by the online-only decision (2026-09-15, `docs/decisions/2026-09-15-online-only.md`).** This is a historical record. Its offline mirror, outbox, `tech.offline` flag, pending-sync UI and sync endpoints were removed in Phase ON (`docs/implementation/PHASE-ON-ONLINE.md`); where it disagrees with the `PLAN*.md` documents, the plans win.
+
 A review of the two competing UI design plans in `docs/UI/plan-1/` and `docs/UI/plan-2/`:
 their themes, design languages, philosophies, where they agree, where they genuinely
 disagree, and where each is right or wrong on the facts.
