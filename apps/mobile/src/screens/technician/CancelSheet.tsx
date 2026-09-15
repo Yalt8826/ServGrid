@@ -48,6 +48,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { TextField } from '../../components/ui/TextField';
 import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
+import { messageOfWriteError } from '../../lib/intentWrite';
 import { istDateKey, type JobView } from './jobView';
 import {
   cancelPayloadOf,
@@ -68,9 +69,9 @@ export interface CancelSheetDeps {
    * in IST (the technician's business day, `jobView.istDateKey`). */
   now: Date;
   /**
-   * The optimistic write + enqueue (the route's). Resolves when the
-   * cancellation is queued; rejects (sheet stays open, nothing lost)
-   * when the local enqueue itself failed.
+   * Files the cancellation with the server (the route's). Resolves once
+   * the server has it; rejects with the sentence to show when it does not
+   * — and the sheet stays open with the reason he chose.
    */
   onSubmit: (payload: CancelSheetPayload) => Promise<void>;
   onDismiss: () => void;
@@ -86,7 +87,7 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
   const [dateError, setDateError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitFailed, setSubmitFailed] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const blocker = submitBlockerOf({ reasonCode, note });
   // Phase 2B's warning in its Phase 1 slot: above the date picker, body
@@ -107,21 +108,21 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
     setRescheduleTo(iso);
   }
 
-  /** The submit pipeline past validation: optimistic write + enqueue are
-   * the route's; a failed enqueue keeps the sheet open with everything
-   * he chose — the record of a wasted trip is never lost (§5). */
+  /** The submit pipeline past validation: the route sends it; a failure
+   * keeps the sheet open with everything he chose and says why — the
+   * record of a wasted trip is never lost (§5). */
   function performSubmit(): void {
     if (blocker !== null || submitting || reasonCode === null) return;
     setSubmitting(true);
-    setSubmitFailed(false);
+    setSubmitError(null);
     void (async () => {
       try {
         await deps.onSubmit(cancelPayloadOf({ reasonCode, note, rescheduleTo }));
         setSubmitting(false);
         deps.onDismiss();
-      } catch {
+      } catch (error) {
         setSubmitting(false);
-        setSubmitFailed(true);
+        setSubmitError(messageOfWriteError(error));
       }
     })();
   }
@@ -264,9 +265,7 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
         ) : null}
       </View>
 
-      {submitFailed ? (
-        <Banner tone="danger" message="The cancellation could not be queued — nothing was lost. Try again." testID="cancel-banner" />
-      ) : null}
+      {submitError !== null ? <Banner tone="danger" message={submitError} testID="cancel-banner" /> : null}
     </Sheet>
   );
 }

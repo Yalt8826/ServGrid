@@ -13,21 +13,17 @@
  *   to work sees he skipped a step, not a stepper that changed shape).
  *   Cancelled is a fifth rendering, not a fifth node: the line freezes
  *   at the node the job reached and a terminal cap carries the word.
- * - **The timeline** (`timelineForJob`): §T3 reads `job_events`, which
- *   the technician's sync contract does not carry. What this device
- *   DOES have is its own outbox — every optimistic op it queued, in
- *   seq order, each stamped with the instant the tap happened
- *   (`occurred_at` for status moves). The section renders that local
- *   truth and says so; the office's history arrives with sync.
+ * - **The timeline** (`timelineFromEvents`): §T3 reads `job_events`, which
+ *   the technician now reads himself for his own job
+ *   (`GET /v1/jobs/:id/events`, money-free). Every event that moved the
+ *   job's status becomes a line, in the order the server recorded them.
  * - **The chips** (`warrantyChipOf`, `detailContractChipOf`): the
  *   warranty chip carries the expiry date, and the contract chip leads
  *   with **prepaid** when the billing is upfront — the load-bearing
  *   word (§T3, §T4).
  */
-import type { JobStatus } from '@servgrid/shared';
+import type { JobStatus, JobTimelineDispatcherResponse } from '@servgrid/shared';
 
-import type { OutboxRow } from '../../sync/outbox';
-import { operationBodyOf } from '../../sync/outbox';
 import { istDateKey, istTimeLabel, statusPillOf, type JobView, type UnitView } from './jobView';
 
 // ── the stepper's shape ──────────────────────────────────────────────────────
@@ -120,76 +116,32 @@ export function stepperStateOf(status: JobStatus, localHistory: readonly JobStat
   return { nodes, reachedIndex, cancelled: false };
 }
 
-// ── the timeline, from this device's outbox ──────────────────────────────────
+// ── the timeline, from the server's trail ───────────────────────────────────
 
-/** One line of the detail's timeline: what happened, and the instant of
- * the tap — `occurred_at` for status moves, the enqueue instant for the
- * rest (the honest local approximation, `PLAN-DATA-MODEL.md` §3.4). */
+/** One line of the detail's timeline: what happened, and when the server
+ * recorded it happening (`job_events.occurred_at`). */
 export interface JobTimelineEntry {
-  /** The outbox row's id — stable list key. */
+  /** The event's id — stable list key. */
   id: string;
   /** The status word, or `Completed` / `Cancelled` for the closers. */
   label: string;
-  /** ISO instant the event happened on this device. */
+  /** ISO instant the event happened. */
   at: string;
-  /** The status the move went to, when the event was a status move. */
+  /** The status the move went to. */
   to: JobStatus | null;
 }
 
-interface StatusOpBody {
-  to?: unknown;
-  occurredAt?: unknown;
-}
-
-/** Fold one outbox row into a timeline entry, or null when the row is
- * not this job's (or not a human-visible event at all). */
-export function timelineEntryOf(row: OutboxRow): JobTimelineEntry | null {
-  if (row.entityType !== 'job') return null;
-  if (row.path.endsWith('/status')) {
-    const body = (operationBodyOf(row) ?? {}) as StatusOpBody;
-    if (typeof body.to !== 'string') return null;
-    const to = body.to as JobStatus;
-    return {
-      id: row.id,
-      label: statusPillOf(to).label,
-      at: typeof body.occurredAt === 'string' ? body.occurredAt : row.createdAt,
-      to,
-    };
-  }
-  if (row.path.endsWith('/completions')) {
-    return { id: row.id, label: statusPillOf('completed').label, at: row.createdAt, to: 'completed' };
-  }
-  if (row.path.endsWith('/cancel')) {
-    // POST /v1/jobs/:id/cancel (§6.3) — the technician's on-site
-    // cancellation (T1.20). The wire path this device queues is
-    // `/cancel`, so that is what folds; a cancellation must show in the
-    // docket's timeline from the moment of the tap, not after sync.
-    return { id: row.id, label: statusPillOf('cancelled').label, at: row.createdAt, to: 'cancelled' };
-  }
-  return null;
-}
-
-/** This device's events for one job, in the order they were queued. */
-export function timelineForJob(rows: readonly OutboxRow[], jobId: string): JobTimelineEntry[] {
+/** The job's trail as timeline lines: every event that moved its status,
+ * in the order the server recorded them. Reschedules, attachments and
+ * stack edits moved nothing on the stepper and are left out. */
+export function timelineFromEvents(events: JobTimelineDispatcherResponse['events']): JobTimelineEntry[] {
   const entries: JobTimelineEntry[] = [];
-  for (const row of rows) {
-    if (row.entityLocalId !== jobId) continue;
-    const entry = timelineEntryOf(row);
-    if (entry !== null) entries.push(entry);
+  for (const event of events) {
+    if (event.toStatus === null) continue;
+    const to = event.toStatus as JobStatus;
+    entries.push({ id: String(event.id), label: statusPillOf(to).label, at: event.occurredAt, to });
   }
   return entries;
-}
-
-/** Every job's events in one pass — the route feeds screens from this
- * instead of re-walking the outbox per navigation. */
-export function timelineByJob(rows: readonly OutboxRow[]): Record<string, JobTimelineEntry[]> {
-  const byJob: Record<string, JobTimelineEntry[]> = {};
-  for (const row of rows) {
-    const entry = timelineEntryOf(row);
-    if (entry === null) continue;
-    (byJob[row.entityLocalId] ??= []).push(entry);
-  }
-  return byJob;
 }
 
 /**

@@ -2,12 +2,13 @@
  * T1 Dashboard tests (UI/plan-2/04-TECHNICIAN.md §T1) — the four the
  * spec names:
  *
- * - **Three figures, tabular, from the mirror with no fetch** — the
- *   data comes through `readJobData` from a REAL SQLite mirror
- *   (bootstrap + outbox rows, node:sqlite under the expo-sqlite seam;
- *   no mocked database), and the figures render on the first paint.
- * - **Offline renders no banner** — the mirror is the source; only a
- *   failed drain raises anything, and that banner is not this screen's.
+ * - **Three figures, tabular, on the first paint** — the data comes
+ *   through `buildJobViews` from a work read exactly as
+ *   `GET /v1/technician/work` answers it (online-only since 2026-09-15),
+ *   and "done today" is dated by the server's `closedAt`.
+ * - **A missing health answer renders no banner** — the chip degrades;
+ *   a lost connection is the no-connection gate's to show, not this
+ *   screen's.
  * - **Count-up runs once; a second focus renders final values
  *   immediately.**
  * - **No element renders a currency symbol** — no earnings figure, no
@@ -18,19 +19,16 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
-import type { SyncBootstrapResponse, SyncWorkingSet } from '@servgrid/shared';
+import type { TechnicianWork } from '@servgrid/shared';
 import { SEMANTIC, STATUS } from '@servgrid/shared';
-import { openMirror, applyBootstrap, type Mirror } from '../../db/mirror';
-import { enqueue } from '../../sync/outbox';
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
-import { readJobData } from './jobData';
+import { buildJobViews, type TechnicianWorkViews } from './workData';
 import { DashboardScreen } from './DashboardScreen';
 import type { JobView } from './jobView';
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 
 const NOW = new Date('2026-09-11T10:00:00+05:30'); // Friday, 10:00 IST
-const EMPLOYEE_ID = '01890a5e-0000-7000-8000-000000000001';
 
 const MORNING = '2026-09-11T08:00:00+05:30'; // past — overdue
 const AFTERNOON = '2026-09-11T14:30:00+05:30'; // today, later
@@ -39,7 +37,7 @@ const TOMORROW = '2026-09-12T09:00:00+05:30';
 
 let seq = 0;
 
-function makeJob(overrides: Partial<SyncWorkingSet['jobs'][number]> = {}): SyncWorkingSet['jobs'][number] {
+function makeJob(overrides: Partial<TechnicianWork['jobs'][number]> = {}): TechnicianWork['jobs'][number] {
   seq += 1;
   const id = `01890a5e-1000-7000-8000-${String(seq).padStart(12, '0')}`;
   return {
@@ -55,11 +53,12 @@ function makeJob(overrides: Partial<SyncWorkingSet['jobs'][number]> = {}): SyncW
     description: null,
     contract: null,
     version: 1,
+    closedAt: null,
     ...overrides,
   };
 }
 
-function makeCustomer(): SyncWorkingSet['customers'][number] {
+function makeCustomer(): TechnicianWork['customers'][number] {
   return {
     id: '01890a5e-2000-7000-8000-000000000001',
     name: 'Sunrise Apartments',
@@ -78,68 +77,21 @@ function makeCustomer(): SyncWorkingSet['customers'][number] {
   };
 }
 
-function bootstrapOf(jobs: SyncWorkingSet['jobs']): SyncBootstrapResponse {
+/** A day's work read: three open jobs today (one overdue), one done this
+ * morning (closed at 09:00 IST), one tomorrow. */
+function workFixture(): TechnicianWorkViews {
   const customer = makeCustomer();
-  return {
-    data: {
-      jobs: jobs.map((job) => ({ ...job, customerId: customer.id })),
-      customers: [customer],
-      customerProducts: [],
-      products: [],
-      services: [],
-    },
-    cursor: '2026-09-10T00:00:00.000Z',
-  };
-}
-
-async function mirroredFixture(): Promise<Mirror> {
-  const mirror = await openMirror('technician');
-  const doneJob = makeJob({ status: 'completed', scheduledFor: MORNING });
   const jobs = [
     makeJob({ scheduledFor: AFTERNOON }), // open, later today
-    makeJob({ scheduledFor: EVENING, status: 'en_route' }), // open, in progress
+    makeJob({ scheduledFor: EVENING, status: 'en_route' }), // open, on the way
     makeJob({ scheduledFor: MORNING }), // open, overdue
-    doneJob, // done today (dated by its outbox completion row, below)
+    makeJob({ status: 'completed', scheduledFor: MORNING, closedAt: '2026-09-11T03:30:00.000Z' }), // done today
     makeJob({ scheduledFor: TOMORROW }), // upcoming — none of the figures
   ];
-  const [laterToday, inProgress] = jobs;
-  applyBootstrap(mirror, bootstrapOf(jobs));
-  // The completion's optimistic write: the row that dates "done today".
-  await enqueue(mirror.database, {
-    employeeId: EMPLOYEE_ID,
-    method: 'POST',
-    path: `/v1/jobs/${doneJob.id}/completions`,
-    body: { completedAt: MORNING, workSummary: 'Swapped battery' },
-    entityType: 'job',
-    entityLocalId: doneJob.id,
-  });
-  // enqueue stamps created_at with the real clock; the fixture pins it
-  // to 09:00 IST on the fixture's business date so "done today" is
-  // judged against the same day the screen's clock shows.
-  mirror.database.runSync(`UPDATE outbox SET created_at = '2026-09-11T03:30:00.000Z' WHERE path = '/v1/jobs/${doneJob.id}/completions'`);
-  // Two still-queued rows (an en_route move and the overdue job's
-  // start): the pending badge's count.
-  await enqueue(mirror.database, {
-    employeeId: EMPLOYEE_ID,
-    method: 'POST',
-    path: `/v1/jobs/${jobs[2]!.id}/status`,
-    body: { to: 'en_route', occurredAt: NOW.toISOString() },
-    entityType: 'job',
-    entityLocalId: jobs[2]!.id,
-  });
-  await enqueue(mirror.database, {
-    employeeId: EMPLOYEE_ID,
-    method: 'POST',
-    path: `/v1/jobs/${inProgress!.id}/status`,
-    body: { to: 'in_progress', occurredAt: NOW.toISOString() },
-    entityType: 'job',
-    entityLocalId: inProgress!.id,
-  });
-  void laterToday;
-  return mirror;
+  return buildJobViews({ jobs, customers: [customer], customerProducts: [], products: [], services: [] });
 }
 
-/** A view list built by hand — for the tests that do not need SQLite. */
+/** A view list built by hand — for the tests that need one card. */
 function viewOf(job: Partial<JobView['job']> & { id: string }, extra: Partial<JobView> = {}): JobView {
   return {
     job: {
@@ -196,21 +148,17 @@ describe('DashboardScreen (§T1)', () => {
     seq = 0;
   });
 
-  it('renders three tabular figures from the mirror with no fetch', async () => {
-    const mirror = await mirroredFixture();
-    const data = readJobData(mirror.database, EMPLOYEE_ID);
+  it('renders three tabular figures from the work read on the first paint', async () => {
+    const data = workFixture();
 
-    // The mirror read is the whole input — open: the three open jobs of
-    // today (14:30, 16:00, and the overdue 08:00); done today: the one
-    // with the completion row; overdue: the 08:00. The tomorrow job is
-    // in none of them. Three outbox rows are queued (the completion and
-    // two status moves), so the badge reads 3.
-    expect(data.pendingCount).toBe(3);
+    // Open: the three open jobs of today (14:30, 16:00, and the overdue
+    // 08:00); done today: the one the server closed this morning; overdue:
+    // the 08:00. The tomorrow job is in none of them.
+    expect(data.completedAtById).toEqual({ [data.views[3]!.job.id]: '2026-09-11T03:30:00.000Z' });
 
     const deps = baseDeps({
       jobs: data.views,
       completedAtById: data.completedAtById,
-      pendingCount: data.pendingCount,
       animateFigures: false, // past the first focus: figures are already correct
     });
     const renderer = await create(<DashboardScreen {...deps} />);
@@ -241,16 +189,12 @@ describe('DashboardScreen (§T1)', () => {
       (n) => typeof n.props.testID === 'string' && /^dashboard-later-[0-9a-f-]+$/.test(n.props.testID),
     );
     expect(laterRows).toHaveLength(2);
-
-    // The badge is the outbox's count — the drain indicator.
-    expect(textOf(renderer, 'dashboard-pending-count')).toBe('3');
   });
 
-  it('offline renders no banner', async () => {
-    // health = null is the offline case: the fetch never answered. The
-    // screen degrades the chip, never raises chrome.
-    const { deps } = { deps: baseDeps({ health: null }) };
-    const renderer = await create(<DashboardScreen {...deps} />);
+  it('a missing health answer renders no banner', async () => {
+    // health = null: the fetch never answered. The screen degrades the
+    // chip, never raises chrome.
+    const renderer = await create(<DashboardScreen {...baseDeps({ health: null })} />);
     const tree = toJson(renderer);
     const texts = allText(tree).join(' ').toLowerCase();
     expect(texts).not.toContain('offline');
@@ -288,8 +232,7 @@ describe('DashboardScreen (§T1)', () => {
   });
 
   it('never renders a currency symbol anywhere in the tree', async () => {
-    const mirror = await mirroredFixture();
-    const data = readJobData(mirror.database, EMPLOYEE_ID);
+    const data = workFixture();
     // The worst case: contract chips, contact details, all states on.
     const views = data.views.map((v, i) =>
       i === 0
@@ -299,20 +242,16 @@ describe('DashboardScreen (§T1)', () => {
           }
         : v,
     );
-    const renderer = await create(
-      <DashboardScreen {...baseDeps({ jobs: views, completedAtById: data.completedAtById, pendingCount: data.pendingCount })} />,
-    );
+    const renderer = await create(<DashboardScreen {...baseDeps({ jobs: views, completedAtById: data.completedAtById })} />);
     const texts = allText(toJson(renderer)).join(' ');
     expect(texts).not.toMatch(/[₹$]|Rs\.?|INR/i);
   });
 
-  it('keeps the real rail under pending and rejected states', async () => {
-    const rejected = viewOf({ id: '01890a5e-1000-7000-8000-00000000000b', scheduledFor: AFTERNOON }, {
-      rejectedMessage: 'JOB_ALREADY_CLOSED: the job was completed by the office.',
+  it('keeps the real rail under a refused write — the server’s sentence beside it', async () => {
+    const refused = viewOf({ id: '01890a5e-1000-7000-8000-00000000000b', scheduledFor: AFTERNOON }, {
+      rejectedMessage: 'This job was completed by the office at 09:12.',
     });
-    const renderer = await create(
-      <DashboardScreen {...baseDeps({ jobs: [rejected] })} />,
-    );
+    const renderer = await create(<DashboardScreen {...baseDeps({ jobs: [refused] })} />);
     const tree = toJson(renderer);
     const rail = findByTestID(tree, 'dashboard-next-card-rail');
     expect(rail).toBeDefined();
@@ -321,7 +260,7 @@ describe('DashboardScreen (§T1)', () => {
     expect((rail!.props.style as { backgroundColor: string }).backgroundColor).toBe(STATUS.unassigned);
     const reason = findByTestID(tree, 'dashboard-next-card-rejected');
     expect(reason).toBeDefined();
-    expect(reason!.children ?? []).toContain('JOB_ALREADY_CLOSED: the job was completed by the office.');
+    expect(reason!.children ?? []).toContain('This job was completed by the office at 09:12.');
     // The danger inset is present beside the rail.
     const inset = findByTestID(tree, 'dashboard-next-card-inset');
     expect(inset).toBeDefined();

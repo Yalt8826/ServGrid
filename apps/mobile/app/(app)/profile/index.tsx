@@ -16,16 +16,14 @@
  * - the chip's red/amber taps navigate to the ladder, which opens at the
  *   failed step by its own probe — a stored hint can lie, the probe
  *   cannot;
- * - logout is GATED (PLAN-FRONTEND.md §5): the gate's count is the
- *   outbox's queued+inflight rows for this employee, `rejected`/`failed`
- *   excluded by contract. T1.15's mirror session supplies the live count
- *   and the *Retry now* drain.
+ * - logout is immediate: the app is online-only (decision 2026-09-15),
+ *   so nothing is ever queued on the handset to lose.
  *
  * **Dispatcher:** the §D6 screen — self only, and NOTHING of the
  * technician's device state: no pending badge, no sync state, no
  * tracking chip (the dispatcher holds no device state and is not
  * tracked), and logout is IMMEDIATE — there is nothing queued to lose.
- * The dispatcher branch never calls `useMirrorSession`, never reads a
+ * The dispatcher branch never reads a
  * tracking health endpoint, and is dark without `dispatch.console`.
  *
  * **Owner (§O9, T4.12):** name, username, change password, logout, app
@@ -48,7 +46,6 @@ import type { AuthMeResponse, TrackingHealth } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
 import { api } from '../../../src/lib/api';
 import { matchAutostartVendor } from '../../../src/location/autostart';
-import { useMirrorSession } from '../../../src/sync/MirrorProvider';
 import { ProfileScreen, type LadderRowState } from '../../../src/screens/technician/ProfileScreen';
 import { DispatcherProfileScreen } from '../../../src/screens/dispatcher/profile';
 import { OwnerProfileScreen } from '../../../src/screens/owner/OwnerProfileScreen';
@@ -76,11 +73,6 @@ async function readFlag(key: string): Promise<boolean> {
 function TechnicianProfileRoute(): React.ReactNode {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
-  // T1.15: the mirror session is live, so the gate's count is the real
-  // outbox — queued + inflight rows for this employee, `rejected` and
-  // `failed` excluded by contract (§5). Zero before it opens, honestly:
-  // nothing can be queued before the mirror exists.
-  const mirrorSession = useMirrorSession();
 
   const loadLadderRows = async (): Promise<LadderRowState[]> => {
     const vendor = matchAutostartVendor(Device.manufacturer ?? Device.deviceName ?? null);
@@ -142,13 +134,9 @@ function TechnicianProfileRoute(): React.ReactNode {
           return res.data;
         }}
         loadLadderRows={loadLadderRows}
-        // The outbox is the source (T1.14), fed by the mirror session's
-        // live count (T1.15).
-        pendingSyncCount={mirrorSession?.pendingCount ?? 0}
-        retrySync={() => {
-          // The drain's manual trigger — one single-flight cycle.
-          mirrorSession?.syncNow();
-        }}
+        // Online-only: nothing is ever queued on the handset (TON.4 removes the row).
+        pendingSyncCount={0}
+        retrySync={() => {}}
         logout={() => {
           void (async () => {
             await api.logout();

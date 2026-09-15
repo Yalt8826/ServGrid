@@ -10,9 +10,9 @@
  *
  * Plus the "Done when" box (the contract warning slot exists and renders
  * nothing pre-2B), the §T5 motion facts (Selection haptic on reason
- * rows), the payload's strict shape, and the timeline fold of a
- * `/v1/jobs/:id/cancel` outbox row — the local truth the detail screen
- * shows the moment the cancellation is queued. The pure model
+ * rows), the payload's strict shape, and the timeline fold of the
+ * server's cancelled event — what the detail screen shows once the
+ * cancellation is filed. The pure model
  * (`cancelSheet.ts`) is asserted alongside the screen it drives.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -34,7 +34,7 @@ import {
   CANCEL_REASONS,
   type CancelSheetPayload,
 } from './cancelSheet';
-import { timelineEntryOf } from './jobDetail';
+import { timelineFromEvents } from './jobDetail';
 import type { JobView } from './jobView';
 
 const NOW = new Date('2026-09-11T10:00:00+05:30'); // Friday, 10:00 IST
@@ -371,32 +371,43 @@ describe('CancelSheet — Done when (§T5)', () => {
     expect(submitBlockerOf({ reasonCode: 'no_access', note: '' })).toBeNull();
   });
 
-  it('the local timeline folds a /cancel outbox row the moment it is queued', () => {
-    // The route enqueues POST /v1/jobs/:id/cancel (§6.3); the detail
-    // screen's timeline reads this device's outbox — the row must fold,
-    // or the technician's own cancellation vanishes from his docket
-    // until sync.
-    const entry = timelineEntryOf({
-      id: 'row-1',
-      createdAt: '2026-09-11T10:05:00.000Z',
-      seq: 1,
-      employeeId: 'e1',
-      method: 'POST',
-      path: '/v1/jobs/01890a5e-7800-7000-8000-000000000001/cancel',
-      bodyJson: '{"reasonCode":"customer_unavailable"}',
-      idempotencyKey: 'idem-1',
-      entityType: 'job',
-      entityLocalId: '01890a5e-7800-7000-8000-000000000001',
-      dependsOn: null,
-      status: 'queued',
-      attempts: 0,
-      nextAttemptAt: null,
-      errorCode: null,
-      errorMessage: null,
-    });
-    expect(entry).not.toBeNull();
-    expect(entry?.label).toBe('Cancelled');
-    expect(entry?.to).toBe('cancelled');
-    expect(entry?.at).toBe('2026-09-11T10:05:00.000Z');
+  it('the server’s cancelled event folds into the docket timeline; events that move no status do not', () => {
+    // The route files POST /v1/jobs/:id/cancel (§6.3); the detail
+    // screen's timeline reads the job's trail from the server, so his own
+    // cancellation shows the moment the job is read again.
+    const entries = timelineFromEvents([
+      {
+        id: 41,
+        eventType: 'status_changed',
+        actorId: 'e1',
+        actorName: 'Ravi',
+        occurredAt: '2026-09-11T09:40:00.000Z',
+        fromStatus: 'assigned',
+        toStatus: 'in_progress',
+        source: 'mobile',
+      },
+      {
+        id: 42,
+        eventType: 'cancelled',
+        actorId: 'e1',
+        actorName: 'Ravi',
+        occurredAt: '2026-09-11T10:05:00.000Z',
+        fromStatus: 'in_progress',
+        toStatus: 'cancelled',
+        source: 'mobile',
+      },
+      {
+        id: 43,
+        eventType: 'rescheduled',
+        actorId: 'e2',
+        actorName: 'Office',
+        occurredAt: '2026-09-11T10:06:00.000Z',
+        fromStatus: null,
+        toStatus: null,
+        source: 'web',
+      },
+    ]);
+    expect(entries.map((entry) => entry.label)).toEqual(['In progress', 'Cancelled']);
+    expect(entries[1]).toEqual({ id: '42', label: 'Cancelled', at: '2026-09-11T10:05:00.000Z', to: 'cancelled' });
   });
 });

@@ -4,19 +4,16 @@
  * its data — per role, because the roles read through different
  * architectures:
  *
- * - **technician** — `useTechnicianMirror` owns the plumbing; the
- *   mirror is the source, no fetch behind the figures (PLAN-FRONTEND.md
- *   §4), and the `tech.jobs` flag keeps the screen dark until the
- *   server turns it on (PLAN-EXECUTION.md §3).
+ * - **technician** — `useTechnicianWork` reads the server's work read
+ *   (online-only, PLAN-FRONTEND.md §4), and the `tech.jobs` flag keeps
+ *   the screen dark until the server turns it on (PLAN-EXECUTION.md §3).
  * - **dispatcher** (T2.7) — online-only: `DispatcherDashboardRoute`
  *   reads the api through react-query, `dispatch.console` gates the
  *   screen the same way, and the offline banner lives in the screen.
  *   Its hooks live in their own component (not this one) so a
  *   technician's session never mounts a dispatcher query.
- * - **sales rep** (T3.7) — online reads through `useRepDashboard` (the
- *   sales/payments surface has no sync working set), with the mirror
- *   session's pending count marking the figures stale, and the
- *   per-flag darks the hook computes (`salesOff` / `paymentsOff`).
+ * - **sales rep** (T3.7) — online reads through `useRepDashboard`, with
+ *   the per-flag darks the hook computes (`salesOff` / `paymentsOff`).
  *   Renewing soon comes from the loader below — the contracts backend
  *   is a later phase, so today it honestly returns [].
  * - **owner** (T4.8) — online-only reads through `useOwnerDashboard`
@@ -34,7 +31,6 @@ import { useRouter } from 'expo-router';
 import { SEMANTIC } from '@servgrid/shared';
 import { RepDashboardScreen } from '../../src/screens/rep/DashboardScreen';
 import { useRepDashboard } from '../../src/screens/rep/useRepData';
-import { useMirrorSession } from '../../src/sync/MirrorProvider';
 import { DispatcherDashboardScreen } from '../../src/screens/dispatcher/dashboard';
 import {
   todayLabelOf,
@@ -42,7 +38,7 @@ import {
   useDispatcherDashboard,
 } from '../../src/screens/dispatcher/useDispatcherDashboard';
 import { DashboardScreen } from '../../src/screens/technician/DashboardScreen';
-import { useTechJobsFlag, useTechnicianMirror } from '../../src/screens/technician/useTechnicianMirror';
+import { useTechJobsFlag, useTechnicianWork } from '../../src/screens/technician/useTechnicianWork';
 import { OwnerDashboardScreen } from '../../src/screens/owner/dashboard';
 import { useOwnerDashboard } from '../../src/screens/owner/useOwnerDashboard';
 import { useSessionStore } from '../../src/state/sessionStore';
@@ -51,20 +47,18 @@ const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
 
-/** The rep's half of the route (T3.7, §S1). The stale figure is the
- * screen's whole point: the pending count comes from the rep's own
- * outbox (the mirror session), never from a fetch. */
+/** The rep's half of the route (T3.7, §S1). Online-only: nothing is ever
+ * queued on the handset, so the figures are never stale-marked. */
 function RepDashboardRoute(): React.ReactNode {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
-  const mirrorSession = useMirrorSession();
   const dashboard = useRepDashboard();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
       <RepDashboardScreen
         name={actor?.username ?? ''}
-        pendingSyncCount={mirrorSession?.pendingCount ?? 0}
+        pendingSyncCount={0}
         figures={
           dashboard.data === null
             ? null
@@ -154,7 +148,7 @@ export default function Screen() {
   const router = useRouter();
   const actor = useSessionStore((s) => s.actor);
   const flag = useTechJobsFlag();
-  const deps = useTechnicianMirror(actor);
+  const deps = useTechnicianWork(actor);
 
   if (actor === null) {
     // Unreachable through the layout (RoleGate redirects first); a
@@ -201,8 +195,8 @@ export default function Screen() {
         completedAtById={deps.completedAtById}
         health={deps.health}
         onHealthFix={() => router.push('/ladder')}
-        pendingCount={deps.pendingCount}
-        draining={deps.draining}
+        pendingCount={0}
+        draining={deps.refreshing}
         onRefresh={deps.refresh}
         onStartJob={deps.startJob}
         onNavigate={deps.navigate}

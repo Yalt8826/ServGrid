@@ -30,11 +30,11 @@
  *   changes no figure; the derived after-discount amount is never
  *   rendered.
  * - **Submit is never disabled for a network reason** — `submitBlockerOf`
- *   has no network-shaped input to read. Submit goes to `loading`, the
- *   sheet dismisses, and the Success haptic waits for the OUTBOX to
- *   confirm — delivery, not intent (`watchOutboxRow` fires after the
- *   sheet is gone; the one-shot watcher is deliberately not cancelled
- *   on unmount, because the signal outlives the surface).
+ *   has no network-shaped input to read; a lost connection is the
+ *   no-connection gate's to show. Submit goes to `loading` while the
+ *   server files it, the Success haptic fires when the server has it —
+ *   delivery, not intent — and a failure keeps the sheet open with
+ *   everything typed and the reason on a banner.
  * - **The context strip** — the sheet leaves ~140pt of the job detail
  *   above it, so the header AND the StatusStepper stay visible: the
  *   technician can see which job he is completing (03-COMPONENTS.md
@@ -44,8 +44,8 @@
  *   (none, until the attachment capture task lands) and says the rule
  *   aloud rather than blocking on it.
  *
- * Pure UI over injected seams — the route owns the mirror write, the
- * enqueue and the outbox watcher, exactly like the detail route.
+ * Pure UI over injected seams — the route owns the write to the server
+ * (`POST /v1/jobs/:id/complete`) and its idempotency key.
  */
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -61,6 +61,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { TextField } from '../../components/ui/TextField';
 import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
+import { messageOfWriteError } from '../../lib/intentWrite';
 import { detailContractChipOf } from './jobDetail';
 import type { JobView } from './jobView';
 import {
@@ -87,26 +88,18 @@ export const CONTEXT_STRIP_EXTRA_PT = CONTEXT_STRIP_PT - 64;
 export interface CompleteSheetDeps {
   /** The job being completed — status, contract (prepaid), the unit (warranty). */
   view: JobView;
-  /** The product catalogue for the parts picker, from the mirror. */
+  /** The product catalogue for the parts picker, from the work read. */
   products: readonly PartProduct[];
   /** The session actor's role — the MoneyGate reads it. */
   role: Role;
   /** Injectable clock — the warranty chip and the stack's installed-on. */
   now: Date;
   /**
-   * The optimistic write + enqueue (the route's). Resolves with the
-   * outbox row id — the handle the confirmation signal is keyed to.
-   * Local and synchronous-fast: enqueue never touches the network (§5).
+   * Files the completion with the server (the route's). Resolves once the
+   * server has it; rejects with the sentence to show when it does not —
+   * and the sheet stays open with everything typed (PLAN-FRONTEND.md §5).
    */
-  onSubmit: (payload: CompleteSheetPayload) => Promise<string>;
-  /**
-   * The delivery signal. Subscribes to the completion row leaving the
-   * queue; fires `onSettled` with the row's status when the outbox
-   * resolves it (done after a drain, rejected after a refusal). One-shot
-   * by contract — the sheet never unsubscribes, even after it dismisses:
-   * the honest signal is delivery, not intent.
-   */
-  watchOutboxRow: (rowId: string, onSettled: (status: 'queued' | 'inflight' | 'done' | 'rejected' | 'failed') => void) => () => void;
+  onSubmit: (payload: CompleteSheetPayload) => Promise<void>;
   onDismiss: () => void;
 }
 
@@ -128,7 +121,10 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   const [picker, setPicker] = useState<PickerMode>('closed');
   const [customerConfirmed, setCustomerConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitFailed, setSubmitFailed] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Pinned on the first attempt: a retry under the same idempotency key
+  // must carry the same body, or the server refuses it as a different request.
+  const [completedAtPin, setCompletedAtPin] = useState<string | null>(null);
   const [warrantyDialog, setWarrantyDialog] = useState(false);
   // Confirmed once this session — the prompt is a reminder, not a toll
   // (§T4: exactly one confirmation, never two dialogs a day).
@@ -143,17 +139,18 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
     setLines((current) => current.map((line) => (line.localId === localId ? { ...line, ...patch } : line)));
   }
 
-  /** The submit pipeline past validation: optimistic write → outbox row
-   * id → subscribe to the delivery signal → dismiss. The haptic fires
-   * from the subscription, whenever the outbox resolves — after this
-   * sheet is gone. */
+  /** The submit pipeline past validation: send → the server accepts →
+   * the Success haptic (delivery, never intent) → dismiss. A failure keeps
+   * the sheet open with everything typed and says why. */
   function performSubmit(): void {
     if (blocker !== null || submitting) return;
+    const completedAt = completedAtPin ?? new Date().toISOString();
+    if (completedAtPin === null) setCompletedAtPin(completedAt);
     setSubmitting(true);
-    setSubmitFailed(false);
+    setSubmitError(null);
     void (async () => {
       try {
-        const rowId = await deps.onSubmit(
+        await deps.onSubmit(
           payloadOf({
             view,
             workSummary,
@@ -164,21 +161,15 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
             lines,
             customerConfirmed,
             now: deps.now,
-            completedAt: new Date().toISOString(),
+            completedAt,
           }),
         );
-        // One-shot, and deliberately not cleaned up on unmount: the
-        // sheet is already dismissing when the confirmation lands.
-        deps.watchOutboxRow(rowId, (status) => {
-          if (status === 'done') haptic('completionSynced');
-        });
+        haptic('completionSynced');
         setSubmitting(false);
         deps.onDismiss();
-      } catch {
-        // The enqueue itself failed (local, not network): the sheet
-        // stays open with everything typed — never lose the work.
+      } catch (error) {
         setSubmitting(false);
-        setSubmitFailed(true);
+        setSubmitError(messageOfWriteError(error));
       }
     })();
   }
@@ -481,9 +472,7 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
           <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 }}>Customer confirmed the work</Text>
         </Pressable>
 
-        {submitFailed ? (
-          <Banner tone="danger" message="The completion could not be queued — nothing was lost. Try again." testID="complete-banner" />
-        ) : null}
+        {submitError !== null ? <Banner tone="danger" message={submitError} testID="complete-banner" /> : null}
       </Sheet>
 
       {/* The ONLY dialog on this sheet (§T4), which is what keeps it

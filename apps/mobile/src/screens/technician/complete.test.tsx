@@ -12,8 +12,9 @@
  *    `accessory` line OFF.
  * 6. One list produces both `parts[]` and `stackChanges[]`, with only
  *    ticked lines in the latter.
- * 7. Submit is enabled with the network down.
- * 8. Success haptic fires on outbox confirmation, NOT on tap.
+ * 7. Submit has no connectivity input — never disabled for a network reason.
+ * 8. Success haptic fires when the server accepts, NOT on tap; a refusal
+ *    keeps the sheet open, the reason on a banner, the typing intact.
  * 9. Prepaid branch hides amount AND Paid-by.
  *
  * Plus the "Done when" boxes: the sheet leaves the stepper visible (the
@@ -100,8 +101,7 @@ function baseDeps(overrides: Partial<Deps> = {}): Deps {
     products: [BATTERY, ACCESSORY],
     role: 'technician',
     now: NOW,
-    onSubmit: vi.fn(async (_payload: CompleteSheetPayload) => 'row-1'),
-    watchOutboxRow: vi.fn(() => () => {}),
+    onSubmit: vi.fn(async (_payload: CompleteSheetPayload) => {}),
     onDismiss: vi.fn(),
     ...overrides,
   };
@@ -397,11 +397,11 @@ describe('CompleteSheet (§T4)', () => {
     expect(partLineOf(ACCESSORY, '').addToEquipment).toBe(false);
   });
 
-  it('7 · submit is enabled with the network down — never disabled for a network reason', async () => {
-    // The watcher never settles and the queue never drains: as far as
-    // this sheet can see, there is no network. The deps interface has NO
-    // connectivity input at all — there is nothing it could disable for.
-    const deps = baseDeps({ watchOutboxRow: vi.fn(() => () => {}) });
+  it('7 · submit is never disabled for a network reason — the sheet has no connectivity input', async () => {
+    // The deps interface has NO connectivity input at all — there is
+    // nothing it could disable for. A lost connection is the
+    // no-connection gate's to show, over the sheet, never inside it.
+    const deps = baseDeps();
     const renderer = await create(<CompleteSheet {...deps} />);
     let tree = toJson(renderer);
 
@@ -409,49 +409,57 @@ describe('CompleteSheet (§T4)', () => {
     tree = toJson(renderer);
     expect(isDisabled(tree)).toBe(false);
 
-    // And it files — the honest optimistic write (§5), no network asked.
+    // And it files: the route sends it, and the sheet dismisses once it lands.
     await trySubmit(tree);
     expect(deps.onSubmit).toHaveBeenCalledTimes(1);
     expect(deps.onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('8 · the Success haptic waits for the outbox to confirm — never on tap', async () => {
-    const settled: Array<(status: 'done' | 'rejected') => void> = [];
-    const watch = vi.fn((_rowId: string, onSettled: (status: 'done' | 'rejected') => void) => {
-      settled.push(onSettled);
-      return () => {};
+  it('8 · the Success haptic waits for the server to accept — never on tap; a refusal keeps the sheet', async () => {
+    let accept!: () => void;
+    const deps = baseDeps({
+      onSubmit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            accept = resolve;
+          }),
+      ),
     });
-    const deps = baseDeps({ watchOutboxRow: watch });
     const renderer = await create(<CompleteSheet {...deps} />);
-    const tree = toJson(renderer);
 
-    await typeInto(tree, 'complete-work-done', 'Battery swap.');
+    await typeInto(toJson(renderer), 'complete-work-done', 'Battery swap.');
     await trySubmit(toJson(renderer));
 
-    // The tap queued the work; the notification did NOT fire on intent.
-    expect(watch).toHaveBeenCalledTimes(1);
+    // The tap sent the work; the notification did NOT fire on intent.
+    expect(deps.onSubmit).toHaveBeenCalledTimes(1);
     expect(Haptics.__fired().every((entry) => !entry.startsWith('notification'))).toBe(true);
+    expect(deps.onDismiss).not.toHaveBeenCalled();
 
-    // The outbox confirms — NOW the honest signal (NotificationSuccess).
+    // The server has it — NOW the honest signal (NotificationSuccess), then the sheet goes.
     await act(async () => {
-      settled[0]!('done');
+      accept();
     });
     expect(Haptics.__fired()).toEqual(['notification:notificationSuccess']);
+    expect(deps.onDismiss).toHaveBeenCalledTimes(1);
 
-    // A REJECTED row is the warning banner's job (§5), never a success beat.
+    // A refusal is the banner's job, never a success beat — and nothing typed is lost.
     Haptics.__reset();
-    const rejectedWatch = vi.fn((_rowId: string, onSettled: (status: 'done' | 'rejected') => void) => {
-      settled.push(onSettled);
-      return () => {};
+    const refused = baseDeps({
+      onSubmit: vi.fn(async () => {
+        throw new Error('This job was cancelled by the office at 14:32.');
+      }),
     });
-    const rejected = baseDeps({ watchOutboxRow: rejectedWatch });
-    const rejectedRenderer = await create(<CompleteSheet {...rejected} />);
-    await typeInto(toJson(rejectedRenderer), 'complete-work-done', 'Battery swap.');
-    await trySubmit(toJson(rejectedRenderer));
-    await act(async () => {
-      settled[1]!('rejected');
-    });
+    const refusedRenderer = await create(<CompleteSheet {...refused} />);
+    await typeInto(toJson(refusedRenderer), 'complete-work-done', 'Battery swap.');
+    await trySubmit(toJson(refusedRenderer));
+    await act(async () => {});
     expect(Haptics.__fired()).toEqual([]);
+    expect(refused.onDismiss).not.toHaveBeenCalled();
+    const banner = findByTestID(toJson(refusedRenderer), 'complete-banner');
+    expect(banner, 'the refusal is shown').toBeDefined();
+    expect(allText(banner!).join(' ')).toContain('This job was cancelled by the office at 14:32.');
+    const input = firstDescendantOfType(findByTestID(toJson(refusedRenderer), 'complete-work-done')!, 'TextInput');
+    expect(input!.props.value).toBe('Battery swap.');
   });
 
   it('9 · a prepaid contract visit hides the amount field AND the Paid-by segments', async () => {

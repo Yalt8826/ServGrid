@@ -1,36 +1,33 @@
 /**
- * The T2.6 push handler (PLAN-FRONTEND.md §6): what a data-only FCM wake
+ * The T2.6 push handler (PLAN-FRONTEND.md §5): what a data-only FCM wake
  * DOES. It never renders the push — the message carries nothing to render
- * (`{"type":"sync"}`, §12.1) — it triggers ONE delta sync and then raises
- * LOCAL notifications from the rows that arrived. A push that carried the
- * job text would be stale the moment the office changed something; the
- * copy here is composed from the synced row, so it can only be as stale
- * as the mirror.
+ * (`{"type":"sync"}`, §12.1) — it reads the technician's work from the
+ * server ONCE and then raises LOCAL notifications from the rows that
+ * arrived. A push that carried the job text would be stale the moment the
+ * office changed something; the copy here is composed from the row just
+ * read, so it is as fresh as that read.
  *
  * **Every push is optional.** Any condition below that cannot be met — no
- * session, no mirror session registered (a headless revival before React
- * mounts), the sync failing offline — degrades to "nothing raised". The
- * rows still arrive on the next foreground sync; a missed push costs
- * latency, never work. That is why a wake for a job the delta did not
- * return raises NOTHING: no notification for content the client cannot
- * show.
+ * session, no executor registered (a headless revival before React
+ * mounts, or before the first work read has answered), the read failing
+ * offline — degrades to "nothing raised". The next open reads the server
+ * anyway; a missed push costs latency, never work. That is why a wake
+ * that brings no new or changed job raises NOTHING.
  *
  * **Haptics and sound are deliberately absent.** The local notification is
  * the OS's job; the app does not buzz for a sync (UI/plan-2/02-MOTION.md
  * §8 — never on passive arrival of data).
  *
- * The sync itself is not owned here: the drain manager lives with the
- * session's mirror provider, which registers a `PushSyncExecutor` for the
- * lifetime of an employee session (and clears it on switch/logout). The
- * headless task, the foreground listener and any future wake surface all
- * funnel through `handlePushWake`, so there is exactly one composition to
- * be right.
+ * The read itself is not owned here: `PushWakeBridge` registers a
+ * `PushSyncExecutor` over the technician's work query for the lifetime of
+ * his session (and clears it on switch/logout). The headless task, the
+ * foreground listener and any future wake surface all funnel through
+ * `handlePushWake`, so there is exactly one composition to be right.
  *
- * **The SDK is imported lazily** (the same seam `db/mirror.ts` uses for
- * expo-sqlite): this module sits in the mirror provider's import graph,
- * which must stay free of native modules — a wake raises through
- * `await import('expo-notifications')` at the moment it raises, never at
- * module load.
+ * **The SDK is imported lazily**: this module sits in the app shell's
+ * import graph, which must stay free of native modules — a wake raises
+ * through `await import('expo-notifications')` at the moment it raises,
+ * never at module load.
  */
 import { useSessionStore } from '../state/sessionStore';
 
@@ -44,8 +41,8 @@ export const PUSH_LOCAL_KIND = 'servgrid-local';
  * the build" (§T2.6 "If it fails"). */
 export const SYNC_NOTIFICATION_CHANNEL = 'servgrid-sync';
 
-/** The job fields a notification can name — the mirror's row, read back
- * AFTER the sync, never the push payload. */
+/** The job fields a notification can name — the work read's row, read
+ * back AFTER the refetch, never the push payload. */
 export interface PushJobRow {
   id: string;
   jobNumber: string;
@@ -58,12 +55,10 @@ export interface PushJobRow {
 }
 
 /**
- * The seam the mirror session fills: run one sync cycle (bootstrap if the
- * mirror is fresh, outbox drain, delta — the same cycle every other
- * trigger runs), and read the mirror's job rows for the before/after
- * diff. The wake must not open its own mirror or drive its own drain —
- * two writers to one SQLite file and two single-flight loops is exactly
- * the parallel-write path §5 forbids.
+ * The seam `PushWakeBridge` fills: read the technician's work from the
+ * server once, and read the cached job rows for the before/after diff.
+ * The wake reads through the same cache entry the screens do, so what it
+ * announces is what the screens show.
  */
 export interface PushSyncExecutor {
   sync(): Promise<void>;
@@ -73,7 +68,7 @@ export interface PushSyncExecutor {
 let executor: PushSyncExecutor | null = null;
 
 /** The live session's executor, or null between sessions. Registered by
- * the mirror provider on session open, cleared on switch/logout/unmount. */
+ * `PushWakeBridge` once the first work read answers, cleared on switch/logout/unmount. */
 export function setPushSyncExecutor(next: PushSyncExecutor | null): void {
   executor = next;
 }
@@ -144,9 +139,9 @@ async function runWake(): Promise<boolean> {
   if (useSessionStore.getState().status !== 'authenticated') return false;
 
   const session = executor;
-  // No mirror session (headless revival before React mounts, the web
-  // build): nothing can sync and nothing can be shown. The next
-  // foreground recovers — every push is optional.
+  // No executor (headless revival before React mounts, the web build, no
+  // work read yet): nothing to diff and nothing to show. The next open
+  // recovers — every push is optional.
   if (session === null) return false;
 
   const presentable = await notificationsPresentable();

@@ -26,8 +26,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, LAYOUT, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { textStyle } from '../fonts/textStyle';
 import { DensityProvider } from '../components/ui/DensityProvider';
-import { PendingBadge } from '../components/domain/PendingBadge';
-import { useMirrorSession } from '../sync/MirrorProvider';
 import { useSessionStore } from '../state/sessionStore';
 import { NavTabBar } from './NavTabBar';
 import { ROUTE_LABELS, densityForRole, groupMapFor, routeIsCovered } from './navmap';
@@ -37,10 +35,6 @@ const RAIL_WIDTH = LAYOUT.railWidth;
 
 export function NavShell({ children }: { children: ReactNode }): ReactNode {
   const actor = useSessionStore((s) => s.actor);
-  // The offline roles' pending-sync count (T1.15). Null for online roles
-  // and before the mirror opens — the badge renders nothing at zero or
-  // without a session, so online chrome stays exactly as it was.
-  const pendingCount = useMirrorSession()?.pendingCount ?? 0;
   const pathname = usePathname();
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -55,9 +49,6 @@ export function NavShell({ children }: { children: ReactNode }): ReactNode {
 
   return (
     <DensityProvider density={density}>
-      {/* §X6: the PendingBadge sits in the header for offline roles, on
-        * every screen — the shell is the one surface all of them share. */}
-      <PendingBadge count={pendingCount} testID="pending-badge" />
       {role === null ? (
         // Unreachable through the layout (RoleGate redirects first);
         // a session tearing down mid-render still paints its screen.

@@ -7,40 +7,35 @@
  *
  * Two facts about the data shape drive every decision here:
  *
- * - **The mirror is the source** (PLAN-FRONTEND.md §4). Jobs read from
- *   SQLite joined to their customer; there is no fetch behind the
- *   figures, and no field the technician's job card does not carry —
- *   which is also why no money can appear: `JobCardTechnician` has no
- *   amount to leak (§6.3, money-free by construction).
- * - **Local truth lives in the outbox** (T1.14). A job with a
- *   `queued`/`inflight` row is *stale* (its rail state is local truth
- *   the server has not seen); a job whose newest row is `rejected`
- *   keeps its real status rail but carries the server's refusal message
- *   verbatim. Rows are never deleted, so the completion instant used
- *   for "done today" and the Completed sort reads the completion row's
- *   `created_at` — the moment the work happened on this device.
+ * - **The server's work read is the source** (PLAN-FRONTEND.md §4,
+ *   online-only since 2026-09-15). Jobs arrive joined to their customer
+ *   (`workData.ts`), and no field the technician's job card does not
+ *   carry — which is also why no money can appear: `JobCardTechnician`
+ *   has no amount to leak (§6.3, money-free by construction).
+ * - **A write's state rides on the view.** `pending` is a status write in
+ *   flight; `rejectedMessage` is the server's refusal of the last one,
+ *   verbatim. The completion instant used for "done today" and the
+ *   Completed sort is the server's `closedAt`.
  *
  * All day arithmetic is IST (`business_date()`, migration 001): the
  * technician's "today" is Kolkata's, never the handset's timezone.
  */
-import type { JobStatus } from '@servgrid/shared';
+import type { JobCardTechnician, JobStatus } from '@servgrid/shared';
 import { STATUS } from '@servgrid/shared';
-import type { MirrorJob } from '../../db/mirror';
-import type { OutboxRow } from '../../sync/outbox';
 
-/** One renderable job: mirror row joined to its customer and annotated
- * with the outbox's judgement of its local edits. */
+/** One renderable job: the job card joined to its customer, with the
+ * state of any write the technician just made. */
 export interface JobView {
-  job: MirrorJob;
+  job: JobCardTechnician;
   /** `customers.name` — the card's heading. */
   customerName: string;
   /** The short place line under the name (area/city), or ''. */
   area: string;
   /** Navigation target for *Navigate*: `google.navigation:q=lat,lng`. */
   coordinates: { latitude: number; longitude: number } | null;
-  /** An outbox row for this job is queued or inflight — the stale inset. */
+  /** A write for this job is on its way to the server — the stale inset. */
   pending: boolean;
-  /** The newest rejected row's server message, verbatim — else null. */
+  /** The server's refusal of the last write, verbatim — else null. */
   rejectedMessage: string | null;
   /**
    * The unit the job is for (§T3), when the mirror can name it
@@ -99,33 +94,6 @@ export function istGreeting(now: Date): string {
   return 'Good evening';
 }
 
-// ── the outbox's judgement of a job ──────────────────────────────────────────
-
-/**
- * Fold one employee's outbox rows onto their jobs: pending (queued or
- * inflight — the stale inset) and the newest rejected message. Rows are
- * read in seq order, so "newest" is the last rejection written.
- */
-export function annotateWithOutbox(
-  rows: readonly OutboxRow[],
-  jobIdOf: (row: OutboxRow) => string | null,
-): (jobId: string) => { pending: boolean; rejectedMessage: string | null } {
-  const pending = new Set<string>();
-  const rejected = new Map<string, string>();
-  for (const row of rows) {
-    const jobId = jobIdOf(row);
-    if (jobId === null) continue;
-    if (row.status === 'queued' || row.status === 'inflight') pending.add(jobId);
-    if (row.status === 'rejected') {
-      rejected.set(jobId, row.errorMessage ?? row.errorCode ?? 'The office could not accept this job.');
-    }
-  }
-  return (jobId: string) => ({
-    pending: pending.has(jobId),
-    rejectedMessage: rejected.get(jobId) ?? null,
-  });
-}
-
 // ── bucketing, sorting, figures ──────────────────────────────────────────────
 
 export type JobsTab = 'today' | 'upcoming' | 'completed';
@@ -177,17 +145,14 @@ export function sortForUpcoming(views: readonly JobView[]): JobView[] {
 }
 
 /**
- * The instant a completion happened on this device, from the completion
- * row the optimistic write enqueued (rows are kept forever). Jobs the
- * office closed have no local row — they sort by their slot, honestly
- * undated, at the end.
+ * The instant a job was completed, from the server's `closedAt`
+ * (`completedAtById`). A job without one sorts by its slot.
  */
 export function completedAtOf(view: JobView, completedAtById: Readonly<Record<string, string>>): string | null {
   return completedAtById[view.job.id] ?? view.job.scheduledFor;
 }
 
-/** Completed: newest first (§T2 `completed_at` descending; local
- * completion instant standing in for it — see `completedAtOf`). */
+/** Completed: newest first (§T2 `completed_at` descending — see `completedAtOf`). */
 export function sortForCompleted(
   views: readonly JobView[],
   completedAtById: Readonly<Record<string, string>>,
@@ -222,8 +187,8 @@ export function dashboardFigures(
     }
     if (view.job.status === 'completed') {
       const at = completedAtById[view.job.id];
-      // A local completion row dates the work; an office-closed job with
-      // only a slot falls back to it — scheduled today, done today.
+      // The server's closedAt dates the work; a job without one falls
+      // back to its slot — scheduled today, done today.
       if ((at !== undefined && istDateKey(at) === todayKey) || (at === undefined && view.job.scheduledFor !== null && istDateKey(view.job.scheduledFor) === todayKey)) {
         doneToday += 1;
       }
@@ -339,8 +304,8 @@ export function primaryActionOf(status: JobStatus): { label: string; to: JobStat
   }
 }
 
-/** The optimistic status move: the mirror's UPDATE plus the outbox row
- * the route enqueues. `occurredAt` is the device instant of the tap. */
+/** The status write for a tap: path and body. `occurredAt` is the device
+ * instant of the tap — pinned with the intent, so a retry carries the same body. */
 export function statusChangeOp(
   jobId: string,
   to: JobStatus,
