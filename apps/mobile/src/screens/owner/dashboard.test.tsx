@@ -39,7 +39,8 @@ import {
   OwnerDashboardScreen,
   type OwnerDashboardDeps,
 } from './dashboard';
-import type { AttentionRowVm, JobsPerDayPoint, RevenuePerWeekPoint } from './model';
+import type { AttentionItem, AttentionRowVm, JobsPerDayPoint, RevenuePerWeekPoint } from './model';
+import { attentionRowsOf } from './model';
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -390,5 +391,97 @@ describe('OwnerDashboardScreen (§O1)', () => {
       (row.props.onPress as () => void)();
     });
     expect(onOpen).toHaveBeenCalledWith('/cash');
+  });
+});
+
+// ── the AMC ending row (T2B.5, rank 5 — decision 7) ──────────────────────
+
+describe('OwnerDashboardScreen — an AMC ending within 7 days', () => {
+  /** The wire item the endpoint returns for rank 5 — everything else null. */
+  const endingItem: AttentionItem = {
+    category: 'contract_ending',
+    employeeId: null,
+    employeeName: null,
+    businessDate: null,
+    expectedCash: null,
+    declaredAmount: null,
+    variance: null,
+    jobId: null,
+    jobNumber: null,
+    jobTitle: null,
+    jobStatus: null,
+    scheduledDate: null,
+    customerName: 'Sunrise Apartments',
+    health: null,
+    lastPingAt: null,
+    contractId: 'c1',
+    contractNumber: 'AMC-2627-00031',
+    contractEndDate: '2027-09-14',
+  };
+
+  it('maps a contract_ending item to the AMC row — number · customer, ends WITH the year, the AMC itself', () => {
+    expect(attentionRowsOf([endingItem], NOW)).toEqual([
+      {
+        key: 'contract_ending-0',
+        category: 'contract_ending',
+        severity: 'warning',
+        title: 'AMC-2627-00031 · Sunrise Apartments',
+        meta: 'ends 14 Sep 2027',
+        note: 'AMC ending',
+        target: '/contracts/c1',
+      },
+    ]);
+
+    // The degradations are honest: no end date says "ends soon", no
+    // contract id links the AMC list, a missing number still says AMC.
+    const bare = attentionRowsOf([{ ...endingItem, contractId: null, contractNumber: null, contractEndDate: null }], NOW);
+    expect(bare[0]).toMatchObject({ title: 'AMC · Sunrise Apartments', meta: 'ends soon', target: '/contracts' });
+  });
+
+  it('the feed keeps the endpoint’s consequence order — an ending AMC lands where the server put it, never re-sorted', () => {
+    const tracking: AttentionItem = {
+      category: 'tracking_health',
+      employeeId: 'e1',
+      employeeName: 'Anitha',
+      businessDate: null,
+      expectedCash: null,
+      declaredAmount: null,
+      variance: null,
+      jobId: null,
+      jobNumber: null,
+      jobTitle: null,
+      jobStatus: null,
+      scheduledDate: null,
+      customerName: null,
+      health: 'stale',
+      lastPingAt: '2026-09-07T14:10:00.000Z',
+      contractId: null,
+      contractNumber: null,
+      contractEndDate: null,
+    };
+    const rows = attentionRowsOf([tracking, endingItem], NOW);
+    expect(rows.map((r) => r.category)).toEqual(['tracking_health', 'contract_ending']);
+    expect(rows[1]!.key).toBe('contract_ending-1');
+  });
+
+  it('the dashboard renders the row and opens the AMC from it', async () => {
+    const onOpenRow = vi.fn();
+    const renderer = await renderScreen(baseDeps({ attention: attentionRowsOf([endingItem], NOW), onOpenRow }));
+    const tree = toJson(renderer);
+
+    const node = findByTestID(tree, 'owner-attention-row-0');
+    expect(node).toBeDefined();
+    const text = allText(node!).join(' ');
+    expect(text).toContain('AMC-2627-00031 · Sunrise Apartments');
+    expect(text).toContain('ends 14 Sep 2027');
+    expect(text).toContain('AMC ending');
+    // Warning severity on the leading rail — a warning, not a danger.
+    const rail = findByTestID(tree, 'owner-attention-row-0-rail');
+    expect(styleOfNode(rail!).backgroundColor).toBe(SEMANTIC.feedback.warning);
+
+    await act(async () => {
+      (node!.props.onPress as () => void)();
+    });
+    expect(onOpenRow).toHaveBeenCalledWith('/contracts/c1');
   });
 });

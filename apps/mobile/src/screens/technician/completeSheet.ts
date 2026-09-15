@@ -17,8 +17,12 @@
  *   submits `collection_mode: 'none'` and shows "No payment taken" in
  *   the segments' place, so a warranty job is never asked how he was
  *   paid for work that was free.
- * - **AMC job — the Free/Charge choice arrives in T2B.5; until then an
- *   AMC job completes like any other.**
+ * - **AMC job — two segments, Free under AMC and Charge (decision 9,
+ *   2026-09-15).** The sheet OPENS on Free under AMC, where the visit is
+ *   covered and no money fields exist at all; the technician switches to
+ *   Charge for extra work the customer pays for, which brings the
+ *   ordinary money fields back. The choice is the technician's alone —
+ *   the server never guesses an AMC job's charge from the amount field.
  * - **One parts list, two server arrays.** Every line becomes a
  *   `parts[]` row (consumed on this job); every TICKED line *also*
  *   becomes a `stackChanges[]` entry (standing at that site). The
@@ -39,6 +43,9 @@
 import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
 
 import { istDateKey, type JobView } from './jobView';
+
+/** What a retry keys on — see `bodyKeyedWriters` at the bottom. */
+import type { IntentWriter } from '../../lib/intentWrite';
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -61,6 +68,28 @@ export const PAYMENT_SEGMENTS: readonly { mode: Exclude<CollectionMode, 'bank_tr
   { mode: 'upi', label: 'UPI' },
   { mode: 'card', label: 'Card' },
 ];
+
+// ── the AMC job's choice (decision 9, 2026-09-15) ────────────────────────────
+
+/** Decision 9 (2026-09-15): on an AMC job the technician chooses; Free is where the sheet opens. */
+export type AmcChoice = 'free' | 'charge';
+export const DEFAULT_AMC_CHOICE: AmcChoice = 'free';
+
+/** The two segments above the money on an AMC job (§T4). */
+export const AMC_SEGMENTS: readonly { choice: AmcChoice; label: string }[] = [
+  { choice: 'free', label: 'Free under AMC' },
+  { choice: 'charge', label: 'Charge' },
+];
+
+/** A job under a live AMC — the one condition the sheet branches on. */
+export function isAmcJob(view: JobView): boolean {
+  return view.job.contract !== null;
+}
+
+/** Free under AMC means no money fields at all: nothing to type, nothing sent. */
+export function isFreeUnderAmc(view: JobView, choice: AmcChoice): boolean {
+  return isAmcJob(view) && choice === 'free';
+}
 
 /** One line of the unified Parts & equipment list (§T4: one list, not two). */
 export interface PartLine {
@@ -114,9 +143,9 @@ export function amountAfterDiscountOf(amount: string, discount: string): number 
  * Whether this completion carries a charge: the amount after discount is
  * a positive figure. Zero or empty means **no payment taken** —
  * `collection_mode: 'none'` is submitted, and a warranty job is never
- * asked how he was paid for work that was free (§T4). An AMC job
- * completes like any other until T2B.5 adds the Free/Charge choice
- * (decision 2026-09-15).
+ * asked how he was paid for work that was free (§T4). On an AMC job the
+ * Free/Charge choice decides the branch before this is consulted — see
+ * `isFreeUnderAmc` (decision 2026-09-15).
  */
 export function chargeApplies(amount: string, discount: string): boolean {
   const after = amountAfterDiscountOf(amount, discount);
@@ -189,6 +218,10 @@ function quantityOf(line: PartLine): number | null {
  * Why submit cannot proceed yet, or null when it can. Every reason is a
  * validation fact — there is deliberately NO network-shaped input here:
  * the sheet cannot disable submit for a network reason (§T4 Never).
+ *
+ * On an AMC job the sheet passes `amount: ''` and `discountAmount: ''`
+ * when the choice is Free, so a half-typed discount left behind on the
+ * Charge side can never block a free completion.
  */
 export function submitBlockerOf(input: {
   workSummary: string;
@@ -234,7 +267,8 @@ export function submitBlockerOf(input: {
  * The wire payload from the sheet's state. One UI list, two arrays
  * (§T4): every line lands in `parts[]`, only ticked lines *also* land in
  * `stackChanges[]` — consumed on this job and standing at that site are
- * different facts, and only the second survives the job.
+ * different facts, and only the second survives the job. Parts and stack
+ * changes are sent in BOTH branches — a free AMC visit still fits parts.
  */
 export function payloadOf(input: {
   view: JobView;
@@ -243,13 +277,16 @@ export function payloadOf(input: {
   discountAmount: string;
   discountReason: string;
   selectedMode: Exclude<CollectionMode, 'bank_transfer' | 'none'>;
+  /** The AMC job's Free/Charge choice (decision 9) — Free sends no money at all. */
+  amcChoice: AmcChoice;
   lines: readonly PartLine[];
   customerConfirmed: boolean;
   now: Date;
   /** The submit instant — the completion's `completed_at`. */
   completedAt: string;
 }): CompleteSheetPayload {
-  const charged = chargeApplies(input.amount, input.discountAmount);
+  const free = isFreeUnderAmc(input.view, input.amcChoice);
+  const charged = !free && chargeApplies(input.amount, input.discountAmount);
   const amount = input.amount.trim();
   const discount = input.discountAmount.trim();
   const workSummary = input.workSummary.trim();
@@ -285,14 +322,47 @@ export function payloadOf(input: {
     completedAt: input.completedAt,
     workSummary,
     // Absent money fields are the server's honest zeros (§3.4) — a free
-    // job sends no money at all.
-    ...(amount === '' ? {} : { cost: amount }),
-    ...(discount === '' || Number(discount) <= 0 ? {} : { discountAmount: discount, discountReason: input.discountReason.trim() }),
+    // job sends no money at all, and a Free-under-AMC visit is the purest
+    // case: nothing typed, nothing sent, whatever was left on the Charge
+    // side before the technician switched back.
+    ...(free || amount === '' ? {} : { cost: amount }),
+    ...(free || discount === '' || Number(discount) <= 0 ? {} : { discountAmount: discount, discountReason: input.discountReason.trim() }),
     // `none` is a consequence, not a choice (§T4): no charge → none,
-    // whatever the segments showed before the amount emptied.
+    // whatever the segments showed before the amount emptied. On an AMC
+    // job, Free is always none — the choice, not the amount, decides.
     collectionMode: charged ? input.selectedMode : 'none',
     ...(input.customerConfirmed ? { customerSigned: true } : {}),
     ...(parts.length > 0 ? { parts } : {}),
     ...(stackChanges.length > 0 ? { stackChanges } : {}),
+  };
+}
+
+// ── the retry's intent (decision 9: the choice can change between attempts) ──
+
+/**
+ * One submit intent, one idempotency key — **keyed by the body**. The
+ * complete route used to pin one writer for the whole sheet, which was
+ * safe while the body could not change between attempts; switching Free ↔
+ * Charge changes the body, and the server refuses a changed body under an
+ * old key (422 `IDEMPOTENCY_KEY_REUSED`). A retry with an edited form is
+ * a NEW intent, so a body that differs from the last attempt's starts a
+ * new writer (and a new key); the same body replays the pinned one — the
+ * ambiguous-failure case the key exists for. `completedAt` is pinned by
+ * the sheet itself, so the same form state still produces the same body
+ * across retries.
+ *
+ * The route calls `writerFor(JSON.stringify(payload))` per attempt.
+ */
+export function bodyKeyedWriters(createWriter: () => IntentWriter): { writerFor(body: string): IntentWriter } {
+  let current: IntentWriter | null = null;
+  let currentBody: string | null = null;
+  return {
+    writerFor(body: string): IntentWriter {
+      if (current === null || currentBody !== body) {
+        current = createWriter();
+        currentBody = body;
+      }
+      return current;
+    },
   };
 }

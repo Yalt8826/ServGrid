@@ -9,9 +9,14 @@
  * version sent `/completions`, a path the server never had, so no
  * completion from a handset was ever accepted.)
  *
- * One intent, one key: the writer lives as long as this sheet, so a retry
- * after a dropped connection replays the first request instead of filing
- * a second completion.
+ * One intent, one key — keyed by the body. The writer used to live for
+ * the whole sheet; but the Free ↔ Charge choice (decision 9) can change
+ * the body between attempts, and the server refuses a changed body under
+ * an old key (422 `IDEMPOTENCY_KEY_REUSED`). `bodyKeyedWriters` starts a
+ * new writer — a new key — whenever the payload's JSON differs from the
+ * last attempt's, and replays the pinned key when the body is unchanged
+ * (the dropped-connection retry). `completedAt` is pinned inside the
+ * sheet, so the same form state still produces the same body.
  *
  * Role- and flag-aware: `tech.jobs` keeps the screen dark until the server
  * turns it on; another role keeps the placeholder.
@@ -23,9 +28,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { SEMANTIC } from '@servgrid/shared';
-import { createIntentWriter, type IntentWriter } from '../../../../src/lib/intentWrite';
+import { createIntentWriter } from '../../../../src/lib/intentWrite';
 import { CompleteSheet } from '../../../../src/screens/technician/CompleteSheet';
-import type { PartProduct } from '../../../../src/screens/technician/completeSheet';
+import { bodyKeyedWriters, type PartProduct } from '../../../../src/screens/technician/completeSheet';
 import {
   TECHNICIAN_WORK_KEY,
   intentRequest,
@@ -49,7 +54,10 @@ export default function Screen() {
   const flag = useTechJobsFlag();
   const deps = useTechnicianWork(actor);
   const queryClient = useQueryClient();
-  const writer = useRef<IntentWriter | null>(null);
+  // One key per submit intent, keyed by the body: an unchanged body
+  // replays the pinned key (the dropped-connection retry), a changed
+  // body — Free ↔ Charge — starts a new intent under a new key.
+  const writers = useRef<ReturnType<typeof bodyKeyedWriters> | null>(null);
 
   const view = jobId === undefined || deps === null ? null : (deps.views.find((v) => v.job.id === jobId) ?? null);
   const products: PartProduct[] =
@@ -78,8 +86,8 @@ export default function Screen() {
         now={new Date()}
         onDismiss={() => router.back()}
         onSubmit={async (payload) => {
-          writer.current ??= createIntentWriter(intentRequest);
-          await writer.current.send('POST', `/v1/jobs/${view.job.id}/complete`, payload);
+          writers.current ??= bodyKeyedWriters(() => createIntentWriter(intentRequest));
+          await writers.current.writerFor(JSON.stringify(payload)).send('POST', `/v1/jobs/${view.job.id}/complete`, payload);
           void queryClient.invalidateQueries({ queryKey: TECHNICIAN_WORK_KEY });
           void queryClient.invalidateQueries({ queryKey: jobEventsKey(view.job.id) });
         }}
