@@ -270,7 +270,7 @@ If the preconditions are too aggressive and block a legitimate deactivation, **l
 
 **Stating them here is what stops the dashboard becoming a design conversation at the start of Phase 4** — which is the failure this endpoint exists to prevent, and the reason `PLAN.md` §8 pins the contents rather than the layout.
 
-`GET /v1/dashboard/owner/attention` — ordered **by consequence, not recency**: `missing_submission` rows, cash variances, overdue jobs, tracking health problems, contracts expiring inside 30 days.
+`GET /v1/dashboard/owner/attention` — ordered **by consequence, not recency**: `missing_submission` rows, cash variances, overdue jobs, tracking health problems, AMCs ending within 7 days (Phase 2B).
 
 **Tests**
 
@@ -550,7 +550,7 @@ If the owner's amount column is leaking into the dispatcher's table, the two are
 
 **Void lives here and only here** — reason required, on both sales and payments. A rep who needs a sale reversed asks.
 
-**O6 Contracts.** Columns: number · site · billing · visits used/included · start · end · **value** · sold by. **Renewals is a filtered view, not a separate screen.**
+**O6 Contracts.** Rebuilt in Phase 2B (T2B.5) on the AMC design: number · customer · start · end · price · state · next due.
 
 The visit schedule in the detail shows every visit with its status and, **where a visit produced multiple job cards, all the attempts.** A visit on its third attempt is the thing the owner wants to see when a customer complains.
 
@@ -576,7 +576,7 @@ No tracking chip. Owners are not tracked.
 - The reassignment control exists on the owner's company screen and **nowhere else** — assert by grepping the rep's screen tree
 - Deactivation 409 renders **linked rows**, not a message string
 - Employee detail renders all eight device diagnostics
-- Contract detail renders every attempt under a multi-attempt visit
+- Contract detail renders the jobs linked to the AMC (Phase 2B)
 - Profile renders the second-owner line
 
 **Done when**

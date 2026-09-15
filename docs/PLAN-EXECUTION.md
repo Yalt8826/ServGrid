@@ -28,7 +28,7 @@ Down-migrations are written and tested in CI, because they are how a developer r
 
 Concretely: no `DROP COLUMN`, no `NOT NULL` on an existing column, no type narrowing, and no enum value removal in the same release that stops using it. Adding an enum value is safe; removing one is a contract step.
 
-This is why phases 1–4 add tables and never modify Phase 0's. A rollback at any point leaves orphan tables, and orphan tables cost nothing. Phase 2B's contract tables follow the same rule: a rollback past them leaves two unwritten tables and a disabled cron.
+This is why phases 1–4 add tables and never modify Phase 0's. A rollback at any point leaves orphan tables, and orphan tables cost nothing. Phase 2B's contract tables follow the same rule: a rollback past them leaves an unwritten table and an unused nullable column.
 
 **One exception, and it is only available now.** The gap pass changed several migrations that have not yet run — `cash_reconciliations` keyed on employee rather than technician, `companies.owner_rep_id`, `job_cards.customer_product_id`, two new attachment owner types. Those are text edits to files 001–014, not expand/contract cycles, because no environment has applied them. **This exception expires the moment Phase 0 deploys**; after that every one of them would have cost a dual-write and a contract step. It is the strongest practical argument for doing a gap pass before the first migration runs rather than after.
 
@@ -66,8 +66,8 @@ Each flag names exactly one surface, so "turn it off" is never ambiguous:
 | `dispatch.console` | Dispatcher dashboard, dispatch form, Job Logs | 2 |
 | `dispatch.bulk` | Multi-select bulk reassign only | 2 |
 | `dispatch.overdue` | Overdue filter and dashboard count | 2 |
-| `contracts.manage` | Contract screens and CRUD | 2B |
-| `contracts.generate` | The nightly visit generator alone | 2B |
+| `contracts.manage` | AMC tab, AMC CRUD, the dispatch form's AMC option | 2B |
+| ~~`contracts.generate`~~ | ~~The nightly visit generator~~ — **removed 2026-09-15** with the generator | 2B |
 | `sales.cards` | Sales cards and line items | 3 |
 | `sales.payments` | Payment capture and the Pending/Collected tabs | 3 |
 | `sales.cash` | The sales rep's cash handover | 3 |
@@ -76,7 +76,7 @@ Each flag names exactly one surface, so "turn it off" is never ambiguous:
 | `owner.cash` | Reconciliation queue, confirm, dispute, reopen | 4 |
 | `owner.amend` | Completion amendment | 4 |
 
-`dispatch.bulk` and `contracts.generate` are deliberately separate from the console and management flags beside them. Both are the risky half of an otherwise safe feature — a bulk operation and an unattended cron — and both need to be switchable without taking the working half down with them.
+`dispatch.bulk` is deliberately separate from the console flag beside it: it is the risky half of an otherwise safe feature and needs to be switchable without taking the working half down. (`contracts.generate` was the same shape for an unattended cron, removed with the cron on 2026-09-15.)
 
 This buys **dark launch**: turn a phase on for one named person for a week before the role. It also makes T0 rollback possible, which is the only tier fast enough to matter during a working day.
 
@@ -319,72 +319,53 @@ The fallback *within* phone-first, if the deviation is refused: a compact two-li
 
 ---
 
-### Phase 2B — Service contracts
+### Phase 2B — AMC contracts
 
-**Size: M · ~4 weeks · Risk: low technically, medium commercially**
+**Size: M · ~3 weeks · Risk: low technically, medium commercially**
 
-The only phase added after the original plan. `services` carried an `AMC` code and nothing behind it — no agreement, no schedule, no expiry, no renewal — so annual maintenance was a job type with a suggestive name. It sits here because generated visits need a dispatcher to assign them, and because renewals are something a rep sells.
+Rebuilt on 2026-09-15 from the owner's description (`docs/decisions/2026-09-15-amc-contracts.md`). The dispatcher records a site's 12-month AMC with its price; AMC work is dispatched by hand through a ticked AMC option; the app reminds four months after the site's last completed job and seven days before the AMC ends. Task detail: `implementation/PHASE-2B-CONTRACTS.md`.
 
 **Ships**
 
 | Layer | Deliverable |
 |---|---|
-| Data | Migration 015: `service_contracts`, `contract_visits`, `v_contracts_expiring`, `v_contract_visits_dispatcher` |
-| API | Contract CRUD, activation with visit-schedule generation, cancellation, visit skip, `GET /v1/jobs/:id/contract` |
-| Jobs | Nightly `generate-contract-visits` (7-day horizon) and `expire-contracts` |
-| App | Contract list, create, detail with visit schedule, renewal list; `ContractChip` on the technician's job detail; prepaid visits hide the amount field |
+| Data | Migration 015: `service_contracts` (no overlapping AMCs per site), `job_cards.contract_id`, `v_contracts` |
+| API | AMC CRUD and cancel, due and ending lists, **`POST /v1/jobs`** with the AMC link |
+| App | Dispatcher **AMC** tab, AMC form, the dispatch form's AMC option; technician chip and Free/Charge; owner AMC screens |
 
-**Entry** — Phase 2 exit met. The three commercial questions that used to gate this phase are now answered and built into the model:
-
-1. **One site, one AMC.** A nine-site corporate account holds nine contracts. Enforced by a partial unique index, and it is why a rep is scoped by `sold_by` rather than through account ownership.
-2. **A visit not carried out is spent, unless the technician reschedules it on the spot.** No roll-over, no refund. The reschedule lives on the cancel sheet, not in the office.
-3. **Parts are recorded; stock is not tracked.** `job_completion_parts` already shipped in Phase 1, so contracts inherit it rather than needing it.
-
-What remains open here is smaller: a visit can be rescheduled indefinitely, and nothing stops it being pushed past the contract's `end_date` beyond an API bound. Watch `attempt_count` during the field run (`PLAN-DATA-MODEL.md` open item 9).
+**Entry** — Phase ON merged.
 
 **Tests**
 
 | Level | What | Gate |
 |---|---|---|
-| Integration | Generator run twice over the same window raises each visit **once** — the partial unique index is the guard, not a key | zero duplicates |
-| Integration | Generator interrupted mid-batch and resumed | no duplicates, no gaps |
-| Integration | Cancel a visit's job **with** a date → visit returns to `scheduled`, generator raises a second card, both cards survive under the visit | passes |
-| Integration | Cancel **without** a date → visit `skipped`, `visits_remaining` drops, renewal value reflects it | passes |
-| Integration | A second active contract at the same site → 409 naming the existing one | rejected |
-| Integration | `rescheduleTo` past the contract's `end_date` → rejected | rejected |
-| Integration | **A visit whose `due_date` is already in the past is raised by the next generator run** — the window has no lower bound, and the card arrives already Overdue | raised, not orphaned |
-| Integration | Activating a contract whose schedule would not fit its term → refused at draft by `contract_schedule_fits_term` | rejected |
-| Integration | Renewal activated the day before the outgoing contract ends → predecessor expired in the same transaction, no 409; a genuine overlap still 409s | both |
-| Integration | A `draft` contract has a NULL `contract_number`; activation allocates one | passes |
-| Integration | Activation writes exactly `visits_included` rows at the right intervals | exact, including a term crossing a fiscal-year boundary |
-| Integration | Prepaid visit completed with `cost > 0` → 422 | rejected |
-| Integration | Prepaid visit completed with `cost 0, mode none` → accepted by the existing constraints, unmodified | passes |
-| **CI assertion** | **No dispatcher payload contains `contract_value`** — extends the Phase 2 money-leak suite to the second table revenue now lives in | zero |
-| Integration | Cancelling a contract skips unraised visits and **leaves raised jobs untouched** | both |
-| Integration | `v_contracts_expiring` against a hand-counted fixture including a cancelled contract | exact — a cancelled contract must not appear |
-| Field | Two real contracts run for two weeks; visits raised, assigned and closed | see exit |
+| Integration | Overlapping AMCs at one site refused, naming the existing one; a renewal starting the day after the old end accepted; overlap with a cancelled AMC accepted | all three |
+| Integration | Due list: a site four months past its last completed job (any job) appears; one with an open job does not | both |
+| Integration | Ending list at 7 days, not 8 | exact |
+| Integration | `POST /v1/jobs` links only an AMC of the same customer that covers the job's day | passes |
+| Integration | Cancel-with-date on an AMC job → successor linked to the same AMC | passes |
+| **CI assertion** | No dispatcher payload contains a completion figure; no technician payload contains `contract_value` | zero |
+| Unit | AMC job complete sheet opens on Free with no amount field; Charge brings it back | both |
+| Field | Every live AMC recorded; two weeks of reminders | see exit |
 
 **Exit criteria**
 
-- [ ] Two real AMC contracts activated, and their visits **raised, assigned and completed through the normal dispatcher and technician flow with no contract-specific handling**
-- [ ] A technician completed a prepaid visit and **was never shown an amount field**
-- [ ] The renewal list matched a manual count of what is expiring
-- [ ] Money-leak assertion green for `contract_value` across every dispatcher endpoint
-- [ ] **A real visit was rescheduled from the field and completed on the second attempt**, with both job cards visible under the visit
-- [ ] No technician skipped a visit without a date when the customer had in fact asked to reschedule — if that happened, the cancel sheet's warning is not doing its job
+- [ ] Every live AMC recorded by a dispatcher with its price, none overlapping
+- [ ] The due list matched the office's own sense of who was due
+- [ ] A reminder dispatched straight from the AMC tab with the option ticked
+- [ ] An AMC job completed free and another charged, both agreed by the office
+- [ ] An AMC renewed from the ending-soon list, starting the day after the old end
 
-**Rollback — the cleanest in the plan.**
+**Rollback**
 
 | Scenario | Tier | Action |
 |---|---|---|
-| Generator raising wrong or duplicate jobs | T0 | flag `contracts.generate` off; already-raised jobs are ordinary jobs and are unaffected |
-| Contract screens wrong | T0 | flag `contracts.manage` off |
+| AMC screens or reminders wrong | T0 | `contracts.manage` off — linked jobs remain ordinary jobs |
+| Job create wrong | T0 | `dispatch.console` off |
 | API bug | T2 | previous image |
-| Wrongly generated jobs in production | T4 | cancel them through the normal cancellation flow, with a reason — no data surgery |
+| A wrong AMC recorded | — | cancel it with a reason, record it again |
 
-This is cheap to undo precisely because a visit becomes an ordinary job card. There is no parallel execution path to unwind: turn the generator off and the system is exactly what it was in Phase 2, plus some jobs that were going to be raised by hand anyway. **That property is worth protecting** — the first change that gives contract jobs special handling downstream is the change that makes this rollback expensive.
-
-**Descope** — ship contracts as a **record without a generator**: the owner and reps capture agreements and see renewals, and visits are dispatched manually as they always were. That keeps the commercial value (knowing what is owed and what is expiring) and drops the automation, which is the part with the operational risk. Roughly halves the phase.
+**That property is worth protecting**: the first change that gives AMC jobs special handling beyond the chip, the dispatch option and Free/Charge is the change that makes this rollback expensive.
 
 ---
 
@@ -557,7 +538,7 @@ The last column is dropped frames scrolling 200 Job Logs rows (`UI/plan-2/02-MOT
 | Restore-from-backup verified | Phase 0 exit | |
 | Job Logs 5-second test | **Phase 2 start** | Fails → take the web deviation, +2 weeks, owner sign-off |
 | Tracking viable on majority handsets | Phase 1 exit | Fails → descope to on-demand + manual check-in |
-| Contract shape: customer or company; skipped-visit rule | **Phase 2B start** | Restructuring after visits exist means rewriting generated history |
+| Contract shape | **Phase 2B start** | **Cleared 2026-09-15** — AMCs per site, dispatcher-recorded, reminders by time since the last job |
 | Rep account allocation agreed | Phase 3 start | Ownership is a column; the split is a business decision |
 | ~~Outbox generalises unchanged~~ | — | Moot: every role online since 2026-09-15 |
 | Map tile source decided | Phase 4 start | **Cleared 2026-09-15** — MapTiler |
@@ -580,7 +561,7 @@ Each risk has a **trigger** — the observable that says it has arrived — beca
 | Single-VPS failure | Any unplanned outage | Documented restore path; accepted risk at 14 users, revisit if it happens twice |
 | **Contract scope was larger than the plan knew** | A second business capability turns out to be missing during Phase 2B | The AMC gap was found by reading the plans against the working day, not against each other. If one such gap existed, a second may. Re-run that reading before Phase 3 rather than after |
 | Notification fatigue | Any technician silences the app, or asks to | The window rule and the urgent-only exception are the mitigations. A silenced app still refetches on foreground, so the failure is soft — but it is invisible, which is the pattern this project treats as the enemy |
-| Contract jobs acquire special handling | Any code path branches on "is this a contract visit" beyond a display chip | Push back in review. The T0 rollback for Phase 2B depends entirely on a generated visit being an ordinary job |
+| AMC jobs acquire special handling | Any code path branches on "is this an AMC job" beyond the chip, the dispatch option and the Free/Charge choice | Push back in review. The T0 rollback for Phase 2B depends on an AMC job being an ordinary job |
 
 ### Timeline
 
@@ -598,7 +579,7 @@ Each risk has a **trigger** — the observable that says it has arrived — beca
 
 **The four added weeks are Phase 2B and nothing else.** Every other amendment from `PLAN-GAPS.md` — assignment notifications, completion amendment, the logout gate, rep cash handover, account ownership, warranty and unit links, the CI pipeline — absorbs into phases that were already scheduled, because each is a small addition to work already planned rather than new work. Contracts cost a phase because they are a part of the business the plan did not know about, not because the plan was built wrong.
 
-Phase 2B's descope (a record without a generator) roughly halves it, so the realistic range is **30–32 weeks** before the other contingencies.
+Phase 2B was rebuilt smaller on 2026-09-15 (no generator, ~3 weeks), so the realistic range is **30–31 weeks** before the other contingencies.
 
 ### Project acceptance
 
@@ -609,7 +590,7 @@ The whole thing is done when, for one full month:
 - Company balances match the books at month-end
 - Every roster handset holds a passing OEM matrix row
 - A backup has been restored successfully at least once
-- No dispatcher has ever seen a revenue figure — **from `job_completions` or from `service_contracts`** — verifiable from the response-schema assertions in CI, not from anyone's recollection
+- No dispatcher has ever seen a job revenue figure — **from `job_completions`**; the AMC price is his by decision (2026-09-15) — verifiable from the response-schema assertions in CI, not from anyone's recollection
 - AMC visits are raised, assigned and closed without anyone tracking them outside the app
 - No submitted field work has been silently lost: not to a dropped connection, not to a shared handset, not to a refused submit
 
@@ -624,7 +605,7 @@ The whole thing is done when, for one full month:
 | 3 | Who besides the owner can authorise a rollback or call off a parallel run, if the owner is unreachable | Medium | Before Phase 1 cutover |
 | 4 | Staff training and handover is not scoped as work anywhere. 14 people learning a new process is real effort. | Medium — probably 1 week spread across phases 1–4 | Before Phase 1 cutover |
 | 5 | No staging handset budget. OEM matrix testing needs devices for a working day each, which means borrowing from working staff. | Medium — schedules Phase 5 | Before Phase 5 |
-| 6 | ~~Phase 2B's three commercial questions.~~ **All closed by the owner:** one site one AMC; an unrescheduled visit is spent; parts recorded, stock not tracked. | — | Done |
+| 6 | ~~Phase 2B's commercial questions.~~ **Re-answered by the owner, 2026-09-15** (`docs/decisions/2026-09-15-amc-contracts.md`): one site one AMC at a time; dispatcher-recorded with price; no visit count; reminder four months after the last completed job; parts recorded, stock not tracked. | — | Done |
 | 7 | ~~Whether technicians spend from collected cash.~~ **Closed: they do not.** Expense columns removed. | — | Done |
 | 8 | The English-only decision deserves one confirmation with an actual technician rather than in the abstract. Cost of being wrong is every screen. | Medium if wrong | Before Phase 1 |
 | 9 | Stock/inventory remains out of scope by decision, not by omission. Parts are now recorded per completion, which is the data an inventory model would need — so if the owner ever wants stock levels, the hard part is already being captured. | Medium if it changes | Revisit after a year of parts data |

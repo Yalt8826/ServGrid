@@ -13,7 +13,7 @@ The API's job description, stated once: **the app never talks to the database di
 | 0 | Fastify skeleton, config, pg pool, migrations 001–005, error envelope, auth, **employee CRUD (§4.1)**, `packages/shared` permission matrix + zod schemas, **FCM project confirmed and a push sent end to end** | everything |
 | 1 | Jobs module, completion/cancellation, `job_events`, idempotency plugin, technician work read (`GET /v1/technician/work`, which replaced sync bootstrap/delta/batch on 2026-09-15), location ingest, attachments, cash handover declare, stack changes **via the completion payload**, **`v_employee_tracking_health` + `GET /v1/location/health/me`** | Technician app |
 | 2 | Dispatcher job queries against `v_job_cards_dispatcher`, assignment + bulk reassign, `v_technician_load`, customer CRUD, **standalone stack endpoints (§6.4)**, **assignment push notifications** | Dispatcher app |
-| 2B | `service_contracts` + `contract_visits` CRUD, nightly visit generator, `v_contracts_expiring` | Contracts |
+| 2B | `service_contracts` CRUD, AMC reminders from `v_contracts`, `POST /v1/jobs` with the AMC link | AMC tab |
 | 3 | Companies with rep ownership, sales cards + items, payments, `v_company_balances`, company ledger, rep cash handover | Sales Rep app |
 | 4 | Cash reconciliation queue + confirm/dispute/reopen, **completion amendment**, location console queries, on-demand FCM requests, employee **deactivation preconditions and role change**, owner dashboards | Owner app |
 | 5 | Tracking-health sweep + alerting, retention jobs, DB role hardening, load sanity | Hardening |
@@ -228,12 +228,12 @@ The `rbac` plugin turns a scope into a SQL predicate, so scoping is applied in t
 
 Without the split there were only two options, both wrong: give dispatchers `location.read`, which hands the desk a live map of eight people it has no business watching, or give them nothing, which leaves the dashboard's tracking warning (`UI/plan-2/05-DISPATCHER.md` §D1) reading data the matrix forbids. The DB grant in `PLAN-DATA-MODEL.md` §7 follows the same line: `v_employee_tracking_health` is granted to `servgrid_dispatcher`, `location_pings` is not.
 
-**`contract.money` exists for the same reason `job.money` does.** `service_contracts.contract_value` is revenue, and the dispatcher guarantee covers revenue wherever it lives, not only in `job_completions`. A dispatcher reads contract *context* — which visit of how many, under which contract number, prepaid or not — from `v_contract_visits_dispatcher`, which has no value column. Adding contracts without this split would have reintroduced the leak in a new table.
+**`contract.money` is the dispatcher's.** The owner decided on 2026-09-15 that the dispatcher records an AMC with its price (`docs/decisions/2026-09-15-amc-contracts.md`), so his `contract.money` is `all`. The revenue guarantee keeps its meaning for *job* revenue — `job_completions` — which he still never reads. Technicians and sales reps hold no `contract.money`.
 
 **Three rules the matrix alone does not capture, enforced in the services:**
 
 1. `job.money` for a technician is **write-once at completion, no read afterwards**. He submits `cost` and `discount_amount`; the job detail he sees after completion shows the work summary and collection mode but not a revenue figure. The completion he submitted is his own record, not a report.
-2. Dispatcher job reads select from `v_job_cards_dispatcher`, and dispatcher contract reads from `v_contract_visits_dispatcher`. Not a habit — a lint rule (`no-restricted-syntax` on `job_completions` and `service_contracts` inside `modules/**/repo.dispatcher.ts`) plus the optional DB grant in `PLAN-DATA-MODEL.md` §7.
+2. Dispatcher job reads select from `v_job_cards_dispatcher`. Not a habit — a lint rule (`no-sql-money-tables` on `job_completions` inside `modules/**/repo.dispatcher.ts`) plus the optional DB grant in `PLAN-DATA-MODEL.md` §7.
 3. **Dispatchers cannot set `customers.company_id`.** They create customers and have no company permission at all, so the field is stripped from dispatcher payloads server-side rather than merely omitted from their form. A field a role cannot read is a field it must not be able to write — otherwise a dispatcher can attach a customer to an account he cannot see, and the first symptom is a company ledger with a site nobody put there.
 
 **Permission tests are the highest-value tests in the codebase.** A table-driven suite iterates all `role × resource × action` combinations against the matrix, and a second suite hits every endpoint as every role asserting 403/404. That second suite is what actually protects the revenue guarantee; the first only protects the table.
@@ -275,12 +275,12 @@ Reassigning from `en_route` resets the status to `assigned` — the new technici
 4. Insert `job_events` (`completed`, with `occurred_at` from the client's `completedAt`, `recorded_at = now()`).
 5. Optional: upsert `customer_products` rows from `stackChanges[]` in the same transaction, each stamped `source_job_id`.
 6. Optional: insert `job_completion_parts` from `parts[]` — what was fitted or consumed. **These do not affect `cost`**, which the technician enters as one figure; parts are a record, not a bill (`PLAN-DATA-MODEL.md` §3.4).
-7. If the job is a contract visit, flip `contract_visits.status` to `completed`.
+7. *(Removed 2026-09-15: there are no contract visits to flip. An AMC's reminder reads the completed job directly, through `v_contracts`.)*
 8. Attachments arrive as separate requests and reference the job id; a completion is valid without them.
 
 The client sends `completedAt` from the device clock. The server accepts it but clamps it: not in the future, not more than 14 days old. Both bounds recorded in `job_events.payload` when clamping occurs.
 
-**A prepaid contract visit completes with no money.** When the job is linked to a `contract_visits` row whose contract is `billing = 'upfront'`, the service asserts `cost = 0` and rejects anything else with a readable 422. The client already hides the amount field in that case (`PLAN-FRONTEND.md` §9); this is the server refusing to trust it.
+**An AMC job's money is the technician's call.** The complete sheet starts on *Free under AMC* (no cost, mode `none`) and he can switch to *Charge*; the server applies the ordinary completion rules to either, with no AMC branch.
 
 ### 6.2b Amending a completion
 
@@ -299,7 +299,7 @@ Reopening is `POST /v1/cash/handovers/:id/reopen` (§10), owner only, reason req
 | Method | Path | Roles | Notes |
 |---|---|---|---|
 | GET | `/v1/jobs` | all | role-scoped; filters `status[]`, `technicianId`, `customerId`, `from`, `to`, `overdue`, `q`; cursor paginated |
-| POST | `/v1/jobs` | dispatcher, owner | allocates `job_number` |
+| POST | `/v1/jobs` | dispatcher, owner | allocates `job_number`; idempotent; optional `contractId` links the job to the customer's AMC, which must cover the job's day |
 | GET | `/v1/jobs/:id` | scoped | response shape differs by role — see below |
 | PATCH | `/v1/jobs/:id` | dispatcher, owner | `If-Match: version`; this is also how a job is **rescheduled** |
 | POST | `/v1/jobs/:id/assign` | dispatcher, owner | `{ technicianId }`, **`If-Match: version`** |
@@ -315,15 +315,15 @@ Reopening is `POST /v1/cash/handovers/:id/reopen` (§10), owner only, reason req
 
 **Rescheduling is a `PATCH` of `scheduled_for`**, under `If-Match`, emitting a `rescheduled` event, leaving status alone. It always worked; it was never written down, and an unstated capability gets rebuilt as a special case. It is *not* a cancellation — `job_cancellations.replacement_job_id` covers the different case where a job is abandoned and a successor raised.
 
-**Cancelling with a date is how a wasted trip is recorded.** A technician at a locked gate cancels the job with a `reasonCode` and, if the work can still happen, a `rescheduleTo` date. What that does depends on whether the job came from a contract:
+**Cancelling with a date is how a wasted trip is recorded.** A technician at a locked gate cancels the job with a `reasonCode` and, if the work can still happen, a `rescheduleTo` date. What that does:
 
 - **Ordinary job** — `rescheduleTo` creates a successor job card in the same transaction, linked by `job_cancellations.replacement_job_id`. Same customer, same service, new date, `unassigned`.
-- **Contract visit** — the visit returns to `scheduled` with `due_date = rescheduleTo`, and the generator raises a fresh card when it comes due. No successor is created here, because creating one *and* leaving the visit scheduled would double-raise the work.
-- **No `rescheduleTo`** — an ordinary job is simply cancelled; a contract visit becomes `skipped`, carrying the cancellation reason, and the customer has spent it.
+- **AMC job** — the same as an ordinary job; the successor stays linked to the AMC when the AMC covers the new date.
+- **No `rescheduleTo`** — the job is simply cancelled, AMC or not.
 
 **The technician makes this call, not the office.** He is the one who knows whether the customer said "come Thursday" or "don't bother". Routing it through a dispatcher would mean the decision is made by someone who was not there, from a reason code, hours later.
 
-`rescheduleTo` is bounded: not in the past, and for a contract visit not beyond `service_contracts.end_date` — a visit pushed past the term is a visit that cannot happen, and accepting the date would produce a contract that never completes.
+`rescheduleTo` is bounded: not in the past.
 
 **Overdue is a filter, not a state.** `?overdue=true` selects open jobs whose `scheduled_date` has passed, reading `is_overdue` from `v_job_cards_dispatcher` so the list, the dashboard count and any later report cannot disagree about the definition. Nothing advances the date automatically — an open job stays on the day it was promised for, because moving it silently hides the missed commitment the dispatcher exists to see.
 
@@ -362,7 +362,7 @@ Products and services are read by everyone — the completion form and the sales
 
 **`GET /v1/technician/work`** — the technician's working set in one read: his open and recently closed jobs, the customers those jobs touch with their active product stacks, and active products and services. Technician only, gated `tech.jobs`, bounded by design — tens of rows, not the database. No cursor.
 
-A technician's jobs carry `contract: { number, billing, visitsRemaining } | null` inline. Contracts are not a separate collection for him: he needs the context of the visit in front of him, never the contract as an entity.
+A technician's jobs carry `contract: { number, endDate } | null` inline — the AMC behind the job, never its price. Contracts are not a separate collection for him.
 
 **Scope exit needs no tombstones any more.** A job reassigned from Ravi to Anitha is simply absent from Ravi's next read. The delta protocol needed a second query to tell his mirror to forget it; with no mirror there is nothing to forget.
 
@@ -487,36 +487,25 @@ Reps create and confirm; only the owner voids. A rep who needs a sale reversed a
 
 A rep who creates a company becomes its owner. He cannot claim another rep's account or hand one off — that is `PATCH /v1/companies/:id/owner`, owner only. Setting it to `null` makes the account a house account visible to both reps, which is how a fortnight of leave is covered without inventing a delegation model.
 
-### 11.1 Service contracts — Phase 2B
+### 11.1 AMC contracts — Phase 2B
+
+Rebuilt 2026-09-15 (`docs/decisions/2026-09-15-amc-contracts.md`). Dispatcher and owner only; flag `contracts.manage`.
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| GET | `/v1/contracts` | rep (`sold_by`), owner | filters `status[]`, `customerId`, `expiringWithinDays` |
-| POST | `/v1/contracts` | rep, owner | draft; **409 if the site already has an active contract** |
-| GET | `/v1/contracts/:id` | rep (`sold_by`), owner | includes the visit schedule and each visit's attempts |
-| PATCH | `/v1/contracts/:id` | rep (`sold_by`, draft only), owner | `If-Match` |
-| POST | `/v1/contracts/:id/activate` | rep, owner | draft → active, allocates `contract_number`, generates the visit rows |
-| POST | `/v1/contracts/:id/cancel` | **owner only** | reason required; unraised visits become `skipped`, raised jobs untouched |
-| GET | `/v1/contracts/expiring` | rep (`sold_by`), owner | `v_contracts_expiring` |
-| PATCH | `/v1/contracts/visits/:id` | dispatcher, owner | move `due_date` without a site visit — the office-side reschedule |
-| POST | `/v1/contracts/visits/:id/skip` | dispatcher, owner | `{ reason }`, required |
-| GET | `/v1/jobs/:id/contract` | technician (own job), dispatcher, owner | dispatcher reads `v_contract_visits_dispatcher` — **no contract value** |
+| GET | `/v1/contracts` | dispatcher, owner | `?filter=all\|due\|ending`, `customerId`, `state`, `q`; reads `v_contracts` |
+| GET | `/v1/contracts/:id` | dispatcher, owner | the AMC and every job linked to it |
+| POST | `/v1/contracts` | dispatcher, owner | idempotent; allocates `AMC-2627-00031`; **409 `DUPLICATE_ENTITY` naming the existing AMC** when the dates overlap one at the same site |
+| PATCH | `/v1/contracts/:id` | dispatcher, owner | `If-Match`; start, end, price, notes; a cancelled AMC → 409 |
+| POST | `/v1/contracts/:id/cancel` | dispatcher, owner | idempotent; `{ reason }` required |
 
-**A rep is scoped by `sold_by`, not by account ownership.** Contracts hang off `customer_id` and rep ownership lives on `companies.owner_rep_id`, so there is no path between them — a site is not an account. A rep sees the contracts he sold. This is the one place where rep scoping does *not* follow `companies.owner_rep_id`, and it follows from one site holding one AMC (`PLAN-DATA-MODEL.md` §3.10).
+**`filter=due` is the reminder.** An active AMC whose customer's last completed job — any job, AMC-linked or not — is four months old or more (or, with no completed job, four months after the AMC's start), **and** whose customer has no open job. Most overdue first. `filter=ending` is active AMCs ending within 7 days, fewest days first. Both come from `v_contracts`, so the tab, the owner's attention feed and any report cannot disagree.
 
-**One active contract per site**, enforced by a partial unique index. The API returns `409 DUPLICATE_ENTITY` naming the existing contract rather than letting the constraint surface as a 500 — a rep drafting a renewal for a site that already has one is a normal thing to do, and he needs to be told which one.
+**Overlap is a database refusal, not a service check.** `service_contracts_no_overlap` excludes two uncancelled AMCs at one customer with intersecting date ranges. The service maps the violation to `409 DUPLICATE_ENTITY` with `details.existing` — a dispatcher recording a renewal early is doing the ordinary thing, and a renewal starting the day after the old end never collides.
 
-**Activation expires an outgoing predecessor in the same transaction.** The renewal case is the ordinary case, and without this it fails on the ordinary day. A contract ends 31 March; the rep signs the renewal on the 28th and activates it; the partial unique index refuses, because the old one is still `active` until `expire-contracts` runs at 03:00 on 1 April. The rep is told to come back in four days, for a reason no one can explain to a customer.
+**Renewal is a create.** The client prefills start = old end + 1 day, end = start + 12 months − 1 day, and the old price.
 
-So `POST /v1/contracts/:id/activate` first expires any `active` contract at the same site whose `end_date < the new contract's start_date`, then activates. If the predecessor's term has *not* ended — a genuine overlap, two live agreements for the same site — the 409 stands and names it, because that is a commercial mistake rather than a scheduling one and it needs a person. The nightly `expire-contracts` job remains, for contracts nothing renews.
-
-The technician's on-site reschedule is *not* here: it is `POST /v1/jobs/:id/cancel` with a `rescheduleTo` (§6.3), because from where he is standing the thing he is acting on is a job, not a contract. `PATCH /v1/contracts/visits/:id` is the office equivalent, for when the customer phones ahead.
-
-**Visit rows are generated at activation, not on the fly.** Activating a contract writes all `visits_included` rows with `due_date` stepped by `visit_interval_days`. Materialising the schedule up front means the owner can see it, a rep can point at it when the customer asks, and a due date can be moved individually without recomputing an interval — a customer who wants the March visit in April is a normal request, and an implied schedule cannot answer it.
-
-The number is allocated at activation for the same reason a sale number is allocated at confirm: a draft that never activates should not burn one.
-
-**Cancelling a contract does not touch jobs already raised.** Unraised visits become `skipped` with the cancellation as the reason; visits that already produced a job card leave that job alone, because it may already be done. This follows the module's central property — once a visit becomes a job, it is just a job.
+**Linking a job is `POST /v1/jobs` with `contractId`** (§6.3): the AMC must belong to the job's customer, be uncancelled, and cover the job's day.
 
 ---
 
@@ -532,22 +521,10 @@ In-process `node-cron`, single API instance. At this scale a queue would be infr
 | `prune-location-pings` | nightly 02:30 IST | delete `recorded_at < now() - 180 days` |
 | `orphan-attachments` | weekly | rows whose `owner_id` no longer exists → delete object + row |
 | `prune-refresh-tokens` | nightly | expired or revoked > 30 days |
-| `generate-contract-visits` | nightly 03:00 IST | raise `unassigned` job cards for `scheduled` visits with `due_date <= current_date + 7` — **no lower bound**; flip the visit to `job_created` |
-| `expire-contracts` | nightly | active contracts past `end_date` → `expired` |
 
 The health sweep is the one that earns its place: `PLAN.md` §7's "make failure loud" is not satisfied by a chip nobody is looking at.
 
-**The visit generator needs no idempotency key.** The partial unique index on `job_cards (contract_visit_id) WHERE status <> 'cancelled'` permits at most one live card per visit, so a generator that runs twice, or resumes after a crash mid-batch, cannot double-raise. The constraint *is* the guard — the same argument as `location_pings`' `UNIQUE (employee_id, recorded_at)`, and cheaper than threading the idempotency plugin through a job with no HTTP request behind it.
-
-The index is partial rather than total precisely so a rescheduled visit works: its cancelled first attempt stays under the visit as history, and the generator is free to raise a second card when the new date arrives.
-
-It raises jobs seven days ahead so the dispatcher has a week of visibility and can schedule around them, and so a generator that fails for a night or two is invisible rather than urgent.
-
-**The window has no lower bound, and that is deliberate.** `due_date <= current_date + 7` and not a symmetric window around today, because a `scheduled` visit whose date is already in the past is exactly the state the reschedule path produces. A technician who cancels a visit's job on Tuesday and picks Wednesday returns the visit to `scheduled` with tomorrow's date; the generator raises it at 03:00 and everything is fine. But a technician who picks *today*, or a generator that does not run for two nights, or a customer who phones the office to move a visit to a date that then passes — each leaves a `scheduled` visit whose date is behind the window's leading edge.
-
-With a lower bound those visits are **orphaned permanently**: the visit is `scheduled`, never becomes a job, never expires, and quietly stops the contract from completing. Nothing errors and nothing is flagged. Sweeping everything overdue means a missed night self-heals on the next run, which is the property that makes a nightly cron acceptable at all. The `(status, due_date)` partial index serves the query either way.
-
-A visit raised late is raised for the day it was due, not for today — `scheduled_for` comes from `due_date`, so the card arrives already **Overdue** in the dispatcher's list. That is correct: the commitment was missed, and `PLAN-DATA-MODEL.md` §3.4 is explicit that a date never silently rolls forward.
+**No AMC work is scheduled here.** The first Phase 2B design ran a nightly visit generator and a contract-expiry job; the owner's AMCs have no fixed visits (`docs/decisions/2026-09-15-amc-contracts.md`), so reminders are the `v_contracts` view read on demand and an AMC's state is derived from its dates. Nothing to run, nothing to miss.
 
 ### 12.1 Assignment notifications — event-driven, not scheduled
 
@@ -580,7 +557,7 @@ Failures clear the stale token exactly as `/v1/location/requests` does (§8), an
 *On pull request, all required to merge:*
 
 1. Typecheck across the monorepo.
-2. Lint, including the three custom rules that carry real guarantees — no literal `#F2C200` outside `theme.ts`; no `job_completions` or `service_contracts` reference inside `modules/**/repo.dispatcher.ts`; and no `location_pings` or `location_requests` reference there either. These are not style rules. The first is the accent-erosion defence, the second the revenue-leak defence, and the third keeps the `location.health` / `location.read` split (§5) from eroding the same way — a dispatcher may know a device went quiet, never where anyone is.
+2. Lint, including the three custom rules that carry real guarantees — no literal `#F2C200` outside `theme.ts`; no `job_completions` reference inside `modules/**/repo.dispatcher.ts`; and no `location_pings` or `location_requests` reference there either. These are not style rules. The first is the accent-erosion defence, the second the revenue-leak defence, and the third keeps the `location.health` / `location.read` split (§5) from eroding the same way — a dispatcher may know a device went quiet, never where anyone is.
 3. **The nav map and the permission matrix agree.** A test walks every route in every role's `GROUPS` entry (`PLAN-FRONTEND.md` §3) and asserts `permit()` allows it, and walks every route the matrix allows and asserts it appears in that role's map. A permitted route with no tab is unreachable and a tab to a forbidden route is a 403 the user tapped — neither raises an error at runtime, which is why it is a build gate.
 4. Unit and integration suites against a testcontainers Postgres.
 5. Migration `up → down → up` on a clean database. Down-migrations are never run in production (`PLAN-EXECUTION.md` Part I) but they are how a developer resets locally, and an untested one fails at the worst moment.
@@ -604,13 +581,13 @@ Failures clear the stale token exactly as `/v1/location/requests` does (§8), an
 | Technician work read | integration | own jobs only, a reassigned job absent on the next read, contract inline, flag gate |
 | Views | SQL fixtures | especially `v_cash_reconciliation_queue`'s `missing_submission` row, and that a day with cash collected on *both* sides — a completion and a payment — sums into one expected figure |
 | Contract | zod schemas shared with the client | response shape per role |
-| Contracts module | integration | generator idempotency under a repeated run, prepaid visit rejects a non-zero cost, cancellation leaves raised jobs alone |
+| Contracts module | integration | overlap refused with the existing AMC named, due list four months after the last completed job, ending list at 7 days, job create links only a covering AMC |
 | Amendment | integration | amend before confirm succeeds; amend after confirm returns 409; reopen then amend succeeds; the event trail carries before and after |
 | Concurrency | integration | two simultaneous assigns — one wins, the loser gets 409 naming the assignee |
 
 Two suites deserve naming as the ones that protect a promise rather than a function:
 
-- **Endpoint authorisation as every role** already protected the revenue guarantee. It now also has to assert that no dispatcher payload contains `contract_value`, because contracts put revenue in a second table and the original test only knew about the first.
+- **Endpoint authorisation as every role** already protected the revenue guarantee. The AMC price is the dispatcher's since 2026-09-15; the suite still asserts no dispatcher payload carries a completion figure, and no technician payload carries `contract_value`.
 - **The `missing_submission` fixture** asserts that a day with collected cash and no declaration row survives the `FULL OUTER JOIN` and reaches the queue. It is the only flag whose row does not exist on one side of the join, so it is the only one a naive `LEFT JOIN` would silently drop — and it is the row the entire feature exists to catch.
 
 No mocked database anywhere. The schema's generated columns, partial indexes and `FULL OUTER JOIN` are the parts most likely to be wrong, and a mock cannot be wrong about them.
@@ -627,5 +604,5 @@ No mocked database anywhere. The schema's generated columns, partial indexes and
 | 4 | FCM requires a Google project even without Play Store distribution. **Now needed for assignment notifications, not just *Locate now*.** | **Confirm in Phase 0, blocking for Phase 2** | Before Phase 2 |
 | 5 | ~~Bulk reassign notification — the losing technician now *does* get a push, since §12.1 fires on reassign. What the local notification should say when work is taken away is a wording decision, not a technical one.~~ **Closed: A1 — "Job reassigned — `<job_number>` is no longer yours. You don't need to do anything."**, and a bulk reassign collapses to one summary notification ("3 of your jobs were reassigned…") instead of one per job. T2.6 composes this from the refetched work read; never a server-side push body (§12.1 stays data-only). | — | Done (2026-09-12, `docs/decisions/2026-09-12-phase-2-entry-decisions.md` Memo A) |
 | 6 | ~~Should a technician be pushed for a job assigned outside the 09:00–19:00 work window? The location service has a window; notifications do not. Proposed: suppress until the window opens, except `priority = 'urgent'`.~~ **Closed: hold-and-release (B1)** — out-of-window assignments are held server-side in the send path and released at window-open in a batch; `priority = 'urgent'` bypasses and pushes immediately; in-window assignments push immediately. Held ≠ dropped, and nothing client-side is new. | — | Done (2026-09-12, `docs/decisions/2026-09-12-phase-2-entry-decisions.md` Memo B) |
-| 7 | ~~Contract visit `due_date` moves — who may do it.~~ **Closed: dispatcher and owner**, per the §11.1 endpoint table and `PLAN.md` §5. A customer phoning ahead reaches the office, so the office moves the date; the technician's equivalent is the on-site reschedule from his cancel sheet. A rep cannot — he sold the agreement, he does not run the schedule. | — | Done |
+| 7 | ~~Contract visit `due_date` moves — who may do it.~~ **Moot since 2026-09-15** — AMCs have no visit schedule. Previously closed: dispatcher and owner, per the §11.1 endpoint table and `PLAN.md` §5. A customer phoning ahead reaches the office, so the office moves the date; the technician's equivalent is the on-site reschedule from his cancel sheet. A rep cannot — he sold the agreement, he does not run the schedule. | — | Done |
 | 8 | Whether a technician should be able to *see* a completion he amended — the owner's correction is invisible to him, which is right for revenue and arguably wrong for a disputed job. Proposed: no change; the owner rings him. | Low | Phase 4, confirm with owner |

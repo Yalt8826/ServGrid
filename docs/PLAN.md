@@ -63,7 +63,7 @@ Money is `NUMERIC(12,2)`. Timestamps are `timestamptz`, business dates come from
 
 **Jobs** — `job_cards`, plus `job_completions` and `job_cancellations` as separate 1:1 tables, plus append-only `job_events`.
 
-**Contracts** — `service_contracts` and `contract_visits`. An AMC is an agreement with a fixed number of scheduled visits, and each visit becomes an ordinary job card when it falls due.
+**Contracts** — `service_contracts`, with jobs linked by `job_cards.contract_id`. An AMC is a 12-month agreement for a site, recorded by the dispatcher; the app reminds him four months after the site's last completed job.
 
 **Sales** — `sales_cards` with `sales_card_items` (unit price snapshotted at sale time), `payments`, `attachments`.
 
@@ -85,19 +85,15 @@ A completion can be amended afterwards, by the owner only and with a reason, bec
 
 ### Service contracts
 
-An AMC is an agreement: a customer signs for a fixed number of visits over a term, billed either upfront or per visit. `services` already carried an `AMC` code, but a code is not a contract, and without one there is nothing to schedule visits from, nothing to expire, and nothing to renew.
+An AMC is a customer site's 12-month maintenance agreement. `services` already carried an `AMC` code, but a code is not a contract: without one there is nothing to remind anyone about and nothing to renew. **Decided by the owner on 2026-09-15** (`docs/decisions/2026-09-15-amc-contracts.md`), replacing a first design with fixed visits and a nightly job generator.
 
-**One site, one AMC.** A contract covers a single customer location, and a partial unique index makes a second active one at the same site impossible. A corporate account with nine sites holds nine contracts — the deal may be negotiated once, but it is serviced and administered per location, which is the level the visits happen at. Since a site is not an account, a sales rep sees the contracts he sold rather than the contracts of accounts he owns.
+**The dispatcher records the AMC**, against the customer, with its start, end and price. The owner can too; sales reps have no part in it. **One site, one AMC at a time**: the database refuses two AMCs whose dates overlap at the same site, so a renewal starting the day after the current one ends can be recorded early.
 
-**A contract visit becomes an ordinary job card.** A nightly job raises an `unassigned` card for every visit falling due within the week and marks the visit as raised. From that moment the dispatcher assigns it with the same picker and the technician closes it with the same sheet — nothing downstream knows a contract caused it. That is what makes the whole module removable: turn the generator off and the jobs it already raised are indistinguishable from manual ones.
+**AMC work is dispatched by hand, and the app reminds.** An AMC has no fixed number of visits. The dispatcher's *AMC* tab lists every AMC customer whose last completed job — any job — was four months ago or more and who has nothing booked, and every AMC ending within seven days. Picking such a customer on the dispatch form offers the AMC option already ticked, and the job is linked to the AMC.
 
-**Billing decides whether money changes hands on site.** An upfront contract's visit is prepaid, so its completion is zero cost, zero discount, collection mode none — which the completion rules already permit without amendment. A per-visit contract charges normally. The technician's job detail carries the contract and its billing mode, so the complete sheet can drop the amount field entirely on a prepaid visit rather than trusting someone to type a zero.
+**A job linked to an AMC is an ordinary job.** The same picker assigns it, the same sheet closes it, the same flow cancels and reschedules it. On the complete sheet the technician starts on *Free under AMC* and can switch to *Charge* for extra work — which the completion rules already permit without amendment.
 
-**The technician decides, on site, whether a visit is lost or moved.** He arrives at a locked gate; the office does not. He cancels the job with a reason and either picks a new date — which returns the visit to the schedule and lets the generator raise a fresh card when it comes due — or does not, which spends one of the customer's entitled visits. No roll-over, no refund: the reschedule was offered and the reason is recorded against the job, so a later dispute has an answer.
-
-Because that default costs the customer something, the cancel sheet says so in those words before he skips it. It is the one place in the app where a technician is warned about a default rather than trusted to know it.
-
-**Renewal is a view**, not a reminder table: active contracts ending within sixty days, with visits used and remaining, on the owner's dashboard and on the selling rep's. A spent visit reduces what a renewal is worth, which is exactly what the owner needs to see before quoting.
+**State comes from dates.** An AMC is upcoming, active or expired by its dates, or cancelled; nothing is stored that a missed night could leave stale.
 
 ### Closed scope decisions
 
@@ -125,7 +121,7 @@ Defined once in `packages/shared`, enforced server-side, used by the UI to decid
 | Customers | read (assigned only) | create, read, update | — | full |
 | Customer product stack | update | — | — | full |
 | Companies | — | **none** | own accounts + house accounts | full |
-| Service contracts | reads the contract behind his visit; **reschedules or spends a visit from the cancel sheet** | reads visit context, moves due dates and skips a visit the customer cancelled by phone, **no contract value** | contracts he sold | full |
+| Service contracts | sees the AMC behind his job, never its price; **chooses Free or Charge** on an AMC job | **records, edits, renews and cancels AMCs, with the price** | — | full |
 | Sales / payments | — | — | own | full |
 | Cash handover | declares own | — | declares own | confirms all, reopens |
 | Employees | self | self | self | full |
@@ -201,7 +197,7 @@ A job detail names the specific unit the job is about, not just the site — a c
 
 *Assignment* shouldn't be a dropdown of eight names. The picker shows load inline — "Ravi · 3 today", "Anitha · 6 today" — because choosing who to send is the actual decision and a name alone doesn't support it.
 
-**Sales Rep** — Dashboard, Sales, Payment (Pending / Collected tabs, proof photo), Company, Contracts due for renewal, Cash handover, Profile.
+**Sales Rep** — Dashboard, Sales, Payment (Pending / Collected tabs, proof photo), Company, Cash handover, Profile.
 
 **Owner** — Dashboard, Jobs, Dispatch Job, Customers, Contracts, Sales, Payments, Companies, Products, Services, Employees, Location, Cash reconciliation queue, Profile.
 
@@ -211,22 +207,22 @@ Fourteen destinations don't fit a phone tab bar, so on Android they group into f
 |---|---|
 | Dashboard | dashboard |
 | Operations | jobs, dispatch job, customers, contracts |
-| Sales | sales, payments, companies, contract renewals |
+| Sales | sales, payments, companies |
 | People | employees, location, cash queue |
 | Profile | profile, products, services |
 
 On desktop the same routes expand into a left rail with those groups as sections. Same route tree, two presentations. Products and services sit under Profile because they are settings the owner touches a few times a year, not work — putting them in Operations would give a daily group two entries nobody opens.
 
-**The grouping is per role, not one owner-shaped map with rows hidden.** That distinction is easy to miss and expensive to discover: the table above is the *owner's* grouping, and simply filtering it by permission strands two screens. Cash sits under People, which a technician cannot reach — so his handover would have no home. Contracts sits under Operations, which a sales rep cannot reach — so the rep who sells and renews AMCs could reach the renewal list but never the contract he is renewing.
+**The grouping is per role, not one owner-shaped map with rows hidden.** That distinction is easy to miss and expensive to discover: the table above is the *owner's* grouping, and simply filtering it by permission strands screens. Cash sits under People, which a technician cannot reach — so his handover would have no home.
 
 | Role | Tabs | Contents |
 |---|---|---|
 | Technician | 4 | Dashboard · Jobs · **Cash** · Profile |
-| Dispatcher | 3 | Dashboard · **Operations** (jobs, dispatch, customers, contracts) · Profile |
-| Sales Rep | 4 | Dashboard · **Sales** (sales, payments, companies, contracts, renewals) · **Cash** · Profile |
+| Dispatcher | 4 | Dashboard · **Operations** (jobs, dispatch, customers) · **AMC** · Profile |
+| Sales Rep | 5 | Dashboard · **Sales** (sales, payments) · **Companies** · **Cash** · Profile |
 | Owner | 5 | Dashboard · Operations · Sales · People · Profile |
 
-Two routes move by role rather than being hidden: `/cash` is the owner's reconciliation queue under People and the field roles' own handover as its own tab, and `/contracts` is operational for a dispatcher and commercial for a rep. Everything else is the same map with unreachable groups removed.
+Two routes move by role rather than being hidden: `/cash` is the owner's reconciliation queue under People and the field roles' own handover as its own tab, and `/contracts` is the dispatcher's own AMC tab and an Operations entry for the owner. Everything else is the same map with unreachable groups removed.
 
 **Cash gets its own tab for the field roles rather than a row inside Profile.** It is touched once a day, at the end of a shift, by someone tired and wanting to leave; a screen behind two taps at that moment is a screen that gets skipped, and a skipped handover is precisely the `missing_submission` row the owner's queue exists to catch. The same argument applies with more force to the sales rep, whose cash is rare — a path nobody exercises is a path nobody notices is broken.
 

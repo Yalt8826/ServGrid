@@ -2,7 +2,7 @@
 
 Density `field`. **Online** — every read and write goes to the API (decision 2026-09-15). Two users, Phase 3.
 
-Five tabs: Dashboard · Sales · **Companies** · **Cash** · Profile. The Sales group carries sales, payments, contracts and renewals; Companies is its own tab because a rep's day is largely his account list in order — contracts are commercial for a rep, not operational, which is why the group map is per role rather than the owner's map with rows hidden (`PLAN-FRONTEND.md` §3).
+Five tabs: Dashboard · Sales · **Companies** · **Cash** · Profile. The Sales group carries sales and payments; Companies is its own tab because a rep's day is largely his account list in order. **Reps have no part in AMCs** (2026-09-15).
 
 **The role's condition:** in a customer's office or reception, phone in hand, often mid-conversation about money. Signal is usually fine but not guaranteed. Unlike the technician, he is not rushed and not gloved — but he is **being watched by the person whose balance is on the screen**, which is its own constraint.
 
@@ -32,9 +32,6 @@ Five tabs: Dashboard · Sales · **Companies** · **Cash** · Profile. The Sales
 │ Nandi Motors             ₹42,500   →   │
 │ Prakash Textiles         ₹31,000   →   │
 ├────────────────────────────────────────┤
-│ RENEWING SOON                          │
-│ Kormangala site · AMC-…0031 · 22 days  │
-├────────────────────────────────────────┤
 │ RECENT PAYMENTS                        │
 └────────────────────────────────────────┘
 ```
@@ -43,7 +40,6 @@ Five tabs: Dashboard · Sales · **Companies** · **Cash** · Profile. The Sales
 
 - **Two figures**, both money, both `mono` tabular, `en-IN`. Sold this month and total outstanding across his accounts.
 - **Owes the most** — top companies by balance, descending. This is the working list; a rep's day is largely this list in order.
-- **Renewing soon** — contracts he sold, expiring within 60 days, from `v_contracts_expiring`. Days remaining, not a date, because urgency is the point.
 - **Recent payments** — his last few collections, for reassurance that they landed.
 
 ### States
@@ -173,30 +169,9 @@ Sales positive, payments negative, running balance on the right — all `mono` t
 
 ---
 
-## S5. Contracts and renewals
+## S5. ~~Contracts and renewals~~
 
-**Purpose.** Sell and renew AMCs.
-
-### Anatomy — renewals list
-
-The commercially important screen. Contracts he sold, expiring within 60 days:
-
-```
-Kormangala 3rd Blk · AMC-2627-0031
-Expires 28 Sep · 22 days
-Visits used 3 of 4                ₹18,000
-[ Draft renewal ]
-```
-
-**Visits used is shown**, because it is what the renewal is worth arguing about. A customer who took three of four visits is a different conversation from one who took all four — and a *spent* visit (skipped, not rescheduled) reduces the value the rep should quote.
-
-### Anatomy — create
-
-Customer site · service · start and end date · visits included · interval days · billing (`Upfront` / `Per visit` segments) · contract value · notes.
-
-**One site, one active AMC.** Drafting for a site that already has one returns 409, and the UI says which contract exists with a link to it — a rep drafting a renewal for a covered site is a normal thing to do, and he needs to be told, not blocked with an error code.
-
-**Activate is the moment.** Draft → active allocates the number and generates the whole visit schedule, which then appears in the detail as a list of dates. Showing the materialised schedule immediately is what makes the contract feel real, and it is what the rep points at when the customer asks when they will be visited.
+Removed 2026-09-15: AMCs are recorded and renewed by the dispatcher (`05-DISPATCHER.md` §D5).
 
 ---
 

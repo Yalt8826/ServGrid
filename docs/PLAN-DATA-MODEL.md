@@ -34,7 +34,7 @@ Migrations are numbered and forward-only. This ordering respects FK dependencies
 | 012 | — | unused; numbers are never reused (see below) | — |
 | 013 | `views_ops` | `v_job_cards_dispatcher`, `v_technician_load` | 2 |
 | 014 | `grants_hardening` | Optional `servgrid_dispatcher` role (§7) | 5 |
-| 015 | `contracts` | `service_contracts`, `contract_visits`, `v_contracts_expiring`, `v_contract_visits_dispatcher` | 2B |
+| 015 | `contracts` | `service_contracts`, `job_cards.contract_id`, `v_contracts`; `v_job_cards_dispatcher` redefined | 2B |
 | 016 | `flag_overrides` | `employee_flag_overrides` (§3.1) | 1 |
 | 017 | `sales` | `sales_cards`, `sales_card_items`, `payments` | 3 |
 | 018 | `views_money` | `v_sales_card_totals`, `v_company_balances`, `v_employee_expected_cash`, `v_cash_reconciliation_queue` | 3 |
@@ -86,7 +86,7 @@ Migration 002 creates all of these before any table exists. They are listed here
 | `job_priority` | `low`, `normal`, `high`, `urgent` | `urgent` is the only value that overrides the notification work-window suppression |
 | `cancellation_reason` | `customer_unavailable`, `customer_cancelled`, `duplicate`, `wrong_details`, `no_access`, `parts_unavailable`, `rescheduled_by_office`, `contract_cancelled`, `other` | `other` requires `reason_note` |
 | `job_event_type` | `created`, `assigned`, `reassigned`, `status_changed`, `rescheduled`, `completed`, `completion_amended`, `cancelled`, `attachment_added`, `stack_updated` | Append-only; new values are additive and safe |
-| `event_source` | `mobile`, `web`, `system` | `system` covers the contract-visit generator |
+| `event_source` | `mobile`, `web`, `system` | `system` covers jobs raised with no human author |
 | `collection_mode` | `cash`, `upi`, `card`, `bank_transfer`, `none` | **Only `cash` reaches `v_employee_expected_cash`.** Everything else lands in the company account and never passes through anyone's hands |
 | `payment_mode` | `cash`, `upi`, `card`, `cheque`, `bank_transfer` | Same cash rule. No `none` — a payment of nothing is not a payment |
 | `payment_status` | `collected`, `void` | |
@@ -99,11 +99,8 @@ Migration 002 creates all of these before any table exists. They are listed here
 | `location_request_mode` | `fix`, `live` | |
 | `device_location_permission` | `none`, `foreground`, `background` | Anything but `background` resolves the health chip to `permission_missing` |
 | `consent_kind` | `location_tracking` | Single-valued today; the type exists so a second consent does not need a migration on a text column |
-| `contract_billing` | `upfront`, `per_visit` | `upfront` forces a zero-cost completion |
-| `contract_status` | `draft`, `active`, `expired`, `cancelled` | Only `active` generates visits |
-| `visit_status` | `scheduled`, `job_created`, `completed`, `skipped` | `skipped` requires a reason |
 
-Twenty-one types: eighteen in migration 002, three more in 015. **Adding a value to any of these is a safe expand step; removing one is a contract step** (`PLAN-EXECUTION.md` Part I §1), which is why `cancellation_reason` is generous up front — guessing a reason code wrong costs a release cycle, and an unused value costs nothing.
+Eighteen types, all in migration 002. (The three contract enums a first Phase 2B design planned for 015 went with its visit schedule on 2026-09-15.) **Adding a value to any of these is a safe expand step; removing one is a contract step** (`PLAN-EXECUTION.md` Part I §1), which is why `cancellation_reason` is generous up front — guessing a reason code wrong costs a release cycle, and an unused value costs nothing.
 
 Two of these are load-bearing rather than descriptive. `collection_mode` and `payment_mode` both decide whether money enters the cash reconciliation at all: the expected-cash view filters on the literal `'cash'` in both. **If either enum gains a value that represents physical currency, the view must change with it** — that coupling is the one place in this schema where adding an enum value is not automatically safe.
 
@@ -169,23 +166,15 @@ Technicians write here after installing (`PLAN.md` §4). `source_job_id` is what
 
 ### 3.4 Jobs — the structural core
 
-**`job_cards` has no money columns.** This is the load-bearing decision. Columns: `job_number UNIQUE`, `customer_id`, `service_id`, `customer_product_id` (nullable), `contract_visit_id` (nullable, → `contract_visits`), `title`, `description`, `priority`, `status`, `assigned_to`, `assigned_by`, `assigned_at`, `scheduled_for`, `scheduled_date` (generated from `scheduled_for`), `contact_name`, `contact_phone`, `created_by`, `closed_at`.
+**`job_cards` has no money columns.** This is the load-bearing decision. Columns: `job_number UNIQUE`, `customer_id`, `service_id`, `customer_product_id` (nullable), `contract_visit_id` (nullable, retired — never written), `contract_id` (nullable, → `service_contracts`, migration 015), `title`, `description`, `priority`, `status`, `assigned_to`, `assigned_by`, `assigned_at`, `scheduled_for`, `scheduled_date` (generated from `scheduled_for`), `contact_name`, `contact_phone`, `created_by`, `closed_at`.
 
 **`customer_product_id`** names the specific unit the job is about. Without it, a site with five UPS units and three battery banks produces a card reading "battery swap" and leaves the technician to work out which one on arrival. Nullable, because a site survey or a first installation has no existing unit to point at — and because a dispatcher taking a call may not know which unit it is either.
 
 It also makes the stored warranty data readable for the first time. `products.warranty_months` and `customer_products.warranty_expires_on` are both in this schema and, until now, nothing consulted them; with this FK the check is one join. The rule is deliberately *not* a constraint — see §3.4's completion notes.
 
-**`contract_visit_id`**, with a partial unique index:
+**`contract_id`** (migration 015) links a job to the AMC it was dispatched under — nullable, indexed, and read by nothing downstream except the chip and the complete sheet's Free/Charge choice (§3.10).
 
-```sql
-CREATE UNIQUE INDEX job_cards_one_live_per_visit
-  ON job_cards (contract_visit_id)
-  WHERE contract_visit_id IS NOT NULL AND status <> 'cancelled';
-```
-
-**This reverses an earlier decision, and the reason is worth recording.** §3.10 originally put the link on `contract_visits.job_card_id` with a plain unique constraint, to keep `job_cards` narrow. That held only while a visit could produce exactly one job. It cannot: a technician who arrives and finds the site inaccessible cancels the job and may set a new date, and the visit then produces a *second* job card. A one-to-one link cannot represent an attempt that failed, and repointing it at the new card would erase the first attempt — which is precisely the history the reason code exists to capture.
-
-So the link moved, and the constraint became *at most one live job per visit* rather than *one job per visit*. Cancelled cards accumulate under the visit as the record of what was tried. The generator's idempotency survives intact: it raises a card only when no live one exists, and the index enforces that rather than trusting the query.
+`contract_visit_id` was created here for a first contracts design in which one scheduled visit could produce several job cards, guarded by the partial unique index `job_cards_one_live_per_visit`. That design was replaced on 2026-09-15 before anything wrote the column; the column and its index remain until Phase 5 drops them, because the previous API image still selects the column. rather than trusting the query.
 
 `job_cards` gains a second nullable context FK, which is a real cost. It is the right trade: the alternative was a junction table for a two-column relationship, and `customer_product_id` already set the precedent that a nullable pointer to *what this job is about* belongs on the card.
 
@@ -221,7 +210,7 @@ CONSTRAINT completion_mode_coherent       CHECK ((cost - discount_amount) = 0 OR
 
 This takes `PLAN.md`'s second option ("the two fields collapse into one") without losing the first ("ask why"). The technician enters one amount. If he discounts, the form opens a reason field and the database refuses the row without one. A warranty job is `cost 0, discount 0, mode none` and passes. A shortfall with no explanation is now unrepresentable, which is the point — the alternative is a silent gap between what was owed and what arrived at the cash handover, appearing weeks later as an unexplained variance in `v_cash_reconciliation_queue`.
 
-**A prepaid contract visit passes these constraints unchanged.** An upfront-billed AMC visit is `cost 0, discount 0, mode none` — the same shape as a warranty job. The contracts module in §3.10 therefore needs no amendment to the completion rules, which is a useful confirmation that the money model was drawn at the right level.
+**A free AMC job passes these constraints unchanged.** An AMC job the technician completes *Free under AMC* is `cost 0, discount 0, mode none` — the same shape as a warranty job — so the contracts module in §3.10 needs no amendment to the completion rules, which is a useful confirmation that the money model was drawn at the right level.
 
 **Warranty is a prompt, not a constraint.** With `job_cards.customer_product_id` set, the completion form knows whether the unit is in warranty. It does not force `cost` to zero, because out-of-scope work on an in-warranty unit is legitimately chargeable and a database rule that decided otherwise would be wrong on site. The client raises a confirmation instead. This is a deliberate exception to the pattern elsewhere in this document — most business rules belong in `CHECK` constraints precisely so they cannot be forgotten, but this one has a legitimate exception on every job it touches, and a constraint with a legitimate exception is a constraint people learn to route around.
 
@@ -265,7 +254,7 @@ CONSTRAINT sale_number_when_confirmed
   CHECK ((status = 'draft') = (sale_number IS NULL))
 ```
 
-Draft means no number; anything else means a number. `service_contracts.contract_number` takes the same shape for the same reason — allocated at activation, `NULL` while `draft` (§3.10). `payments.payment_number` and `job_cards.job_number` are both allocated at create and stay `NOT NULL`; the difference is exactly the difference between a record that begins provisional and one that does not.
+Draft means no number; anything else means a number. `service_contracts.contract_number` does not: an AMC is recorded once it has been agreed, so its number is allocated at create (§3.10). `payments.payment_number` and `job_cards.job_number` are both allocated at create and stay `NOT NULL`; the difference is exactly the difference between a record that begins provisional and one that does not.
 
 Void rather than delete, and a void needs a reason. Dues are derived, so a void is the *only* correct way to reverse a sale — deleting the row would silently move a company's balance with no trace.
 
@@ -340,61 +329,25 @@ One atomic statement, no explicit lock, no gap-free guarantee needed (rollbacks 
 
 ### 3.10 Service contracts
 
-`services` carried an `AMC` code from the start, and a code is not a contract. Nothing modelled the agreement, the visits it entitles, its expiry or its renewal — so an AMC was, in effect, a job type with a suggestive name. Migration 015, Phase 2B.
+`services` carried an `AMC` code from the start, and a code is not a contract. Migration 015, Phase 2B — **as decided by the owner on 2026-09-15** (`docs/decisions/2026-09-15-amc-contracts.md`), which replaced a first design of fixed visit schedules, `contract_visits` and a nightly generator.
 
-**`service_contracts`** — `contract_number` (**nullable while `draft`**, `UNIQUE`), `customer_id`, `service_id`, `start_date`, `end_date`, `visits_included smallint`, `visit_interval_days smallint`, `contract_value numeric(12,2)`, `billing` (`upfront | per_visit`), `status` (`draft | active | expired | cancelled`), `sold_by → employees`, `notes`, `cancelled_at`/`cancelled_by`/`cancel_reason`.
+**`service_contracts`** — `contract_number text NOT NULL UNIQUE` (allocated at create from `contract:2627`, rendered `AMC-2627-00031`), `customer_id`, `start_date`, `end_date`, `contract_value numeric(12,2)`, `notes`, `created_by → employees`, `cancelled_at` / `cancelled_by` / `cancel_reason`, plus `created_at`, `updated_at`, `version`.
 
-`CHECK (end_date > start_date)`, `CHECK (visits_included > 0)`, `CHECK ((status = 'draft') = (contract_number IS NULL))` — the number is allocated at activation, the same shape as `sales_cards.sale_number` in §3.5 — and one more that is easy to omit and produces a contract that can never complete:
-
-```sql
-CONSTRAINT contract_schedule_fits_term CHECK (
-  start_date + ((visits_included - 1) * visit_interval_days) <= end_date
-)
-```
-
-Four visits at 120-day intervals do not fit in a twelve-month term; the last one falls past `end_date`, and since `rescheduleTo` is bounded by `end_date` (`PLAN-BACKEND.md` §6.3) that visit can be neither carried out nor moved. The failure appears months later as a contract stuck one visit short of complete, and by then the fix is a data correction rather than a rejected form. Catching it at draft time costs one constraint and a validation message, and the numbers come from a rep typing into four fields on a phone.
-
-And:
+`CHECK (end_date >= start_date)`, `CHECK (contract_value >= 0)`, and the cancellation trio all-or-nothing. And:
 
 ```sql
-CREATE UNIQUE INDEX service_contracts_one_active_per_site
-  ON service_contracts (customer_id)
-  WHERE status = 'active';
+CONSTRAINT service_contracts_no_overlap EXCLUDE USING gist
+  (customer_id WITH =, daterange(start_date, end_date, '[]') WITH &&)
+  WHERE (cancelled_at IS NULL)
 ```
 
-**[resolves] one site, one AMC.** A contract covers a single customer location. A corporate account with nine sites holds nine contracts, one per site — the commercial agreement may be negotiated once, but it is administered and serviced per location, and that is the level the visits happen at. The partial unique index makes a second active contract at the same site impossible rather than merely discouraged, which matters because the failure mode is silent: two active contracts generate two sets of visits, and the customer gets serviced twice while the owner bills once.
+**One site, one AMC at a time.** A contract covers a single customer location — a nine-site corporate account holds nine. The exclusion constraint (it needs `btree_gist`) makes two live AMCs with intersecting terms at one site impossible, which matters because the failure is silent: two AMCs, two sets of reminders, a customer billed twice. It is a range rule rather than a "one active" unique index so that a renewal starting the day after the current term ends can be recorded early, and cancelled rows are excluded so a mistake can be cancelled and recorded again.
 
-Draft, expired and cancelled contracts are excluded from the index, so a renewal can be drafted while the current term runs and activated the moment it ends.
+**No status column.** `upcoming`, `active` and `expired` are the dates against `business_date(now())`; `cancelled` is `cancelled_at`. A stored status would need a nightly job to keep it true, and a night the job did not run would leave it false.
 
-This also settles how a rep is scoped to contracts. Since contracts hang off `customer_id` and rep ownership lives on `companies.owner_rep_id`, there is no path between them — so **a rep sees the contracts he sold**: `sold_by = :actor`. Not the account's contracts, because an account has no contracts; a site does.
+**`job_cards.contract_id`** (nullable, → `service_contracts`) links a job to the AMC it was dispatched under. **A linked job is an ordinary job**: nothing about assignment, completion or cancellation branches on it. An AMC job completed *Free under AMC* is `cost 0, discount 0, mode none` — legal under §3.4 already.
 
-**`contract_visits`** — `contract_id`, `seq_no smallint`, `due_date`, `status` (`scheduled | job_created | completed | skipped`), `skipped_reason`. `UNIQUE (contract_id, seq_no)` and `CHECK (status <> 'skipped' OR skipped_reason IS NOT NULL)`.
-
-The job link is `job_cards.contract_visit_id` (§3.4), not a column here — see the reversal recorded there. A visit may have several job cards over its life: one per attempt.
-
-**A visit becomes an ordinary job card.** The generator raises an `unassigned` card for every `scheduled` visit due within seven days and flips the visit to `job_created`. From that point nothing downstream knows a contract caused it: the same picker assigns it, the same sheet closes it, the same events record it. That is what makes the module removable — disable the generator and the cards it already raised are indistinguishable from manual ones.
-
-Idempotency is free: the partial unique index in §3.4 permits at most one live job card per visit, so a generator that runs twice, or resumes after a crash, cannot double-raise. No idempotency key is needed because the constraint *is* the key.
-
-**Visit lifecycle, including the attempt that fails**
-
-| From | Event | To |
-|---|---|---|
-| `scheduled` | generator raises a card | `job_created` |
-| `job_created` | technician completes the job | `completed` |
-| `job_created` | technician cancels **and gives a new date** | `scheduled`, `due_date` = the new date |
-| `job_created` | technician cancels **with no new date** | `skipped`, reason carried from the cancellation |
-| `scheduled` | contract cancelled | `skipped` |
-
-**The technician decides, on site, whether the visit is lost or moved.** He is the one standing at a locked gate; the office is not. He cancels the job with a reason from `cancellation_reason` and either picks a date — which returns the visit to `scheduled` and lets the generator raise a fresh card when it comes due — or does not, which spends the visit.
-
-`skipped` therefore means *attempted or due, and not rescheduled*: the customer has used up one of his entitled visits without receiving it. It does not roll over and it does not refund. That is the simple rule, and it is defensible because the technician was offered the reschedule and the reason is recorded against the job — if a customer disputes it later, the cancellation says who was unavailable and when.
-
-`visits_remaining` counts `scheduled` and `job_created` rows. A `skipped` visit is spent, so it reduces what a renewal is worth, which is the behaviour the owner's renewal list needs to show him.
-
-**Billing decides what happens on site.** `upfront` means the visit is prepaid and its completion is `cost 0, discount 0, mode none` — already legal under §3.4 without amendment. `per_visit` charges normally. The technician's job payload carries `{ number, billing, visitsRemaining }` so the complete sheet can drop the amount field entirely on a prepaid visit rather than relying on someone to type a zero into a field that defaults to blank.
-
-**Renewal is `v_contracts_expiring`** (§4), not a reminders table. A reminder row would be a stored fact that can fall out of step with the contract it describes — the same reasoning that makes dues a view.
+**Reminders are a view, not a table** — `v_contracts` (§4). A stored reminder is a fact that can fall out of step with the jobs it describes.
 
 ---
 
@@ -444,17 +397,9 @@ There is no expenses term, because employees do not spend from collections (§3.
 
 The view also carries `notifications_enabled` and `last_ping_at` through from the device row. `notifications_enabled` is not folded into `health`, deliberately: a technician with notifications off is still tracking correctly, so collapsing it into the same enum would either hide it or misreport a healthy device as unhealthy. The client renders it as a separate chip state (`PLAN-FRONTEND.md` §6) reading the same row.
 
-**`v_contracts_expiring`** — active contracts with `end_date <= current_date + 60`, carrying `visits_used`, `visits_remaining`, `days_to_expiry`, `contract_value` and the selling rep. Feeds the owner's dashboard and the rep's renewal list.
+**`v_contracts`** — one row per AMC with everything the AMC tab reads: the contract columns and customer name, `state` (`cancelled` | `upcoming` | `active` | `expired`), `last_service_date` (IST date of the customer's latest **completed** job — any job, not only AMC-linked ones, per the owner), `next_visit_due` (`GREATEST(start_date, last_service_date) + 4 months`), the customer's earliest open job (`open_job_id`, `open_job_number`, `open_job_scheduled_for`), `is_visit_due` (active, due date reached, **no open job**), `days_to_end` and `is_ending_soon` (active, 0–7 days left).
 
-A view rather than a reminders table for the same reason dues are a view: a stored reminder is a fact that can fall out of step with the contract it describes — a contract cancelled in March leaves a renewal prompt sitting in April.
-
-**`v_contract_visits_dispatcher`** — a money-free projection keyed on `contract_visit_id`: `contract_number`, `seq_no`, `visits_included`, `visits_remaining`, `due_date`, `billing`, `attempt_count`. No `contract_value`.
-
-`attempt_count` is the number of cancelled job cards under the visit. A visit on its third attempt is a site the dispatcher should probably ring before sending anyone again, and that is exactly the kind of thing that is invisible unless a view counts it.
-
-`service_contracts.contract_value` is revenue, and the dispatcher guarantee in `PLAN.md` §5 covers revenue wherever it lives, not only `job_completions`. A dispatcher needs to know a job is the third of four visits under contract AMC-2627-0031 so he can schedule it sensibly; he does not need to know what the customer paid for it. Granting `SELECT` on the contracts table itself would have reintroduced exactly the leak §7 exists to close — the same mistake in a new table, which is what makes it worth naming here rather than trusting the pattern to hold on its own.
-
-`billing` is included deliberately: a prepaid visit behaves differently on site, and the dispatcher fielding the customer's call about money should be able to say "that one's covered" without seeing an amount.
+A view rather than a reminders table for the same reason dues are a view: a stored reminder is a fact that can fall out of step with what it describes. The AMC price is readable by the dispatcher by decision (2026-09-15); the revenue guarantee in `PLAN.md` §5 covers job revenue — `job_completions` — and nothing in this view reads it.
 
 **`v_job_cards_dispatcher`** — an explicit money-free projection of `job_cards`, plus `cancellation_reason`, a boolean `is_completed`, a boolean `is_contract_visit`, and `is_overdue` (`status` not terminal and `scheduled_date < business_date(now())`). Dispatcher endpoints select from this view, never from `job_cards`. The schema already makes revenue absent; this makes the *query surface* one reviewable object instead of every future `SELECT`.
 
@@ -477,12 +422,11 @@ Indexes are listed with the query each exists for. Anything not on this list sho
 | | `(business_date DESC)` | owner revenue dashboard |
 | `payments` | `(received_by, business_date)` partial `mode='cash'` | expected-cash view, payments side |
 | `companies` | `(owner_rep_id)` partial active | a rep's account list |
-| `service_contracts` | `(status, end_date)` partial `status='active'` | renewal view |
-| | unique `(customer_id)` partial `status='active'` | one site, one live AMC |
-| | `(sold_by, start_date DESC)` | a rep's contracts |
-| `contract_visits` | `(status, due_date)` partial `status='scheduled'` | the nightly generator |
-| `job_cards` | unique `(contract_visit_id)` partial `status <> 'cancelled'` | at most one live job per visit |
-| | `(contract_visit_id)` | attempt history for a visit |
+| `service_contracts` | gist exclusion `(customer_id, daterange(start_date, end_date))` where uncancelled | one site, one AMC at a time |
+| | `(end_date)` | the ending-soon list |
+| `job_cards` | `(contract_id)` partial `contract_id IS NOT NULL` | an AMC's linked jobs |
+| | `(customer_id, status)`, `(customer_id, closed_at)` | last service date and open job per customer |
+| | unique `(contract_visit_id)` partial, `(contract_visit_id)` | retired with the column, dropped in Phase 5 |
 | `job_events` | `(job_card_id, occurred_at DESC)` | job timeline |
 | `location_pings` | `(employee_id, recorded_at DESC)` | trail + last-ping |
 | | `(business_date, employee_id)` | day view across staff |
@@ -519,11 +463,12 @@ CREATE ROLE servgrid_dispatcher NOLOGIN;
 GRANT USAGE ON SCHEMA public TO servgrid_dispatcher;
 GRANT SELECT, INSERT, UPDATE ON job_cards, customers, job_events TO servgrid_dispatcher;
 GRANT SELECT ON v_job_cards_dispatcher, v_technician_load TO servgrid_dispatcher;
-GRANT SELECT ON v_contract_visits_dispatcher TO servgrid_dispatcher;
+GRANT SELECT, INSERT, UPDATE ON service_contracts TO servgrid_dispatcher;
+GRANT SELECT ON v_contracts TO servgrid_dispatcher;
 GRANT SELECT ON v_employee_tracking_health TO servgrid_dispatcher;
 REVOKE ALL ON job_completions, payments, sales_cards, sales_card_items,
-              cash_reconciliations, service_contracts, v_company_balances,
-              v_employee_expected_cash, v_contracts_expiring FROM servgrid_dispatcher;
+              cash_reconciliations, v_company_balances,
+              v_employee_expected_cash FROM servgrid_dispatcher;
 REVOKE ALL ON location_pings, location_requests FROM servgrid_dispatcher;
 ```
 
@@ -548,11 +493,11 @@ The demo fixture must include, deliberately:
 - a technician-day with cash collected and no submission (`missing_submission`)
 - a sales-rep-day with a cash payment collected, so the payments side of `v_employee_expected_cash` is exercised at all
 - a completion with parts fitted, including one `from_customer_stock` and one free-text third-party part
-- a contract visit cancelled once and rescheduled, then completed on the second attempt — two job cards under one visit
+- an AMC job cancelled with a new date, whose successor stays linked to the same AMC
 - a company with a negative balance from an overpayment
 - a house account with `owner_rep_id IS NULL`, and a company owned by each rep
 - a location trail with a two-hour basement gap
-- an upfront contract mid-term with visits raised and closed, a per-visit contract, one expiring inside 60 days, and one with a `skipped` visit
+- an active AMC due for a visit (last completed job more than four months ago), one whose customer has an open job booked, one ending within 7 days, a renewal starting the day after its predecessor ends, and a cancelled one
 - an open job three days past its scheduled date (`is_overdue`)
 
 These are the states the UI is most likely to render wrong, and several of them are states that only exist because of a rule written in this document — a fixture that omits them lets the rule go untested.
@@ -569,6 +514,6 @@ These are the states the UI is most likely to render wrong, and several of them 
 | 4 | Attachment retention. Photos accumulate; 15 MB cap × ~8 techs × daily is real storage within a year. Contracts add a signed-agreement document per site. | Low now, real by month 12 | Phase 5 |
 | 5 | Fiscal-year rollover for `sequences` scopes has no automated step — first job of the new FY creates the scope row implicitly, which is correct but untested. `contract:` joins `job:`, `sale:` and `payment:` as a scope. | Low | Add a test in Phase 1 |
 | 6 | ~~Do employees spend from collected cash?~~ **Closed: no.** Expense columns removed (§3.7), which keeps every variance a real one. | — | Done |
-| 7 | ~~Is a contract against a site or a company account?~~ **Closed: one site, one AMC**, enforced by a partial unique index (§3.10). A nine-site corporate account holds nine contracts. Reps are scoped by `sold_by`. | — | Done |
+| 7 | ~~Is a contract against a site or a company account?~~ **Closed: one site, one AMC**, enforced by a partial unique index (§3.10). A nine-site corporate account holds nine contracts. Recorded by dispatchers since 2026-09-15. | — | Done |
 | 8 | ~~What happens to a visit that is never carried out?~~ **Closed:** the technician chooses on site — reschedule to a date he picks, or spend the visit. `skipped` does not roll over and does not refund (§3.10). | — | Done |
-| 9 | A visit rescheduled repeatedly has no ceiling. `attempt_count` surfaces it to the dispatcher, but nothing stops a visit being pushed past the contract's `end_date`. | Low — probably a warning, not a constraint | Phase 2B |
+| 9 | ~~A visit rescheduled repeatedly has no ceiling.~~ **Moot since 2026-09-15** — AMCs have no visit schedule. | — | Done |

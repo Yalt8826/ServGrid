@@ -15,14 +15,14 @@ The framing that keeps this app honest, from `PLAN.md` §1: **every role works o
 | 0 | App shell, fonts, design tokens, session store, secure storage, login, consent screen, API client with refresh-on-401 | the seams |
 | 1 | **Technician app** — dashboard, job tabs, job detail, complete/cancel sheets, profile; online reads and intent-keyed writes; location task + permission ladder; tracking health chip | idempotency and location while scope is small |
 | 2 | **Dispatcher app** — dashboard, dispatch form, phone-native Job Logs with Overdue, load-aware assignment picker, customer CRUD; online-only with explicit error states | the one screen where phone-first costs something |
-| 2B | **Contracts** — contract list and detail, visit schedule, renewal list; contract context on the technician's job detail | a module that adds no new client machinery |
+| 2B | **AMC** — the dispatcher's AMC tab (due for a visit, ending soon, all), AMC form, the dispatch form's AMC option; the technician's Free/Charge choice | a module that adds no new client machinery |
 | 3 | **Sales Rep app** — sales cards with list price and discount per line, company balances, payment capture with proof photo, cash handover | money on a phone, in front of the customer |
 | 4 | **Owner app** — Android five-group nav, desktop left rail, DataTable, location console with map, cash reconciliation queue | one route tree, two presentations |
 | 5 | Hardening — OEM matrix testing on the real handsets, sunlight legibility check, glove-and-vehicle tap testing | the risks in `PLAN.md` §11 |
 
 Phase 1 was built with an offline SQLite mirror and outbox, and Phase 3 reused them. Both were removed by the online-only decision of 2026-09-15 (`implementation/PHASE-ON-ONLINE.md`); the rows above describe the app as it now stands.
 
-Phase 2B is a deliberately quiet phase on this side. Contracts introduce screens but no new client machinery: no new state layer, no new write path, no platform seam. A generated visit arrives as an ordinary job card, so the technician's app needs one extra chip and one conditional field. If contracts turn out to need a technician read beyond the contract object inline on his work read, something has been modelled wrong on the server.
+Phase 2B is a deliberately quiet phase on this side. Contracts introduce screens but no new client machinery: no new state layer, no new write path, no platform seam. An AMC job is an ordinary job card, so the technician's app needs one extra chip and one choice on the complete sheet. If contracts turn out to need a technician read beyond the contract object inline on his work read, something has been modelled wrong on the server.
 
 ---
 
@@ -61,10 +61,9 @@ app/
     companies/
       index.tsx  [id].tsx      ledger with running balance
     contracts/
-      index.tsx                list; rep sees his accounts', owner sees all
-      new.tsx                  customer, service, term, visits, billing
-      renewals.tsx             v_contracts_expiring
-      [id].tsx                 detail + visit schedule
+      index.tsx                AMC tab: due for a visit, ending soon, all
+      new.tsx                  customer, start, end, price, notes (also renew)
+      [id].tsx                 detail + linked jobs
     products/  index.tsx  [id].tsx
     services/  index.tsx
     employees/ index.tsx  new.tsx  [id].tsx
@@ -98,36 +97,37 @@ const GROUPS: Record<Role, NavGroup[]> = {
   ],
   dispatcher: [
     { key: 'dashboard',  routes: ['/dashboard'] },
-    { key: 'operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts'] },
+    { key: 'operations', routes: ['/jobs', '/jobs/new', '/customers'] },
+    { key: 'amc',        routes: ['/contracts', '/contracts/new'] },
     { key: 'profile',    routes: ['/profile'] },
   ],
   sales_rep: [
     { key: 'dashboard', routes: ['/dashboard'] },
-    { key: 'sales',     routes: ['/sales', '/payments', '/companies',
-                                 '/contracts', '/contracts/renewals'] },
+    { key: 'sales',     routes: ['/sales', '/payments'] },
+    { key: 'companies', routes: ['/companies', '/companies/new'] },
     { key: 'cash',      routes: ['/cash/handover'] },
     { key: 'profile',   routes: ['/profile'] },
   ],
   owner: [
     { key: 'dashboard',  routes: ['/dashboard'] },
     { key: 'operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts'] },
-    { key: 'sales',      routes: ['/sales', '/payments', '/companies', '/contracts/renewals'] },
+    { key: 'sales',      routes: ['/sales', '/payments', '/companies'] },
     { key: 'people',     routes: ['/employees', '/location', '/cash'] },
     { key: 'profile',    routes: ['/profile', '/products', '/services'] },
   ],
 };
 ```
 
-**This is a map per role, not one owner-shaped map with rows hidden**, and the difference is not cosmetic. An earlier draft carried a single map — the owner's — and filtered it by permission. That silently strands two screens: `/cash` sits under People, which a technician cannot reach, so his handover has no home at all; `/contracts` sits under Operations, which a rep cannot reach, so the person who sells and renews AMCs can open the renewal list but never the contract behind it. Neither failure produces an error. Both produce a route that exists, is permitted, and cannot be navigated to.
+**This is a map per role, not one owner-shaped map with rows hidden**, and the difference is not cosmetic. An earlier draft carried a single map — the owner's — and filtered it by permission. That silently strands screens: `/cash` sits under People, which a technician cannot reach, so his handover would have no home at all. The failure produces no error — only a route that exists, is permitted, and cannot be navigated to.
 
 Two routes therefore change home by role rather than being hidden:
 
 - **`/cash`** — the owner's reconciliation queue under People; the field roles' own declaration (`/cash/handover`) as its own tab. It gets a tab rather than a row inside Profile because it is touched once, at the end of a shift, by someone tired and wanting to leave. A screen two taps deep at that moment is a screen that gets skipped, and a skipped handover is exactly the `missing_submission` row the owner's queue exists to catch.
-- **`/contracts`** — operational for a dispatcher (it is where visits come from), commercial for a rep and the owner.
+- **`/contracts`** — the dispatcher's own **AMC** tab, because the reminders are daily work for him; an Operations entry for the owner. Sales reps have no AMC routes (2026-09-15).
 
 Products and services live under Profile because they are settings — the owner edits a price or adds an SKU a few times a year. Putting them in Operations would give the group the dispatcher uses hourly two entries nobody opens.
 
-- **Android, any role** — bottom tabs from that role's map. **Technician 4, dispatcher 3, sales rep 5, owner 5.** One component, one map per role.
+- **Android, any role** — bottom tabs from that role's map. **Technician 4, dispatcher 4, sales rep 5, owner 5.** One component, one map per role.
 - **Web, owner** — the same groups become sections in a persistent left rail, each expanded to its individual routes.
 
 `RoleGate` still guards every route from `permit()`; the map decides *reachability*, the matrix decides *permission*, and a route in a role's map that `permit()` refuses is a bug the Phase 0 test suite should catch by walking both.
@@ -310,7 +310,7 @@ Domain (`components/domain/`):
 | `StatusPill` | Reads from the status colour map; never takes a raw colour. |
 | `OverdueChip` | Open job past its scheduled date. Reads `is_overdue` from the server, never recomputed from a device clock. |
 | `WarrantyChip` | "In warranty · to 14 Mar 2027" on a job whose `customer_product_id` is still covered. |
-| `ContractChip` | "AMC-2627-0031 · visit 3 of 4 · prepaid". The word **prepaid** is the load-bearing part on a technician's screen. |
+| `ContractChip` | "AMC · until 14 Sep 2027". Tells the technician the job is under the customer's AMC; never a price. |
 | `StatusStepper` | The one animated element. |
 | `TechnicianPicker` | **Shows load inline** — "Ravi · 3 today", "Anitha · 6 today". Never a bare dropdown of eight names. |
 | `FilterBar` | Persistent, horizontally scrollable chips; technician, status, date. Reflects state in the URL. |
@@ -358,7 +358,7 @@ None of them is yellow. A job card can already carry a status rail in `inProgres
 
 Two conditional behaviours, both about not asking for money that isn't owed:
 
-- **A prepaid contract visit hides the amount field entirely.** Not zero, not disabled — absent, with the `ContractChip` reading "prepaid" in its place. A field showing ₹0 invites someone to type into it, and the server rejects a non-zero cost on a prepaid visit anyway (`PLAN-BACKEND.md` §6.2), so showing the field can only produce a rejection the technician does not deserve.
+- **An AMC job opens on *Free under AMC*.** The amount field and Paid-by are absent — not zero, not disabled — and the payload carries no charge. One tap on *Charge* brings the ordinary money fields back for extra work (`docs/decisions/2026-09-15-amc-contracts.md`).
 - **An in-warranty unit completed with a charge raises a confirmation**, not a block: *"This unit is under warranty until 14 Mar 2027. Charge anyway?"* Out-of-scope work on a covered unit is legitimately chargeable, so this is a prompt. It is the only confirmation on this sheet, which is what keeps it meaningful — a technician who dismisses two dialogs a day will dismiss this one without reading it.
 
 **Parts fitted** are a third disclosure on the sheet — "Parts used", collapsed by default, opening a short repeating row of product picker, quantity, optional serial. Most jobs fit nothing and never open it.
@@ -369,7 +369,7 @@ They are recorded because a fixed-price AMC whose visits consume two filters eac
 
 **The cancel sheet asks whether it can still happen.** Reason code, optional note, and then *Reschedule to* — a date picker, skippable. This is where a wasted trip gets recorded: the technician standing at a locked gate is the only person who knows whether the customer said "come Thursday" or "don't bother", and routing that through the office means the decision is made hours later by someone who was not there.
 
-On a contract visit the copy has to be plainer than usual, because the consequence is asymmetric and invisible: skipping without a date **spends one of the customer's entitled visits**. The sheet says so in those words above the date picker. Everywhere else in this app a technician can be trusted to understand the default; here the default costs the customer something.
+An AMC job cancels exactly like any other: AMCs carry no visit count, so nothing is spent, and a new date raises a successor still linked to the AMC.
 
 ### Dispatcher — Phase 2
 
@@ -378,10 +378,10 @@ Online-only, with an explicit error state on every screen — never a spinner th
 | Screen | Notes |
 |---|---|
 | Dashboard | **overdue count first**, then unassigned, per-technician load, today's status split |
-| Dispatch Job | customer search-or-create, the unit at that site, service, priority, schedule, `TechnicianPicker` |
+| Dispatch Job | customer search-or-create, the unit at that site, service, priority, schedule, `TechnicianPicker`, and a ticked **AMC job** option when the customer has an AMC covering today |
 | Job Logs | **the phone-first screen that costs something**; Overdue is a filter chip and sorts first |
 | Customer | search, create, edit, view stack read-only. **No company field** — dispatchers have no company permission, so it is not on the form and the API strips it |
-| Contracts | from Phase 2B: which visit of how many, prepaid or not, and `attempt_count`. He can **move a visit's due date** and **skip a visit** the customer cancelled by phone — the office-side counterpart to the technician's on-site reschedule. **Never the contract value** |
+| AMC | from Phase 2B, its own tab: **due for a visit** (four months after the customer's last completed job), **ending within 7 days**, all AMCs. He records, edits, renews and cancels AMCs, with the price |
 | Profile | self only |
 
 **Overdue leads the dashboard** because it is the only number on it that represents a promise already broken. Unassigned work is a queue; overdue work is a customer who was told a day. Nothing advances a job's date on its own — that would make the number go away without anything being fixed.
@@ -396,11 +396,10 @@ Dispatcher screens never request or render money. The API will not send it; `Mon
 
 | Screen | Notes |
 |---|---|
-| Dashboard | month's sales, outstanding across his accounts, recent payments, **contracts expiring in 60 days** |
+| Dashboard | month's sales, outstanding across his accounts, recent payments |
 | Sales | list, create with line items — product picker snapshots name and price at add time; each line records **list price, discount % and the final price** |
 | Payment | **Pending** = companies with `balance > 0` (a view, not rows); **Collected** = his payments. Capture: amount, mode, proof photo — **no reference field**; the photo is the evidence |
 | Company | **his accounts plus house accounts**, with balances; detail with ledger and running balance |
-| Contracts | his accounts' contracts; create, activate, and the renewal list |
 | Cash handover | his own declaration, same screen as the technician's with a different heading |
 | Profile | health chip — reps are tracked too |
 
@@ -421,7 +420,7 @@ Both layouts. Fourteen routes in five Android groups; a left rail on web.
 | Dashboard | stacked stat cards, Condensed figures | 4-up stat row + charts |
 | Jobs | `JobCard` list | `DataTable` — sortable, sticky header, status colour on the left edge |
 | Sales / Payments | cards | tables with running totals |
-| Contracts | cards with visits used | table + visit schedule in the side detail |
+| AMC | the dispatcher's AMC sections as cards | table with price, state and next due; linked jobs in the side detail |
 | Location console | roster with health + last-seen | **map + roster + day trail** |
 | Cash queue | flagged cards, `missing_submission` first | table: expected / declared / variance / flag |
 | Employees, Products, Companies, Customers | list + detail | tables + side detail |
@@ -442,10 +441,10 @@ Both layouts. Fourteen routes in five Android groups; a left rail on web.
 
 | Layer | Tool | Scope |
 |---|---|---|
-| Permission rendering | vitest + RTL | every screen under every role — asserts money is absent for dispatchers, **including `contract_value` on the contracts screen** |
+| Permission rendering | vitest + RTL | every screen under every role — asserts money is absent for dispatchers, **no completion figure on any dispatcher screen** |
 | Intent writes | vitest | **key generated once per submit intent and reused across retries**; kept on a network error or 5xx, cleared on a definite 4xx or success; 401 refresh-and-retry; typed input survives every failure |
-| Complete sheet | vitest + RTL | prepaid visit hides the amount field; in-warranty charge raises exactly one confirmation; discount discloses a mandatory reason; **parts list renders no subtotal and does not alter the amount** |
-| Cancel sheet | vitest + RTL | contract visit with no date shows the "spends a visit" warning; a date returns the visit to scheduled; date is bounded by the contract's end |
+| Complete sheet | vitest + RTL | AMC job opens on Free with no amount field and Charge brings it back; in-warranty charge raises exactly one confirmation; discount discloses a mandatory reason; **parts list renders no subtotal and does not alter the amount** |
+| Cancel sheet | vitest + RTL | a date raises a successor; a date in the past is refused |
 | Connection loss | vitest + a device with airplane mode toggling | the *No connection* screen covers every role; a half-typed complete sheet is intact when it returns and submits once |
 | Location | manual matrix, Phase 5 | per handset: overnight survival, basement gap recovery, battery cost over a work day |
 | Visual | screenshots at 360dp, 412dp, 1280px, 1920px | the card-vs-row rule on every owner screen |
@@ -466,5 +465,5 @@ The location matrix is a table of `manufacturer × OS version × mitigation stat
 | 5 | Owner desktop is a React Native Web build. If the `DataTable` and rail fight RNW hard enough, a separate thin React app sharing `packages/shared` is the escape hatch. | Medium — a real fork in the road | Assess at Phase 4 start |
 | 6 | Dark mode deferred. `PLAN.md` §9 warns the contrast levels were chosen for sunlight, not monitors — if it is ever added, do not soften them. | Low | — |
 | 7 | ~~Notification permission on Android 13+ has no visible failure state.~~ **Resolved:** it is the fourth `TrackingHealthChip` state (§6), amber, sourced from `devices.notifications_enabled`. Kept here because the chip is Phase 1 and the notification permission is Phase 2 — the state must be built with a source that is always `true` until Phase 2 fills it in. | — | Built Phase 1, populated Phase 2 |
-| 8 | Contracts appear in two nav groups (§3), the only place the grouping scheme bends. Watch whether it confuses anyone in Phase 2B before adding a third such case. | Low | Phase 2B |
+| 8 | ~~Contracts appear in two nav groups (§3).~~ **Moot since 2026-09-15**: AMC is the dispatcher's own tab and an Operations entry for the owner; reps have none. | — | Done |
 | 9 | English-only is now a recorded decision rather than an omission. Revisit once, with an actual technician, before Phase 1 — the cost after is every screen. | Medium if wrong | Before Phase 1 |

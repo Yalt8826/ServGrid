@@ -88,7 +88,7 @@ The most-seen object in the product and the primary signature.
 ┌─┬──────────────────────────────────────┐
 │▌│ Kormangala · 3rd Block      JC-…0042 │  ← rail 4px, customer h2, number mono
 │▌│ Battery swap · UPS 850VA             │  ← service + unit, body
-│▌│ 14:30    [In warranty] [AMC 3 of 4]  │  ← time mono, chips
+│▌│ 14:30    [In warranty] [AMC]         │  ← time mono, chips
 │▌│ ● In progress                        │  ← status pill
 └─┴──────────────────────────────────────┘
 ```
