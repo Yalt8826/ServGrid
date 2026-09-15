@@ -21,7 +21,7 @@ import { textStyle } from '../../fonts/textStyle';
 export { DURATION, EASING, ELEVATION, RADII, SEMANTIC, SPACE, STALE, TAP, TYPE };
 export type { ComponentState, Density };
 
-/** Caption style — timestamps, helper text (`Pending sync` among them). */
+/** Caption style — timestamps, helper text. */
 export const captionStyle = {
   caption: {
     ...textStyle('caption'),
@@ -38,24 +38,6 @@ export function labelStyle(): ReturnType<typeof textStyle> & { color: string } {
   return {
     ...textStyle('label'),
     color: SEMANTIC.text.secondary,
-  };
-}
-
-/**
- * The stale treatment, everywhere (03-COMPONENTS.md): a 2px slate.400
- * **dashed** left inset plus a `Pending sync` caption. Never a spinner,
- * never greyed out — the data is real. Returns the container style; the
- * caption renders next to the component's own caption/helper text.
- */
-export function staleInsetStyle(): {
-  borderLeftWidth: number;
-  borderLeftColor: string;
-  borderStyle: 'dashed' | 'solid' | 'dotted';
-} {
-  return {
-    borderLeftWidth: STALE.insetWidth,
-    borderLeftColor: STALE.insetColor,
-    borderStyle: 'dashed',
   };
 }
 

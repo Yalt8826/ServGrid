@@ -246,8 +246,10 @@ export const HAPTIC_EVENTS = [
 export type HapticEvent = (typeof HAPTIC_EVENTS)[number];
 
 /**
- * The eight states (03-COMPONENTS.md). Every interactive primitive is
- * specified in all of them; the gallery renders each.
+ * The seven states (03-COMPONENTS.md). Every interactive primitive is
+ * specified in all of them; the gallery renders each. There was an eighth,
+ * `stale` — local data the server had not confirmed — retired when the app
+ * went online-only (decision 2026-09-15): nothing waits on the phone.
  */
 export const STATES = [
   'default',
@@ -257,18 +259,17 @@ export const STATES = [
   'loading',
   'empty',
   'error',
-  'stale',
 ] as const;
 
 export type ComponentState = (typeof STATES)[number];
 
 /**
- * The stale treatment, everywhere (03-COMPONENTS.md): a 2px slate.400
- * dashed left inset plus a `Pending sync` caption. Never a spinner,
- * never greyed out — the data is real.
+ * The dashed inset: a 2px slate.400 dashed left edge. Since the app went
+ * online-only it means one thing — a write for this row is on its way to
+ * the server (`JobCard`, the job detail header), with `Sending…` beside
+ * it. Never a spinner, never greyed out — the data is real.
  */
 export const STALE = {
   insetWidth: 2,
   insetColor: SEMANTIC.line.stale,
-  caption: 'Pending sync',
 } as const;

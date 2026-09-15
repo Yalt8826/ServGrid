@@ -51,12 +51,6 @@ describe('TextField — eight states without throwing', () => {
     expect(texts).toContain('Username or password is wrong.');
     expect(texts).not.toContain('Your login name');
   });
-  it('stale — dashed inset plus Pending sync', async () => {
-    const r = await mount(
-      <TextField label="Note" value="done" onChangeText={() => {}} stale testID="tf" />,
-    );
-    expect(allText(toJson(r))).toContain('Pending sync');
-  });
   it('renders at every density', async () => {
     for (const d of ['field', 'console', 'desk'] as const) {
       await mount(<TextField label="U" value="" onChangeText={() => {}} testID="tf" />, d);

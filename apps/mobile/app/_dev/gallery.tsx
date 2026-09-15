@@ -64,8 +64,6 @@ function ButtonStates(): React.ReactNode {
             <Button label="Save" disabled disabledReason="No connection — kept on device" testID={`g-button-${s}`} />
           ) : s === 'loading' ? (
             <Button label="Save" loading testID={`g-button-${s}`} />
-          ) : s === 'stale' ? (
-            <Button label="Save" stale testID={`g-button-${s}`} />
           ) : s === 'error' ? (
             <Button label="Retry sync" variant="danger" testID={`g-button-${s}`} />
           ) : s === 'empty' ? (
@@ -88,7 +86,7 @@ function ButtonStates(): React.ReactNode {
 function FieldStates(): React.ReactNode {
   return (
     <View>
-      {(['default', 'error', 'disabled', 'stale'] as ComponentState[]).map((s) => (
+      {(['default', 'error', 'disabled'] as ComponentState[]).map((s) => (
         <StateBlock key={s} label={s}>
           <TextField
             label="Username"
@@ -97,7 +95,6 @@ function FieldStates(): React.ReactNode {
             disabled={s === 'disabled'}
             errorText={s === 'error' ? 'Username or password is wrong.' : undefined}
             helperText={s === 'default' ? 'Your login name' : undefined}
-            stale={s === 'stale'}
             testID={`g-text-${s}`}
           />
         </StateBlock>
@@ -121,9 +118,6 @@ function MoneyStates(): React.ReactNode {
       <StateBlock label="error">
         <MoneyField label="Amount collected" value="" onChangeText={() => {}} errorText="Enter the amount collected" testID="g-money-error" />
       </StateBlock>
-      <StateBlock label="stale">
-        <MoneyField label="Amount collected" value="4250.5" onChangeText={() => {}} stale testID="g-money-stale" />
-      </StateBlock>
     </View>
   );
 }
@@ -141,10 +135,9 @@ function PickerStates(): React.ReactNode {
       <StateBlock label="chosen">
         <Select label="Status" value="a" options={opts} onSelect={() => {}} testID="g-sel-chosen" />
       </StateBlock>
-      <StateBlock label="error / disabled / stale">
+      <StateBlock label="error / disabled">
         <Select label="Status" value={null} options={opts} onSelect={() => {}} errorText="Pick one" testID="g-sel-error" />
         <Select label="Status" value={null} options={opts} onSelect={() => {}} disabled testID="g-sel-disabled" />
-        <Select label="Status" value="a" options={opts} onSelect={() => {}} stale testID="g-sel-stale" />
       </StateBlock>
       <StateBlock label="DatePicker — D MMM / D MMM YYYY">
         <DatePicker label="Service date" value="2026-03-14" onChange={() => {}} testID="g-dp-thisyear" />
@@ -172,9 +165,6 @@ function SurfaceStates(): React.ReactNode {
           <Banner tone={tone} message="The server's message, verbatim." testID={`g-banner-${tone}`} />
         </StateBlock>
       ))}
-      <StateBlock label="Banner stale">
-        <Banner tone="warning" message="Created offline" stale testID="g-banner-stale" />
-      </StateBlock>
       <StateBlock label="Skeleton (exact geometry, 200ms delay, no shimmer)">
         <Skeleton width={'100%' as const} height={16} testID="g-sk-block" />
         <View style={{ height: 8 }} />
@@ -266,7 +256,7 @@ function Gallery(): React.ReactNode {
  * gallery they each throw a full-screen scrim over everything below,
  * which dims every other component on the page and buries the rest of
  * the list — the gallery is the one artefact that has to stay readable,
- * since it is what stops `stale` and `error` being reinvented per screen.
+ * since it is what stops `error` and `empty` being reinvented per screen.
  *
  * A button that opens the real component beats a non-modal replica:
  * a replica is a second implementation, and it drifts.

@@ -18,7 +18,7 @@ import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
 import { haptic } from './haptics';
 import { usePressScale } from './motion';
-import { captionStyle, staleInsetStyle } from './uiBase';
+import { captionStyle } from './uiBase';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -30,8 +30,6 @@ export interface ButtonProps {
   /** Required whenever `disabled` — the visible why (caption). */
   disabledReason?: string;
   loading?: boolean;
-  /** The row carries local data the server has not confirmed. */
-  stale?: boolean;
   fullwidth?: boolean;
   testID?: string;
 }
@@ -43,7 +41,6 @@ export function Button({
   disabled = false,
   disabledReason,
   loading = false,
-  stale = false,
   fullwidth = false,
   testID,
 }: ButtonProps): React.ReactNode {
@@ -63,7 +60,6 @@ export function Button({
       style={[
         {
           alignSelf: fullwidth ? 'stretch' : 'flex-start',
-          ...(stale ? staleInsetStyle() : {}),
         },
       ]}
     >
@@ -125,11 +121,6 @@ export function Button({
       </Animated.View>
       {disabled && disabledReason ? (
         <Text style={[captionStyle.caption, { marginTop: 4 }]}>{disabledReason}</Text>
-      ) : null}
-      {stale ? (
-        <Text style={[captionStyle.caption, { marginTop: 4 }]} testID={testID ? `${testID}-stale` : undefined}>
-          Pending sync
-        </Text>
       ) : null}
     </View>
   );

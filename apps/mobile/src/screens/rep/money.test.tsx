@@ -81,14 +81,9 @@ describe('money rules (§S1, §S4)', () => {
     }
   });
 
-  it('the stale figure carries the dashed inset and the Pending sync caption', async () => {
-    const stale = await create(<MoneyFigure value="₹85,000" stale testID="figure" />);
-    expect(findByTestID(toJson(stale), 'figure-stale')).toBeDefined();
-    expect(findByTestID(toJson(stale), 'figure-pending')).toBeDefined();
-    expect(allText(toJson(stale))).toContain('Pending sync');
-
-    const fresh = await create(<MoneyFigure value="₹85,000" testID="figure" />);
-    expect(findByTestID(toJson(fresh), 'figure-stale')).toBeUndefined();
-    expect(findByTestID(toJson(fresh), 'figure-pending')).toBeUndefined();
+  it('a figure never carries a stale inset or Pending sync — nothing waits on the phone', async () => {
+    const figure = await create(<MoneyFigure value="₹85,000" testID="figure" />);
+    expect(findByTestID(toJson(figure), 'figure')).toBeDefined();
+    expect(allText(toJson(figure))).not.toContain('Pending sync');
   });
 });

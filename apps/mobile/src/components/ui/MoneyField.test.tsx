@@ -30,7 +30,6 @@ describe('MoneyField — eight states without throwing', () => {
     ['default', <MoneyField label="Amount" value="1250" onChangeText={() => {}} testID="mf" />],
     ['disabled', <MoneyField label="Amount" value="0" onChangeText={() => {}} disabled testID="mf" />],
     ['error', <MoneyField label="Amount" value="0" onChangeText={() => {}} errorText="Enter the amount collected" testID="mf" />],
-    ['stale', <MoneyField label="Amount" value="1250" onChangeText={() => {}} stale testID="mf" />],
     ['helper', <MoneyField label="Amount" value="1250" onChangeText={() => {}} helperText="Cash only" testID="mf" />],
   ];
   for (const [name, ui] of cases) {

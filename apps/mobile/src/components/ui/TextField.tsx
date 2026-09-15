@@ -18,7 +18,7 @@ import { useState } from 'react';
 import { RADII, SEMANTIC, TAP, type ComponentState } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
-import { captionStyle, staleInsetStyle } from './uiBase';
+import { captionStyle } from './uiBase';
 
 export interface TextFieldProps {
   label: string;
@@ -30,8 +30,6 @@ export interface TextFieldProps {
   errorText?: string;
   disabled?: boolean;
   loading?: boolean;
-  /** The value is local data the server has not confirmed. */
-  stale?: boolean;
   secureTextEntry?: boolean;
   /**
    * Multiline input (the complete sheet's Work done field, §T4: three
@@ -60,7 +58,6 @@ export function TextField({
   errorText,
   disabled = false,
   loading = false,
-  stale = false,
   secureTextEntry = false,
   multiline = false,
   rows,
@@ -86,7 +83,7 @@ export function TextField({
         : SEMANTIC.line.default;
 
   return (
-    <View testID={testID} style={[{ alignSelf: 'stretch' }, stale ? staleInsetStyle() : {}]}>
+    <View testID={testID} style={{ alignSelf: 'stretch' }}>
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 }}>
         {label}
       </Text>
@@ -126,11 +123,6 @@ export function TextField({
         </Text>
       ) : helperText ? (
         <Text style={[captionStyle.caption, { marginTop: 4 }]}>{helperText}</Text>
-      ) : null}
-      {stale ? (
-        <Text style={[captionStyle.caption, { marginTop: 4 }]} testID={testID ? `${testID}-stale` : undefined}>
-          Pending sync
-        </Text>
       ) : null}
       {loading ? (
         <View style={{ height: 2, borderRadius: 1, backgroundColor: SEMANTIC.line.default, marginTop: 4 }}>

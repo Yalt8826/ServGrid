@@ -11,7 +11,6 @@ import { RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { haptic } from './haptics';
 import { Button } from './Button';
-import { captionStyle } from './uiBase';
 
 export interface ConfirmDialogProps {
   visible: boolean;
@@ -21,8 +20,6 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
   onConfirm: () => void;
   disabled?: boolean;
-  /** The object of the confirmation is local, server-unseen data. */
-  stale?: boolean;
   testID?: string;
 }
 
@@ -34,7 +31,6 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
   disabled = false,
-  stale = false,
   testID,
 }: ConfirmDialogProps): React.ReactNode {
   if (!visible) return null;
@@ -58,11 +54,6 @@ export function ConfirmDialog({
         >
           <Text style={{ ...textStyle('h2'), color: SEMANTIC.text.primary }}>{title}</Text>
           <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary }}>{message}</Text>
-          {stale ? (
-            <Text style={captionStyle.caption} testID={testID ? `${testID}-stale` : undefined}>
-              Pending sync
-            </Text>
-          ) : null}
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: SPACE[3] }}>
             <Button label="Cancel" variant="secondary" onPress={onCancel} disabled={disabled} />
             <Button

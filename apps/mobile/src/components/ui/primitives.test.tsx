@@ -35,16 +35,11 @@ describe('Select', () => {
     await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} disabled testID="sel" />);
     await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} loading testID="sel" />);
     await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} errorText="Pick one" testID="sel" />);
-    await mount(<Select label="Role" value="te" options={opts} onSelect={() => {}} stale testID="sel" />);
   });
   it('shows the selected label, not a placeholder, once chosen', async () => {
     const r = await mount(<Select label="Role" value="te" options={opts} onSelect={() => {}} testID="sel" />);
     expect(allText(toJson(r))).toContain('Technician');
     expect(allText(toJson(r))).not.toContain('Select');
-  });
-  it('stale carries Pending sync', async () => {
-    const r = await mount(<Select label="Role" value="te" options={opts} onSelect={() => {}} stale testID="sel" />);
-    expect(allText(toJson(r))).toContain('Pending sync');
   });
 });
 
@@ -61,11 +56,6 @@ describe('DatePicker', () => {
     await mount(<DatePicker label="Date" value={null} onChange={() => {}} disabled testID="dp" />);
     await mount(<DatePicker label="Date" value={null} onChange={() => {}} loading testID="dp" />);
     await mount(<DatePicker label="Date" value={null} onChange={() => {}} errorText="Pick a date" testID="dp" />);
-    await mount(<DatePicker label="Date" value="2026-03-14" onChange={() => {}} stale testID="dp" />);
-  });
-  it('stale carries Pending sync', async () => {
-    const r = await mount(<DatePicker label="Date" value="2026-03-14" onChange={() => {}} stale testID="dp" />);
-    expect(allText(toJson(r))).toContain('Pending sync');
   });
 });
 
@@ -125,10 +115,6 @@ describe('Banner', () => {
     expect(texts).toContain('Retry');
     expect(texts).toContain('Details');
   });
-  it('stale banner carries Pending sync', async () => {
-    const r = await mount(<Banner tone="warning" message="queued" stale testID="b" />);
-    expect(allText(toJson(r))).toContain('Pending sync');
-  });
 });
 
 describe('Skeleton', () => {
@@ -172,10 +158,6 @@ describe('EmptyState', () => {
     const r = await mount(<EmptyState message="Nothing needs attention" testID="es" />);
     expect(allText(toJson(r))).toEqual(['Nothing needs attention']);
   });
-  it('stale carries Pending sync', async () => {
-    const r = await mount(<EmptyState message="No jobs" stale testID="es" />);
-    expect(allText(toJson(r))).toContain('Pending sync');
-  });
 });
 
 describe('ConfirmDialog', () => {
@@ -210,20 +192,5 @@ describe('ConfirmDialog', () => {
       />,
     );
     expect(allText(toJson(r))).toContain('Unavailable while the server is unreachable');
-  });
-  it('stale carries Pending sync', async () => {
-    const r = await mount(
-      <ConfirmDialog
-        visible
-        title="Void offline job?"
-        message="Created while offline."
-        confirmLabel="Void job"
-        onCancel={() => {}}
-        onConfirm={() => {}}
-        stale
-        testID="cd"
-      />,
-    );
-    expect(allText(toJson(r))).toContain('Pending sync');
   });
 });
