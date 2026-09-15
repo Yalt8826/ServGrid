@@ -168,7 +168,7 @@ let db: Pool;
 let app: FastifyInstance;
 let config: Config;
 
-async function seedEmployee(role: 'dispatcher' | 'owner', who: Actor): Promise<void> {
+async function seedEmployee(role: 'dispatcher' | 'owner' | 'technician', who: Actor): Promise<void> {
   const username = `ml.${role}.${randomBytes(4).toString('hex')}`;
   const r = await db.query<{ id: string }>(
     `INSERT INTO employees (username, password_hash, full_name, role)
@@ -201,6 +201,7 @@ async function seedJob(overrides: {
   status?: string;
   scheduledFor?: string | null;
   closedAt?: string | null;
+  assignedTo?: string;
 }): Promise<string> {
   const status = overrides.status ?? 'assigned';
   const r = await db.query<{ id: string }>(
@@ -212,7 +213,7 @@ async function seedJob(overrides: {
       customerId,
       serviceId,
       status,
-      status === 'unassigned' ? null : techId,
+      status === 'unassigned' ? null : (overrides.assignedTo ?? techId),
       status === 'unassigned' ? null : new Date().toISOString(),
       overrides.scheduledFor ?? null,
       overrides.closedAt ?? null,
@@ -244,6 +245,9 @@ function bearer(actor: Actor): Record<string, string> {
 let customerId = '';
 let serviceId = '';
 let techId = '';
+/** A technician who can log in, and his completed job — the online timeline's reader (TON.1). */
+const FIELD_TECH: Actor = { username: '', id: '', token: '' };
+let fieldJobId = '';
 /** doneJobId is completed WITH money; the others are open, for the write paths. */
 let doneJobId = '';
 let cancelJobId = '';
@@ -330,6 +334,18 @@ beforeAll(async () => {
   assignJobId = await seedJob({ status: 'unassigned' });
   bulkJobId1 = await seedJob({ status: 'assigned' });
   bulkJobId2 = await seedJob({ status: 'unassigned' });
+
+  // TON.1: the technician now reads his own job's timeline online. His
+  // completed job carries every money column and an amended event whose
+  // stored payload is the money's before/after pair.
+  await seedEmployee('technician', FIELD_TECH);
+  fieldJobId = await seedJob({ status: 'completed', closedAt: new Date().toISOString(), assignedTo: FIELD_TECH.id });
+  await seedCompletion(fieldJobId, FIELD_TECH.id);
+  await db.query(
+    `INSERT INTO job_events (job_card_id, event_type, actor_id, occurred_at, from_status, to_status, source, payload)
+     VALUES ($1, 'completion_amended', $2, $3, 'completed', 'completed', 'web', $4::jsonb)`,
+    [fieldJobId, OWNER.id, new Date().toISOString(), JSON.stringify({ reason: 'typo', cost: { from: '9000.00', to: '900.00' } })],
+  );
 });
 
 afterAll(async () => {
@@ -665,6 +681,33 @@ describe('the walk — no dispatcher payload carries money at any depth', () => 
     expect(res.statusCode).toBe(404);
     const parsed = errorEnvelopeSchema.parse(JSON.parse(res.body)) as unknown as ErrorEnvelope;
     expect(parsed.error.requestId).toMatch(ULID);
+    const hits: string[] = [];
+    walkKeys(parsed, '$', hits);
+    expect(hits).toEqual([]);
+  });
+});
+
+describe('the technician’s own timeline carries no money either (TON.1)', () => {
+  it('GET /v1/jobs/:id/events as the technician on the job — recursed, the amended payload redacted', async () => {
+    const res = await app.inject({ method: 'GET', url: `/v1/jobs/${fieldJobId}/events`, headers: bearer(FIELD_TECH) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body.events) && body.events.length > 0, 'the fixture trail is non-empty').toBe(true);
+
+    const hits: string[] = [];
+    walkKeys(body, '$', hits);
+    expect(hits, `money keys leaked in the technician's timeline: ${hits.join(', ')}`).toEqual([]);
+    expect(body).not.toHaveProperty('completion');
+    const amended = body.events.find((e: { eventType: string }) => e.eventType === 'completion_amended');
+    expect(JSON.stringify(amended.payload)).not.toContain('9000.00');
+    expect(amended.payload).toMatchObject({ redacted: expect.any(String) });
+  });
+
+  it('another technician’s job is refused, and the refusal carries no money', async () => {
+    const res = await app.inject({ method: 'GET', url: `/v1/jobs/${doneJobId}/events`, headers: bearer(FIELD_TECH) });
+    expect(res.statusCode, res.body).toBe(403);
+    const parsed = errorEnvelopeSchema.parse(JSON.parse(res.body)) as unknown as ErrorEnvelope;
+    expect(parsed.error.code).toBe('OUT_OF_SCOPE');
     const hits: string[] = [];
     walkKeys(parsed, '$', hits);
     expect(hits).toEqual([]);

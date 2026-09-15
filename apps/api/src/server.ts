@@ -29,7 +29,7 @@ import { jobsRoutes } from './modules/jobs/routes.js';
 import { locationRoutes } from './modules/location/routes.js';
 import { paymentsRoutes } from './modules/payments/routes.js';
 import { salesRoutes } from './modules/sales/routes.js';
-import { syncRoutes } from './modules/sync/routes.js';
+import { technicianRoutes } from './modules/technician/routes.js';
 
 /**
  * The Fastify instance (PLAN-BACKEND.md §2 server.ts): plugin
@@ -140,7 +140,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(catalogRoutes);
   app.register(devicesRoutes);
   app.register(locationRoutes, { workWindow: config.workWindow });
-  app.register(syncRoutes);
+  app.register(technicianRoutes);
   app.register(cashRoutes);
   app.register(salesRoutes);
   app.register(paymentsRoutes);

@@ -26,8 +26,8 @@ import { ULID, validEnv } from '../helpers/env.js';
  *    `/auth/me` answer and nothing else changes;
  *  - the flip is owner-only on the employee-admin matrix cells, refuses
  *    unknown flags and unknown employees loudly;
- *  - `tech.offline` off closes the sync doors with 409 FLAG_DISABLED —
- *    "online-only, queued items preserved";
+ *  - `tech.jobs` off closes the technician's work read with 409
+ *    FLAG_DISABLED, and on opens it;
  *  - `tech.location` off makes ping ingest answer 200 with every ping
  *    rejected DISABLED, so a handset clears its buffer instead of
  *    retrying forever.
@@ -170,13 +170,13 @@ describe('evaluation — the override rides /auth/me', () => {
     expect(flip.statusCode, flip.body).toBe(200);
     expect(flip.json().employeeId).toBe(TECH.id);
     expect(flip.json().flags['tech.jobs']).toBe(true);
-    expect(flip.json().flags['tech.offline']).toBe(false); // untouched flags stay off
+    expect(flip.json().flags['tech.location']).toBe(false); // untouched flags stay off
 
     const me = await getMe(TECH.token);
     expect(me.statusCode, me.body).toBe(200);
     const flags = featureFlagsSchema.parse(me.json().featureFlags);
     expect(flags['tech.jobs']).toBe(true);
-    expect(flags['tech.offline']).toBe(false);
+    expect(flags['tech.location']).toBe(false);
 
     // The owner is a different employee: his own evaluation is untouched.
     const mine = await getMe(OWNER.token);
@@ -223,25 +223,27 @@ describe('the flip is guarded', () => {
 });
 
 describe('the T0 rollback gates', () => {
-  it('tech.offline off closes the sync doors with FLAG_DISABLED, on opens them', async () => {
-    // Defaulted off: the mirror's door is closed until the owner names this technician.
+  it('tech.jobs off closes the technician work read with FLAG_DISABLED, on opens it', async () => {
+    // The evaluation test above switched it on; the owner switches it back off.
+    const off = await putFlag(OWNER.token, TECH.id, 'tech.jobs', false);
+    expect(off.statusCode, off.body).toBe(200);
     const closed = await app.inject({
       method: 'GET',
-      url: '/v1/sync/bootstrap',
+      url: '/v1/technician/work',
       headers: { authorization: `Bearer ${TECH.token}` },
     });
     expect(closed.statusCode).toBe(409);
     expect(envelopeOf(closed.statusCode, closed.body).code).toBe('FLAG_DISABLED');
 
-    const open = await putFlag(OWNER.token, TECH.id, 'tech.offline', true);
+    const open = await putFlag(OWNER.token, TECH.id, 'tech.jobs', true);
     expect(open.statusCode, open.body).toBe(200);
 
-    const bootstrap = await app.inject({
+    const work = await app.inject({
       method: 'GET',
-      url: '/v1/sync/bootstrap',
+      url: '/v1/technician/work',
       headers: { authorization: `Bearer ${TECH.token}` },
     });
-    expect(bootstrap.statusCode, bootstrap.body).toBe(200);
+    expect(work.statusCode, work.body).toBe(200);
   });
 
   it('tech.location off rejects every ping DISABLED over HTTP 200 — the buffer clears', async () => {

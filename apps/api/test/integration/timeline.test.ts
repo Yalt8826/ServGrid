@@ -233,10 +233,14 @@ describe('GET /v1/jobs/:id/events — the dispatcher read', () => {
 });
 
 describe('GET /v1/jobs/:id/events — who may read it', () => {
-  it('a technician is 403 — his trail comes from his mirror', async () => {
+  it('the technician on the job reads its trail, without the completion block (online-only, TON.1)', async () => {
+    // His trail used to come from his own outbox; with nothing stored on
+    // the handset he reads the server's, in the dispatcher's money-free
+    // shape. Another technician's job is OUT_OF_SCOPE (technician-work.test.ts).
     const res = await app.inject({ method: 'GET', url: `/v1/jobs/${jobId}/events`, headers: bearer(TECH) });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error.code).toBe('FORBIDDEN');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(Array.isArray(res.json().events)).toBe(true);
+    expect(res.json()).not.toHaveProperty('completion');
   });
 
   it('a sales rep is 403', async () => {

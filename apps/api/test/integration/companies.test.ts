@@ -5,12 +5,9 @@ import type { FastifyInstance } from 'fastify';
 import {
   CompanySchema,
   errorEnvelopeSchema,
-  syncBatchResponseSchema,
   type CompanyRecord,
   type ErrorEnvelope,
   type LoginResponse,
-  type SyncBatchResponse,
-  type SyncOperation,
 } from '@servgrid/shared';
 import { loadConfig, type Config } from '../../src/config.js';
 import { closePool } from '../../src/db/pool.js';
@@ -30,12 +27,12 @@ import { ULID, validEnv } from '../helpers/env.js';
  *   "already exists" must be able to see WHICH account (§11.1's contracts
  *   reasoning). An INACTIVE duplicate is allowed: deactivation is what
  *   releases the name for re-entry.
- * - **Two reps creating the same company OFFLINE is the ordinary
- *   collision of a shared territory** — the first drain applies; the
- *   second comes back `rejected` (a batch outcome — the op ran through
- *   the real stack and its own route's rbac) with DUPLICATE_ENTITY and
- *   `details.existing` naming the row that beat it, and exactly one row
- *   exists at the end.
+ * - **Two reps creating the same company is the ordinary collision of a
+ *   shared territory** — the first create applies; the second is refused
+ *   at submit time with DUPLICATE_ENTITY and `details.existing` naming the
+ *   row that beat it, and exactly one row exists at the end. (Online-only
+ *   since 2026-09-15: this used to arrive later, as a drained outbox
+ *   rejection.)
  */
 
 function databaseUrl(): string {
@@ -66,7 +63,7 @@ let db: Pool;
 let app: FastifyInstance;
 let config: Config;
 
-async function seedEmployee(role: 'owner' | 'sales_rep', who: Actor, offline = false): Promise<void> {
+async function seedEmployee(role: 'owner' | 'sales_rep', who: Actor): Promise<void> {
   const username = `comp.${role}.${randomBytes(4).toString('hex')}`;
   const r = await db.query<{ id: string }>(
     `INSERT INTO employees (username, password_hash, full_name, role)
@@ -75,15 +72,6 @@ async function seedEmployee(role: 'owner' | 'sales_rep', who: Actor, offline = f
   );
   who.id = r.rows[0]!.id;
   who.username = username;
-  if (offline) {
-    // The offline tier ships dark (PLAN-EXECUTION.md §3): the suite turns
-    // it on for the rep who drains an outbox, the way the owner's flip
-    // would — the flag mechanics themselves are flags.test.ts's subject.
-    await db.query(
-      `INSERT INTO employee_flag_overrides (employee_id, flag, enabled) VALUES ($1, 'tech.offline', true)`,
-      [who.id],
-    );
-  }
   const res = await app.inject({
     method: 'POST',
     url: '/v1/auth/login',
@@ -119,33 +107,6 @@ function errorOf(status: number, body: string): ErrorEnvelope['error'] {
   return error;
 }
 
-/** One queued outbox create, verbatim from the handset shape (§7). */
-function offlineCreate(localId: string, payload: Record<string, unknown>): SyncOperation {
-  return {
-    localId,
-    idempotencyKey: randomUUID(),
-    method: 'POST',
-    path: '/v1/companies',
-    body: payload,
-  };
-}
-
-function randomUUID(): string {
-  const hex = randomBytes(16).toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-async function drain(actor: Actor, operations: SyncOperation[]): Promise<SyncBatchResponse> {
-  const res = await app.inject({
-    method: 'POST',
-    url: '/v1/sync/batch',
-    headers: { ...bearer(actor), 'x-client-source': 'mobile' },
-    payload: { operations },
-  });
-  expect(res.statusCode, res.body).toBe(200);
-  return syncBatchResponseSchema.parse(res.json());
-}
-
 beforeAll(async () => {
   admin = new Pool({ connectionString: adminUrlFor(databaseUrl()), max: 2 });
   await admin.query(`DROP DATABASE IF EXISTS ${SCRATCH_DB} WITH (FORCE)`);
@@ -163,7 +124,7 @@ beforeAll(async () => {
 
   await seedEmployee('owner', OWNER);
   await seedEmployee('sales_rep', REP_A);
-  await seedEmployee('sales_rep', REP_B, true); // REP_B drains an outbox below
+  await seedEmployee('sales_rep', REP_B);
 });
 
 afterAll(async () => {
@@ -218,41 +179,32 @@ describe('the name rule — case-insensitive unique among active rows', () => {
   });
 });
 
-describe('two reps create the same company offline', () => {
-  it('the first drain applies; the second is rejected DUPLICATE_ENTITY with details.existing — and exactly one row exists', async () => {
+describe('two reps create the same company', () => {
+  it('the first create applies; the second is refused DUPLICATE_ENTITY with details.existing — and exactly one row exists', async () => {
     const suffix = randomBytes(3).toString('hex');
     const shared = {
       name: `Integr Gamma Enterprises ${suffix}`,
       city: 'Bengaluru',
     };
 
-    // Rep A's create reaches the server first (his device synced at the
-    // office wifi); he owns the row the moment it exists.
-    const online = await createCompany(REP_A, shared);
-    expect(online.statusCode, online.body).toBe(200);
-    const serverRow = CompanySchema.parse(JSON.parse(online.body)) as CompanyRecord;
+    // Rep A's create reaches the server first; he owns the row the moment it exists.
+    const first = await createCompany(REP_A, shared);
+    expect(first.statusCode, first.body).toBe(200);
+    const serverRow = CompanySchema.parse(JSON.parse(first.body)) as CompanyRecord;
     expect(serverRow.ownerRepId).toBe(REP_A.id);
 
-    // Rep B queued the identical create offline; the drain re-runs it
-    // through the real stack, his credentials, the create route's own rbac.
-    const batch = await drain(REP_B, [
-      // ...and a create nobody conflicts with proves the door itself works.
-      offlineCreate('l_01', { name: `Integr Delta Traders ${suffix}`, phone: '9847000001' }),
-      offlineCreate('l_02', shared),
-    ]);
+    // Rep B's own new account applies and is his...
+    const unrelated = await createCompany(REP_B, { name: `Integr Delta Traders ${suffix}`, phone: '9847000001' });
+    expect(unrelated.statusCode, unrelated.body).toBe(200);
+    expect((CompanySchema.parse(JSON.parse(unrelated.body)) as CompanyRecord).ownerRepId).toBe(REP_B.id);
 
-    const applied = batch.results.find((r) => r.localId === 'l_01')!;
-    expect(applied.outcome).toBe('applied');
-    expect(applied.status).toBe(200);
-    const appliedRow = CompanySchema.parse(applied.body) as CompanyRecord;
-    expect(appliedRow.ownerRepId).toBe(REP_B.id); // the drain ran as rep B
-
-    const rejected = batch.results.find((r) => r.localId === 'l_02')!;
-    expect(rejected.outcome).toBe('rejected');
-    expect(rejected.status).toBe(409);
-    expect(rejected.error!.code).toBe('DUPLICATE_ENTITY');
-    // The verdict carries the server's row: which account beat him, whose it is.
-    const existing = CompanySchema.parse((rejected.error!.details as { existing: unknown }).existing) as CompanyRecord;
+    // ...and the identical name is refused while he is still on the form.
+    const second = await createCompany(REP_B, shared);
+    expect(second.statusCode, second.body).toBe(409);
+    const refusal = errorOf(second.statusCode, second.body);
+    expect(refusal.code).toBe('DUPLICATE_ENTITY');
+    // The refusal carries the server's row: which account beat him, whose it is.
+    const existing = CompanySchema.parse((refusal.details as { existing: unknown }).existing) as CompanyRecord;
     expect(existing.id).toBe(serverRow.id);
     expect(existing.ownerRepId).toBe(REP_A.id);
 

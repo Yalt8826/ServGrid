@@ -12,7 +12,6 @@
  */
 export const FEATURE_FLAGS = [
   'tech.jobs', // 1 — technician job screens and completion
-  'tech.offline', // 1 — SQLite mirror and outbox; off means online-only, queued items preserved
   'tech.location', // 1 — background tracking task and ping ingest
   'tech.notifications', // 2 — assignment pushes and local notifications
   'dispatch.console', // 2 — dispatcher dashboard, dispatch form, job logs
