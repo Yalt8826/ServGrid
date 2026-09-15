@@ -455,7 +455,7 @@ Sales tables are additive; a rollback to Phase 2 leaves them unwritten.
 
 **Entry — one blocking item, one already cleared:**
 
-1. **Map tile source decided** (`PLAN-FRONTEND.md` open item 2) — self-hosted raster vs. a free tier with attribution obligations.
+1. ~~**Map tile source decided**~~ — **cleared 2026-09-15**: hosted OpenStreetMap tiles from MapTiler (`PLAN-FRONTEND.md` open item 2, TON.8).
 2. FCM was the second blocker here. It is now proven in Phase 0 and in production use since Phase 2, so *Locate now* inherits a channel that has been carrying assignment notifications for two phases. That is a straightforward gain from moving it early: the riskiest part of on-demand location is no longer new.
 
 And one assessment, made at phase start, not mid-phase: **does React Native Web carry the `DataTable` and rail acceptably?** Spike it in the first three days. If not, fork a thin React web app sharing `packages/shared` and budget **+2 weeks** (`PLAN-FRONTEND.md` open item 5). Deciding this on day 3 is cheap; discovering it in week 4 is not.
@@ -560,7 +560,7 @@ The last column is dropped frames scrolling 200 Job Logs rows (`UI/plan-2/02-MOT
 | Contract shape: customer or company; skipped-visit rule | **Phase 2B start** | Restructuring after visits exist means rewriting generated history |
 | Rep account allocation agreed | Phase 3 start | Ownership is a column; the split is a business decision |
 | ~~Outbox generalises unchanged~~ | — | Moot: every role online since 2026-09-15 |
-| Map tile source decided | Phase 4 start | |
+| Map tile source decided | Phase 4 start | **Cleared 2026-09-15** — MapTiler |
 | RNW carries DataTable + rail | Phase 4 day 3 | Fails → fork thin React web, +2 weeks |
 | Full OEM matrix filled | Phase 5 exit | |
 
