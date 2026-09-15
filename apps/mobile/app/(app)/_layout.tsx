@@ -63,7 +63,6 @@ export default function AppLayout() {
               <Stack.Screen name="companies/[id]" />
               <Stack.Screen name="contracts/index" />
               <Stack.Screen name="contracts/new" />
-              <Stack.Screen name="contracts/renewals" />
               <Stack.Screen name="contracts/[id]" />
               <Stack.Screen name="products/index" />
               <Stack.Screen name="products/[id]" />
