@@ -74,10 +74,14 @@ export async function upsertDeviceWithDiagnostics(db: Db, d: DeviceRegistration)
        failure_reason = CASE
          WHEN EXCLUDED.fcm_token IS NOT NULL THEN NULL
          ELSE devices.failure_reason END,
-       location_permission = COALESCE(EXCLUDED.location_permission, devices.location_permission),
-       battery_opt_exempt = COALESCE(EXCLUDED.battery_opt_exempt, devices.battery_opt_exempt),
-       autostart_confirmed = COALESCE(EXCLUDED.autostart_confirmed, devices.autostart_confirmed),
-       notifications_enabled = COALESCE(EXCLUDED.notifications_enabled, devices.notifications_enabled),
+       -- The RAW parameters, not EXCLUDED: EXCLUDED carries the VALUES
+       -- row, where a first-sight default has already turned "omitted"
+       -- into false / 'none', so COALESCE against it never kept anything —
+       -- a notifications-only post reset location_permission to 'none'.
+       location_permission = COALESCE($8::device_location_permission, devices.location_permission),
+       battery_opt_exempt = COALESCE($9::bool, devices.battery_opt_exempt),
+       autostart_confirmed = COALESCE($10::bool, devices.autostart_confirmed),
+       notifications_enabled = COALESCE($11::bool, devices.notifications_enabled),
        last_seen_at = now()
      RETURNING id, install_id, manufacturer, model, os_version, app_version,
                location_permission, battery_opt_exempt, autostart_confirmed,
@@ -97,4 +101,15 @@ export async function upsertDeviceWithDiagnostics(db: Db, d: DeviceRegistration)
     ],
   );
   return r.rows[0]!;
+}
+
+/** The session's own device row, or null — the ladder reads back the two
+ * steps Android cannot report (`GET /v1/devices/me`). Scoped by employee
+ * too, so a device id can never name someone else's row. */
+export async function findOwnDevice(db: Db, employeeId: string, deviceId: string): Promise<DeviceRow | null> {
+  const r = await db.query<DeviceRow>(
+    `SELECT * FROM devices WHERE employee_id = $1 AND id = $2`,
+    [employeeId, deviceId],
+  );
+  return r.rows[0] ?? null;
 }

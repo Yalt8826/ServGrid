@@ -9,11 +9,11 @@
  *
  * `expo-notifications` / `expo-task-manager` are not installed yet (they
  * land with the FCM Google project — T0.15 runbook step 2), so both are
- * module-mocked here. `react-native`, AsyncStorage and the zustand
+ * module-mocked here. `react-native` and the zustand
  * session store run through the real vitest stubs/config.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearPendingToken, loadPendingToken, savePendingToken } from './pendingToken';
 import * as RN from 'react-native';
 
 /** The slice of a notification our code touches. */
@@ -112,7 +112,7 @@ beforeEach(() => {
 afterEach(() => {
   useSessionStore.getState().setAnonymous();
   RN.Platform.OS = 'android';
-  return AsyncStorage.clear();
+  return clearPendingToken();
 });
 
 describe('acquirePushToken — the token gate', () => {
@@ -128,13 +128,13 @@ describe('acquirePushToken — the token gate', () => {
     notif.getDevicePushTokenAsync.mockRejectedValue(new Error('no play services'));
     await expect(acquirePushToken()).resolves.toBeNull();
     expect(fakeApi.api.request).not.toHaveBeenCalled();
-    await expect(AsyncStorage.getItem('servgrid.pushToken.v1')).resolves.toBeNull();
+    await expect(loadPendingToken()).resolves.toBeNull();
   });
 
   it('anonymous: token is parked, API is NOT called, result is null', async () => {
     useSessionStore.getState().setAnonymous();
     await expect(acquirePushToken()).resolves.toBeNull();
-    await expect(AsyncStorage.getItem('servgrid.pushToken.v1')).resolves.toBe(TOKEN);
+    await expect(loadPendingToken()).resolves.toBe(TOKEN);
     expect(fakeApi.api.request).not.toHaveBeenCalled();
   });
 
@@ -144,20 +144,20 @@ describe('acquirePushToken — the token gate', () => {
     expect(fakeApi.api.request).toHaveBeenCalledWith('POST', '/v1/devices/push-token', {
       body: { token: TOKEN, platform: 'android' },
     });
-    await expect(AsyncStorage.getItem('servgrid.pushToken.v1')).resolves.toBe(TOKEN);
+    await expect(loadPendingToken()).resolves.toBe(TOKEN);
   });
 
   it('registration failing leaves the token parked and does not throw', async () => {
     useSessionStore.getState().setAuthenticated(ACTOR);
     fakeApi.api.request.mockResolvedValue(apiResult(false));
     await expect(acquirePushToken()).resolves.toBeNull();
-    await expect(AsyncStorage.getItem('servgrid.pushToken.v1')).resolves.toBe(TOKEN);
+    await expect(loadPendingToken()).resolves.toBe(TOKEN);
   });
 });
 
 describe('registerPendingPushToken — parked token ships after login', () => {
   it('ships a parked token once a session exists', async () => {
-    await AsyncStorage.setItem('servgrid.pushToken.v1', TOKEN);
+    await savePendingToken(TOKEN);
     useSessionStore.getState().setAuthenticated(ACTOR);
     await registerPendingPushToken();
     expect(fakeApi.api.request).toHaveBeenCalledWith('POST', '/v1/devices/push-token', {
@@ -172,18 +172,18 @@ describe('registerPendingPushToken — parked token ships after login', () => {
   });
 
   it('anonymous never POSTs, even with a token parked', async () => {
-    await AsyncStorage.setItem('servgrid.pushToken.v1', TOKEN);
+    await savePendingToken(TOKEN);
     useSessionStore.getState().setAnonymous();
     await registerPendingPushToken();
     expect(fakeApi.api.request).not.toHaveBeenCalled();
   });
 
   it('a failed POST keeps the token parked for the next attempt', async () => {
-    await AsyncStorage.setItem('servgrid.pushToken.v1', TOKEN);
+    await savePendingToken(TOKEN);
     useSessionStore.getState().setAuthenticated(ACTOR);
     fakeApi.api.request.mockResolvedValue(apiResult(false));
     await expect(registerPendingPushToken()).resolves.toBeUndefined();
-    await expect(AsyncStorage.getItem('servgrid.pushToken.v1')).resolves.toBe(TOKEN);
+    await expect(loadPendingToken()).resolves.toBe(TOKEN);
   });
 });
 

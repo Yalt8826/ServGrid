@@ -9,10 +9,10 @@
  *
  * - health comes from the self-scoped view read (`/v1/location/health/me`,
  *   T1.12) — real view data, never a stored state;
- * - the four ladder rows are judged by OS truth plus the same local
- *   records the ladder writes (`AsyncStorage` flags for the two steps
- *   Android cannot read back), so the rows and the ladder can never
- *   disagree;
+ * - the four ladder rows are judged by OS truth plus the same server
+ *   record the ladder writes (the device row's battery and autostart
+ *   diagnostics, `GET /v1/devices/me`), so the rows and the ladder can
+ *   never disagree — and nothing is remembered on the phone;
  * - the chip's red/amber taps navigate to the ladder, which opens at the
  *   failed step by its own probe — a stored hint can lie, the probe
  *   cannot;
@@ -34,7 +34,6 @@
  * are not tracked.
  */
 import { useEffect, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
@@ -45,6 +44,7 @@ import { AppState, Text, View, StyleSheet } from 'react-native';
 import type { AuthMeResponse, TrackingHealth } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
 import { api } from '../../../src/lib/api';
+import { loadMyDevice } from '../../../src/lib/myDevice';
 import { matchAutostartVendor } from '../../../src/location/autostart';
 import { ProfileScreen, type LadderRowState } from '../../../src/screens/technician/ProfileScreen';
 import { DispatcherProfileScreen } from '../../../src/screens/dispatcher/profile';
@@ -53,22 +53,9 @@ import { useOtherOwners } from '../../../src/screens/owner/useOwnerData';
 import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
-/** Same keys, same semantics, as the ladder route — one memory between
- * the two screens, or the rows would contradict the ladder. */
-const BATTERY_FLAG_KEY = 'servgrid.ladder.batteryExempt';
-const AUTOSTART_FLAG_KEY = 'servgrid.ladder.autostartConfirmed';
-
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
-
-async function readFlag(key: string): Promise<boolean> {
-  try {
-    return (await AsyncStorage.getItem(key)) === '1';
-  } catch {
-    return false;
-  }
-}
 
 function TechnicianProfileRoute(): React.ReactNode {
   const router = useRouter();
@@ -84,10 +71,11 @@ function TechnicianProfileRoute(): React.ReactNode {
     } catch {
       // Unreadable OS truth renders as not-granted, never as a crash.
     }
-    const [battery, autostart] = await Promise.all([
-      readFlag(BATTERY_FLAG_KEY),
-      readFlag(AUTOSTART_FLAG_KEY),
-    ]);
+    // The same server record the ladder writes — one memory between the
+    // two screens, or the rows would contradict the ladder.
+    const device = await loadMyDevice();
+    const battery = device?.batteryOptExempt === true;
+    const autostart = device?.autostartConfirmed === true;
     return [
       {
         step: 1,

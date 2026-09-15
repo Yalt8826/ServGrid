@@ -58,6 +58,12 @@ module.exports = {
         'servgrid-rules/no-sql-money-tables': ['error', ['repo.dispatcher.ts']],
         // Rule 3 — location.health / location.read split.
         'servgrid-rules/no-sql-location-tables': ['error', ['repo.dispatcher.ts']],
+        // Rule 4 — nothing stored on the phone but the login token and the
+        // GPS buffer (docs/decisions/2026-09-15-online-only.md).
+        'servgrid-rules/no-device-storage': [
+          'error',
+          ['tokenStore.impl.native.ts', 'tokenStore.impl.web.ts', 'bufferStore.native.ts', 'legacyMirrorCleanup.native.ts'],
+        ],
       },
     },
   ],

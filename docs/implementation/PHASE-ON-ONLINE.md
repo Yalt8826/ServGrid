@@ -154,7 +154,8 @@ TON.8 map tiles (blocked on the owner's MapTiler key)
 **Depends on:** TON.2 · **Parallel with:** TON.3 · **Tier:** T3 (batched with TON.2's APK)
 
 **Build**
-- Permission-ladder flags (`batteryExempt`, `autostartConfirmed`) are written to the server's device diagnostics (`POST /v1/devices`) and read back from the server; no local copy.
+- Permission-ladder flags (`batteryExempt`, `autostartConfirmed`) are written to the server's device diagnostics (`POST /v1/devices`) and read back through a new `GET /v1/devices/me` (the device the access token was issued for at login); no local copy.
+- The one-time cleanup also deletes the old AsyncStorage database files (`RKStorage`), since the package that could clear its keys is gone.
 - The parked FCM token lives in memory until a session exists.
 - Remove `@react-native-async-storage/async-storage`.
 - `tools/eslint-plugin-servgrid-rules` gains **`no-device-storage`**: importing `expo-sqlite`, `expo-secure-store`, `@react-native-async-storage/async-storage`, or `localStorage` access, outside `src/lib/tokenStore.impl.*` and `src/location/bufferStore.native.ts`, is an error. Proven by a firing fixture and a clean fixture in `lint-proof.mjs`, like the other rules.
