@@ -50,7 +50,7 @@ describe('component gallery — the enforceable deliverable', () => {
   it('covers every state label for every primitive section', async () => {
     const r = await create(<GalleryRoute />);
     const texts = allText(toJson(r));
-    // The gallery labels each state block; the eight state names appear
+    // The gallery labels each state block; the seven state names appear
     // across the Button and field sections at minimum.
     for (const s of STATES) {
       expect(texts, `state "${s}" labelled somewhere in the gallery`).toContain(s);
@@ -65,11 +65,9 @@ describe('component gallery — the enforceable deliverable', () => {
     }
   });
 
-  it('stale blocks carry the Pending sync caption', async () => {
+  it('no block carries a Pending sync caption — the stale state is retired (online-only)', async () => {
     const r = await create(<GalleryRoute />);
-    const texts = allText(toJson(r));
-    const count = texts.filter((t) => t === 'Pending sync').length;
-    expect(count).toBeGreaterThanOrEqual(3);
+    expect(allText(toJson(r))).not.toContain('Pending sync');
   });
 
   it('eleven primitives are represented by testIDs', async () => {

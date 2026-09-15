@@ -28,7 +28,6 @@ import {
 import Animated from 'react-native-reanimated';
 
 import { DURATION, EASING, formatMoneyEnIN, SEMANTIC } from '@servgrid/shared';
-import { staleInsetStyle } from '../../components/ui/uiBase';
 import { textStyle } from '../../fonts/textStyle';
 
 /** The figure cross-fade (§S1): `quick` — 140ms, opacity only. */
@@ -92,18 +91,12 @@ export function ledgerAmountOf(kind: 'sale' | 'payment', amount: string): string
  * One money figure with the change motion (§S1): 140ms opacity fade to
  * the new value, never a count-up. With reduced motion the value flips
  * immediately — movement is removed, the information is not.
- *
- * `stale` carries the dashed inset plus the `Pending sync` caption
- * (03-COMPONENTS.md). No screen sets it since the app went online-only
- * (2026-09-15); the design system's stale state is retired in TON.4b.
  */
 export function MoneyFigure({
   value,
-  stale = false,
   testID,
 }: {
   value: string;
-  stale?: boolean;
   testID?: string;
 }): React.ReactNode {
   const reduced = useReducedMotion();
@@ -129,17 +122,12 @@ export function MoneyFigure({
   const style = useAnimatedStyle(() => ({ opacity: fade.value }));
 
   return (
-    <View style={stale ? styles.staleInset : null} testID={stale ? `${testID}-stale` : testID}>
+    <View testID={testID}>
       <Animated.View style={style}>
         <Text style={styles.figure} testID={testID ? `${testID}-text` : undefined}>
           {value}
         </Text>
       </Animated.View>
-      {stale ? (
-        <Text style={styles.staleCaption} testID={testID ? `${testID}-pending` : undefined}>
-          Pending sync
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -150,10 +138,4 @@ const styles = StyleSheet.create({
     color: SEMANTIC.text.primary,
     fontVariant: ['tabular-nums'],
   },
-  staleCaption: {
-    ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
-    marginTop: 2,
-  },
-  staleInset: staleInsetStyle(),
 });

@@ -12,7 +12,6 @@ import Animated from 'react-native-reanimated';
 import { RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { haptic } from './haptics';
-import { staleInsetStyle } from './uiBase';
 import { useArrival } from './motion';
 
 export type BannerTone = 'danger' | 'warning' | 'success' | 'info';
@@ -24,8 +23,6 @@ export interface BannerProps {
   /** Up to two text actions. */
   actions?: { label: string; onPress: () => void }[];
   onDismiss?: () => void;
-  /** The surfaced row is local data the server has not confirmed. */
-  stale?: boolean;
   testID?: string;
 }
 
@@ -36,7 +33,7 @@ const TONE_COLOR: Record<BannerTone, string> = {
   info: SEMANTIC.feedback.info,
 };
 
-export function Banner({ tone, message, actions = [], onDismiss, stale = false, testID }: BannerProps): React.ReactNode {
+export function Banner({ tone, message, actions = [], onDismiss, testID }: BannerProps): React.ReactNode {
   const rail = TONE_COLOR[tone];
   // Drops from above with weight (spring.sheet, a hair of overshoot). The
   // only assertive motion in the product, and it earns it: the alternative
@@ -60,7 +57,6 @@ export function Banner({ tone, message, actions = [], onDismiss, stale = false, 
           paddingLeft: SPACE[3],
           paddingRight: SPACE[2],
         },
-        stale ? staleInsetStyle() : {},
         arrival,
       ]}
     >
@@ -84,11 +80,6 @@ export function Banner({ tone, message, actions = [], onDismiss, stale = false, 
           </Pressable>
         ) : null}
       </View>
-      {stale ? (
-        <Text style={{ ...textStyle('caption'), color: SEMANTIC.text.secondary, marginTop: SPACE[1] }}>
-          Pending sync
-        </Text>
-      ) : null}
     </Animated.View>
   );
 }

@@ -16,12 +16,10 @@ export interface EmptyStateProps {
   /** The next action — optional: an informational empty has none. */
   actionLabel?: string;
   onAction?: () => void;
-  /** The empty view reflects rows the server has not confirmed. */
-  stale?: boolean;
   testID?: string;
 }
 
-export function EmptyState({ message, actionLabel, onAction, stale = false, testID }: EmptyStateProps): React.ReactNode {
+export function EmptyState({ message, actionLabel, onAction, testID }: EmptyStateProps): React.ReactNode {
   return (
     <View testID={testID} style={{ alignItems: 'center', paddingVertical: SPACE[8], paddingHorizontal: SPACE[4] }}>
       <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary, textAlign: 'center' }}>
@@ -31,11 +29,6 @@ export function EmptyState({ message, actionLabel, onAction, stale = false, test
         <View style={{ marginTop: SPACE[4] }}>
           <Button label={actionLabel} variant="secondary" onPress={onAction} />
         </View>
-      ) : null}
-      {stale ? (
-        <Text style={{ marginTop: SPACE[2], ...textStyle('caption'), color: SEMANTIC.text.secondary }}>
-          Pending sync
-        </Text>
       ) : null}
     </View>
   );

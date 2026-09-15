@@ -94,11 +94,6 @@ describe('Button — renders in all eight states without throwing', () => {
     );
     expect(allText(toJson(r))).toContain('Retry');
   });
-
-  it('stale — dashed inset and Pending sync caption', async () => {
-    const r = await mount(<Button label="Save" stale testID="btn" />);
-    expect(allText(toJson(r))).toContain('Pending sync');
-  });
 });
 
 describe('Button contract — disabled always explains itself', () => {

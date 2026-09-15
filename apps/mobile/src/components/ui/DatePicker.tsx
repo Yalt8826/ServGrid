@@ -10,7 +10,7 @@ import { RADII, SEMANTIC, TAP } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
 import { haptic } from './haptics';
-import { captionStyle, staleInsetStyle } from './uiBase';
+import { captionStyle } from './uiBase';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -29,7 +29,6 @@ export interface DatePickerProps {
   errorText?: string;
   disabled?: boolean;
   loading?: boolean;
-  stale?: boolean;
   testID?: string;
 }
 
@@ -41,7 +40,6 @@ export function DatePicker({
   errorText,
   disabled = false,
   loading = false,
-  stale = false,
   testID,
 }: DatePickerProps): React.ReactNode {
   const density = useDensity();
@@ -49,7 +47,7 @@ export function DatePicker({
   const height = density === 'field' ? TAP.min : density === 'console' ? 44 : 36;
 
   return (
-    <View testID={testID} style={[{ alignSelf: 'stretch' }, stale ? staleInsetStyle() : {}]}>
+    <View testID={testID} style={{ alignSelf: 'stretch' }}>
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 }}>
         {label}
       </Text>
@@ -91,11 +89,6 @@ export function DatePicker({
         </Text>
       ) : helperText ? (
         <Text style={[captionStyle.caption, { marginTop: 4 }]}>{helperText}</Text>
-      ) : null}
-      {stale ? (
-        <Text style={[captionStyle.caption, { marginTop: 4 }]} testID={testID ? `${testID}-stale` : undefined}>
-          Pending sync
-        </Text>
       ) : null}
     </View>
   );

@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { formatMoneyEnIN, stripToNumeric, RADII, SEMANTIC, TAP } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
-import { captionStyle, staleInsetStyle } from './uiBase';
+import { captionStyle } from './uiBase';
 
 export interface MoneyFieldProps {
   label: string;
@@ -20,7 +20,6 @@ export interface MoneyFieldProps {
   helperText?: string;
   errorText?: string;
   disabled?: boolean;
-  stale?: boolean;
   testID?: string;
 }
 
@@ -31,7 +30,6 @@ export function MoneyField({
   helperText,
   errorText,
   disabled = false,
-  stale = false,
   testID,
 }: MoneyFieldProps): React.ReactNode {
   const density = useDensity();
@@ -45,7 +43,7 @@ export function MoneyField({
       : SEMANTIC.line.default;
 
   return (
-    <View testID={testID} style={[{ alignSelf: 'stretch' }, stale ? staleInsetStyle() : {}]}>
+    <View testID={testID} style={{ alignSelf: 'stretch' }}>
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 }}>
         {label}
       </Text>
@@ -85,11 +83,6 @@ export function MoneyField({
         </Text>
       ) : helperText ? (
         <Text style={[captionStyle.caption, { marginTop: 4 }]}>{helperText}</Text>
-      ) : null}
-      {stale ? (
-        <Text style={[captionStyle.caption, { marginTop: 4 }]} testID={testID ? `${testID}-stale` : undefined}>
-          Pending sync
-        </Text>
       ) : null}
     </View>
   );

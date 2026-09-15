@@ -7,8 +7,7 @@
  * sale* · OWES THE MOST · RENEWING SOON · RECENT PAYMENTS.
  *
  * The figures are the server's, read online — nothing waits on the phone
- * behind them (online-only, decision 2026-09-15), so they never carry a
- * `Pending sync` caption.
+ * behind them (online-only, decision 2026-09-15).
  *
  * Motion: figures cross-fade on change, 140ms (`MoneyFigure`). **No
  * count-up** — a money figure animating in front of a customer looks like

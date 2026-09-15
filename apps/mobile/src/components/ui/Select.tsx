@@ -1,8 +1,8 @@
 /**
  * `Select` (Phase-0 primitive list). A pressable summary row opening a
  * `Sheet` of options in production; Phase 0 renders the trigger in all
- * states and owns the selection contract (label, caption error, stale
- * inset). The chosen value renders as the summary, never a placeholder
+ * states and owns the selection contract (label, caption error). The
+ * chosen value renders as the summary, never a placeholder
  * once chosen.
  */
 import { Pressable, Text, View } from 'react-native';
@@ -12,7 +12,7 @@ import { RADII, SEMANTIC, TAP } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
 import { haptic } from './haptics';
-import { captionStyle, staleInsetStyle } from './uiBase';
+import { captionStyle } from './uiBase';
 
 export interface SelectOption {
   value: string;
@@ -28,7 +28,6 @@ export interface SelectProps {
   errorText?: string;
   disabled?: boolean;
   loading?: boolean;
-  stale?: boolean;
   testID?: string;
 }
 
@@ -41,7 +40,6 @@ export function Select({
   errorText,
   disabled = false,
   loading = false,
-  stale = false,
   testID,
 }: SelectProps): React.ReactNode {
   const density = useDensity();
@@ -50,7 +48,7 @@ export function Select({
   const selected = options.find((o) => o.value === value) ?? null;
 
   return (
-    <View testID={testID} style={[{ alignSelf: 'stretch' }, stale ? staleInsetStyle() : {}]}>
+    <View testID={testID} style={{ alignSelf: 'stretch' }}>
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 }}>
         {label}
       </Text>
@@ -94,11 +92,6 @@ export function Select({
         </Text>
       ) : helperText ? (
         <Text style={[captionStyle.caption, { marginTop: 4 }]}>{helperText}</Text>
-      ) : null}
-      {stale ? (
-        <Text style={[captionStyle.caption, { marginTop: 4 }]} testID={testID ? `${testID}-stale` : undefined}>
-          Pending sync
-        </Text>
       ) : null}
     </View>
   );
