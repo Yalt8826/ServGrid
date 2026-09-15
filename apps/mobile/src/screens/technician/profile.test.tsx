@@ -47,7 +47,6 @@ const ALL_DONE: LadderRowState[] = [
 interface Fakes {
   loadHealth: ReturnType<typeof vi.fn>;
   loadLadderRows: ReturnType<typeof vi.fn>;
-  retrySync: ReturnType<typeof vi.fn>;
   logout: ReturnType<typeof vi.fn>;
   openLadder: ReturnType<typeof vi.fn>;
   changePassword: ReturnType<typeof vi.fn>;
@@ -57,7 +56,6 @@ function fakes(overrides: Partial<ProfileDeps> = {}): { deps: ProfileDeps; f: Fa
   const f: Fakes = {
     loadHealth: vi.fn(async () => health({})),
     loadLadderRows: vi.fn(async () => ALL_DONE),
-    retrySync: vi.fn(),
     logout: vi.fn(),
     openLadder: vi.fn(),
     changePassword: vi.fn(),
@@ -67,7 +65,6 @@ function fakes(overrides: Partial<ProfileDeps> = {}): { deps: ProfileDeps; f: Fa
     role: 'Technician',
     appVersion: '1.2.0',
     deviceModel: 'Pixel 7',
-    pendingSyncCount: 0,
     subscribeForeground: () => () => {},
     ...f,
     ...overrides,
@@ -179,37 +176,16 @@ describe('ProfileScreen (§T7)', () => {
     }
   });
 
-  it('§ logout blocked with a queued row, and the count matches', async () => {
-    const gated = fakes({ pendingSyncCount: 3 });
-    const r = await create(<ProfileScreen {...gated.deps} />);
-    // The count is the message.
-    expect(allText(toJson(r))).toContain('3 items not yet synced');
-    // The button cannot act — its handler is not even wired while blocked.
-    await press(r, 'profile-logout');
-    expect(gated.f.logout).not.toHaveBeenCalled();
-    const logoutPressable = findAll(findByTestID(toJson(r), 'profile-logout')!, (n) => n.type === 'Pressable')[0]!;
-    expect(logoutPressable.props.accessibilityState).toMatchObject({ disabled: true });
-    expect(logoutPressable.props.onPress).toBeUndefined();
-    // The one offer is Retry now.
-    await press(r, 'profile-retry-sync');
-    expect(gated.f.retrySync).toHaveBeenCalledTimes(1);
-    // No confirm-and-lose path: no dialog exists on this screen.
-    expect(allText(toJson(r)).join(' | ').toLowerCase()).not.toContain('discard');
-    expect(allText(toJson(r)).join(' | ').toLowerCase()).not.toContain('are you sure');
-  });
-
-  it('§ logout proceeds when nothing is queued — rejected and failed rows never block', async () => {
-    // The contract: the count the route feeds excludes `rejected` and
-    // `failed` (kept deliberately). Zero here means exactly that — the
-    // end-of-shift technician is not trapped behind rows he has already
-    // seen and can never sync.
-    const open = fakes({ pendingSyncCount: 0 });
-    const r = await create(<ProfileScreen {...open.deps} />);
+  it('§ logout is one tap — nothing is ever queued on this phone (online-only)', async () => {
+    const { deps, f } = fakes();
+    const r = await create(<ProfileScreen {...deps} />);
     expect(findByTestID(toJson(r), 'profile-logout-gate')).toBeUndefined();
     expect(findByTestID(toJson(r), 'profile-retry-sync')).toBeUndefined();
+    expect(findByTestID(toJson(r), 'profile-pending-sync')).toBeUndefined();
     await press(r, 'profile-logout');
-    expect(open.f.logout).toHaveBeenCalledTimes(1);
-    expect(findByTestID(toJson(r), 'profile-pending-sync')).toBeDefined();
+    expect(f.logout).toHaveBeenCalledTimes(1);
+    // No confirm-and-lose path: no dialog exists on this screen.
+    expect(allText(toJson(r)).join(' | ').toLowerCase()).not.toContain('are you sure');
   });
 
   it('ladder rows render with individual state and Fix routes to the ladder', async () => {
@@ -263,14 +239,13 @@ describe('ProfileScreen (§T7)', () => {
     expect(findByTestID(toJson(r), 'ladder-row-pending')).toBeUndefined();
   });
 
-  it('identity, pending count, app version and device model render; change password routes', async () => {
+  it('identity, app version and device model render; change password routes', async () => {
     const { deps, f } = fakes();
     const r = await create(<ProfileScreen {...deps} />);
     expect(allText(toJson(r))).toContain(NAME);
     expect(allText(toJson(r))).toContain('Technician · ravi.k');
     expect(allText(toJson(r))).toContain('1.2.0');
     expect(allText(toJson(r))).toContain('Pixel 7');
-    expect(allText(toJson(r))).toContain('Nothing waiting');
     await press(r, 'profile-change-password');
     expect(f.changePassword).toHaveBeenCalledTimes(1);
     // Not on this screen, ever: no earnings, no stats, no ranking.

@@ -58,7 +58,6 @@ function RepDashboardRoute(): React.ReactNode {
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
       <RepDashboardScreen
         name={actor?.username ?? ''}
-        pendingSyncCount={0}
         figures={
           dashboard.data === null
             ? null
@@ -195,8 +194,7 @@ export default function Screen() {
         completedAtById={deps.completedAtById}
         health={deps.health}
         onHealthFix={() => router.push('/ladder')}
-        pendingCount={0}
-        draining={deps.refreshing}
+        refreshing={deps.refreshing}
         onRefresh={deps.refresh}
         onStartJob={deps.startJob}
         onNavigate={deps.navigate}

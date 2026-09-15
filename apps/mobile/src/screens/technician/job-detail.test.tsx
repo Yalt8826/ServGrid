@@ -10,9 +10,8 @@
  *   proves nothing drove.
  * - **Post-completion, the tree contains no `cost`, `amount` or `₹`** —
  *   no money figure, ever, after completion (§T3).
- * - **Rejected state pins a banner under the header carrying the
- *   server's `message` verbatim**, with *Discard my copy* and *View the
- *   office version* (§T3 / PLAN-FRONTEND.md §5).
+ * - **A refused write pins a banner under the header carrying the
+ *   server's `message` verbatim**, with *Refresh* to read the job again.
  *
  * Plus the §T3 anatomy the tests can see: the docket header (number in
  * mono, top right), the hero advance beat (once, colours move, haptics
@@ -91,8 +90,7 @@ function baseDeps(overrides: Partial<JobDetailDeps> = {}): JobDetailDeps {
     onStartJob: vi.fn(),
     onComplete: vi.fn(),
     onCancel: vi.fn(),
-    onDiscardMyCopy: vi.fn(),
-    onViewOfficeVersion: vi.fn(),
+    onRefresh: vi.fn(),
     now: NOW,
     ...overrides,
   };
@@ -266,14 +264,14 @@ describe('JobDetailScreen (§T3)', () => {
     expect(findByTestID(tree, 'detail-cancel')).toBeUndefined();
   });
 
-  it('a rejected job pins the server message verbatim under the header, with the two actions', async () => {
+  it('a refused write pins the server message verbatim under the header, with Refresh', async () => {
     const MESSAGE = 'Completion refused: this job was already closed by the office at 14:32.';
-    const onDiscardMyCopy = vi.fn();
+    const onRefresh = vi.fn();
     const renderer = await create(
       <JobDetailScreen
         {...baseDeps({
           view: viewOf({ status: 'in_progress' }, { rejectedMessage: MESSAGE }),
-          onDiscardMyCopy,
+          onRefresh,
         })}
       />,
     );
@@ -287,15 +285,15 @@ describe('JobDetailScreen (§T3)', () => {
     const text = allText(banner ?? null).join(' ');
     expect(text).toContain(MESSAGE); // verbatim
 
-    // The two actions, wired.
+    // One action: read the job from the server again.
     const actions = findAll(banner ?? null, (n) => typeof n.props.onPress === 'function');
-    expect(actions.length).toBe(2);
-    expect(text).toContain('Discard my copy');
-    expect(text).toContain('View the office version');
+    expect(actions.length).toBe(1);
+    expect(text).toContain('Refresh');
+    expect(text).not.toContain('Discard my copy');
     await act(async () => {
       actions[0]!.props.onPress?.();
     });
-    expect(onDiscardMyCopy).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
 
     // The header keeps its real status rail — the inset is the danger
     // layer, the rail is not repainted (§T2/§T3).

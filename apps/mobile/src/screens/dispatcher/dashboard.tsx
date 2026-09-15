@@ -15,16 +15,13 @@
  * jobs, then unassigned, then jobs still `assigned` past their scheduled
  * time — someone was due there and has not set off.
  *
- * **Not** "jobs rejected from a technician's outbox": outbox rejections
- * live on the handset and the server keeps no queue of its own — there
- * is nothing for that section to read, so none was designed.
- *
  * **Offline is different here.** This is the one role where stale data
  * is dangerous, because dispatch decisions are made from it: a
  * full-width `feedback.danger` banner — "No connection. This screen is
- * not live." — and the figures grey to `text.disabled`. The technician's
- * dashboard is the deliberate opposite (no banner, the mirror is the
- * source); dashboard.test.tsx on each side proves the pair.
+ * not live." — and the figures grey to `text.disabled`. (Since the app
+ * went online-only the no-connection gate covers every role's screen
+ * first; this banner is what shows if the gate's reachability probe
+ * says online while the API does not answer.)
  *
  * Motion (§D1): the load bars draw on focus, staggered 30ms; the
  * figures do NOT count up — a dispatcher returning twenty times a day

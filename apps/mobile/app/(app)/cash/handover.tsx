@@ -7,9 +7,8 @@
  * This file is the seam where the pure `HandoverScreen` meets the API:
  * the three calls the screen needs, with the amendment carrying its
  * `If-Match: <version>` optimistic-concurrency guard (PLAN-BACKEND.md
- * §10). The offline queue is T1.14's outbox; until that task lands these
- * calls run directly, and the screen's seams make rewiring to enqueue a
- * route-file change only.
+ * §10). The calls run directly against the API, like every write in the
+ * app (online-only, decision 2026-09-15).
  */
 import { SafeAreaView } from 'react-native-safe-area-context';
 

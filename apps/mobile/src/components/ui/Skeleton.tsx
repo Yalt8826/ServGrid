@@ -11,8 +11,7 @@
  * and the block is gone, having flashed for 50ms, which is precisely what
  * the floor exists to prevent. So this is a dumb rectangle and the hook
  * carries the contract.
- * Geometry matches the real content exactly. Never used for
- * offline-first content — the local mirror has nothing to wait for.
+ * Geometry matches the real content exactly.
  */
 import { View } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
@@ -43,9 +42,8 @@ export const SKELETON_MIN_MS = 400;
  * return showSkeleton ? <Skeleton height={88} /> : <JobCard job={data} />;
  * ```
  *
- * **Never on an offline-first screen.** The technician and rep read the
- * local mirror; there is nothing to wait for, and a skeleton there is a
- * lie about the architecture (§7).
+ * Every role reads the server since the app went online-only
+ * (2026-09-15), so any screen waiting on a first read may use it (§7).
  */
 export function useSkeleton(loading: boolean): boolean {
   const [visible, setVisible] = useState(false);

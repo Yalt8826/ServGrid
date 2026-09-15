@@ -11,8 +11,8 @@
  *   completed, logs anyone out — and the session is cleared exactly once,
  *   with a failed clear surfaced rather than swallowed.
  *
- * T1.14 adds one transport nuance: a FormData body (the outbox binary
- * pass's multipart upload) passes through unstringified, so attachment
+ * One transport nuance: a FormData body (an attachment's multipart
+ * upload) passes through unstringified, so attachment
  * uploads get the same 401 → refresh-once → retry-once contract with the
  * same reuse-a-caller-supplied-key rule as every JSON call.
  */
@@ -52,7 +52,7 @@ export interface ApiResult<T = unknown> {
 
 export interface RequestInitLite {
   body?: unknown;
-  /** Reuses a caller-supplied key (the outbox generates one, at enqueue). */
+  /** Reuses a caller-supplied key (one per submit intent — lib/intentWrite). */
   idempotencyKey?: string;
   /** Skip the Authorization header (login, refresh). */
   anonymous?: boolean;
@@ -198,7 +198,7 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
     let wireBody: string | FormData | undefined;
     if (body !== undefined) {
       if (typeof FormData !== 'undefined' && body instanceof FormData) {
-        // The outbox binary pass (T1.14): a multipart upload travels as
+        // An attachment upload: a multipart body travels as
         // FormData and must reach fetch unstringified — the runtime sets
         // the Content-Type itself, because it carries the boundary.
         wireBody = body;
@@ -356,8 +356,8 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
         }
         if (outcome === 'refresh-failed-retryable') {
           // No completed round trip refused the token: the session stands
-          // and the caller retries later (a technician in a basement keeps
-          // his outbox).
+          // and the caller retries later (a technician in a basement stays
+          // logged in).
           return toResult(res, outcome);
         }
         // refreshed — exactly one retry, with the same Idempotency-Key.

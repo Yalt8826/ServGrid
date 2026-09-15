@@ -20,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
-import { PendingBadge } from '../../components/domain/PendingBadge';
 import { TrackingHealthChip } from '../../components/domain/TrackingHealthChip';
 import { DispatcherProfileScreen, type DispatcherProfileDeps } from './profile';
 import { useSessionStore } from '../../state/sessionStore';
@@ -55,7 +54,7 @@ describe('DispatcherProfileScreen (§D6)', () => {
     // react-test-renderer keeps composite components in the instance tree
     // even though the host stubs render them to plain Views.
     const offenders = renderer.root.findAll(
-      (instance) => instance.type === PendingBadge || instance.type === TrackingHealthChip,
+      (instance) => instance.type === TrackingHealthChip,
     );
     expect(offenders).toHaveLength(0);
 

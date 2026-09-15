@@ -2,13 +2,12 @@
  * S7 Profile — the rep's lens (UI/plan-2/06-SALES-REP.md §S7). The rep
  * shares the technician's `ProfileScreen` (the profile route already
  * splits per role); reps are tracked too, so the TrackingHealthChip, the
- * permission ladder and the gated logout are his as well. Asserted here
+ * permission ladder and the logout are his as well. Asserted here
  * against rep-shaped deps, so a later role-specialisation cannot silently
  * break the rep:
  *
- * - name, role, `TrackingHealthChip`, permission ladder, pending count.
- * - **The logout gate**: blocked while anything is queued, with the
- *   count and *Retry now*; open at zero.
+ * - name, role, `TrackingHealthChip`, permission ladder.
+ * - **Logout is immediate** — the app is online-only; nothing is queued.
  * - **Not on this screen**: no commission, no targets, no comparison
  *   with the other rep.
  */
@@ -42,7 +41,7 @@ const LADDER: LadderRowState[] = [
   { step: 4, title: 'Xiaomi autostart', stateText: 'Confirmed', done: true },
 ];
 
-function deps(overrides: { pendingSyncCount?: number } = {}) {
+function deps() {
   return {
     username: 'anitha.r',
     role: 'Sales rep',
@@ -50,8 +49,6 @@ function deps(overrides: { pendingSyncCount?: number } = {}) {
     deviceModel: 'Pixel 7',
     loadHealth: vi.fn(async () => health({})),
     loadLadderRows: vi.fn(async () => LADDER),
-    pendingSyncCount: overrides.pendingSyncCount ?? 0,
-    retrySync: vi.fn(),
     logout: vi.fn(),
     openLadder: vi.fn(),
     changePassword: vi.fn(),
@@ -72,27 +69,18 @@ describe('RepProfile — §S7 via the shared screen', () => {
     for (const step of [1, 2, 3, 4]) {
       expect(findByTestID(tree, `profile-ladder-row-${step}`)).toBeDefined();
     }
-    expect(findByTestID(tree, 'profile-pending-sync')).toBeDefined();
+    expect(findByTestID(tree, 'profile-pending-sync')).toBeUndefined(); // online-only: nothing waits
   });
 
-  it('the logout gate blocks while anything is queued, and opens at zero', async () => {
-    const blocked = await create(<ProfileScreen {...deps({ pendingSyncCount: 2 })} />);
-    let tree = toJson(blocked);
-    expect(findByTestID(tree, 'profile-logout-gate')).toBeDefined();
-    const logout = findAll(findByTestID(tree, 'profile-logout')!, (n) => n.type === 'Pressable')[0]!;
-    expect(logout.props.accessibilityState).toMatchObject({ disabled: true });
-    expect(findByTestID(tree, 'profile-retry-sync')).toBeDefined();
-    expect(allText(tree)).toContain('2 items not yet synced');
-
-    const clear = await create(<ProfileScreen {...deps({ pendingSyncCount: 0 })} />);
-    tree = toJson(clear);
+  it('logout is immediate — there is no gate, because nothing is ever queued', async () => {
+    const tree = toJson(await create(<ProfileScreen {...deps()} />));
     expect(findByTestID(tree, 'profile-logout-gate')).toBeUndefined();
-    const openLogout = findAll(findByTestID(tree, 'profile-logout')!, (n) => n.type === 'Pressable')[0]!;
-    expect(openLogout.props.accessibilityState).toMatchObject({ disabled: false });
+    const logout = findAll(findByTestID(tree, 'profile-logout')!, (n) => n.type === 'Pressable')[0]!;
+    expect(logout.props.accessibilityState).toMatchObject({ disabled: false });
   });
 
   it('no commission, no targets, no comparison with the other rep — at any depth', async () => {
-    const r = await create(<ProfileScreen {...deps({ pendingSyncCount: 1 })} />);
+    const r = await create(<ProfileScreen {...deps()} />);
     const rendered = JSON.stringify(toJson(r)).toLowerCase();
     expect(rendered).not.toContain('commission');
     expect(rendered).not.toContain('target');

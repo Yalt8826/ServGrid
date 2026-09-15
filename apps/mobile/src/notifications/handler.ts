@@ -116,10 +116,9 @@ async function raiseJobNotification(job: PushJobRow, isNew: boolean): Promise<vo
   });
 }
 
-/** Rows the sync DELIVERED: ids the mirror did not hold before (an
+/** Rows the refetch DELIVERED: ids the cache did not hold before (an
  * assignment), or rows whose version moved (a reassign, a priority
- * escalation — the wakes §6 lists besides assign). A row the delta did
- * not return is not here, so it raises nothing. */
+ * escalation). A row that did not change is not here, so it raises nothing. */
 function arrivedRows(before: ReadonlyMap<string, number>, after: readonly PushJobRow[]): Array<{ job: PushJobRow; isNew: boolean }> {
   const arrivals: Array<{ job: PushJobRow; isNew: boolean }> = [];
   for (const job of after) {

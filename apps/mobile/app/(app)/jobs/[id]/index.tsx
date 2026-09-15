@@ -90,8 +90,7 @@ export default function Screen() {
         onStartJob={deps.startJob}
         onComplete={(v) => router.push(`/jobs/${v.job.id}/complete`)}
         onCancel={(v) => router.push(`/jobs/${v.job.id}/cancel`)}
-        onDiscardMyCopy={deps.refresh}
-        onViewOfficeVersion={deps.refresh}
+        onRefresh={deps.refresh}
         now={new Date()}
       />
     </SafeAreaView>

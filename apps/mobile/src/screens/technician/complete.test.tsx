@@ -526,8 +526,7 @@ describe('CompleteSheet — Done when (§T4)', () => {
       onStartJob: vi.fn(),
       onComplete: vi.fn(),
       onCancel: vi.fn(),
-      onDiscardMyCopy: vi.fn(),
-      onViewOfficeVersion: vi.fn(),
+      onRefresh: vi.fn(),
       now: NOW,
     };
   }

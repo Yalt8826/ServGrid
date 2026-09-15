@@ -3,21 +3,19 @@
  * "What am I doing now, and is anything wrong?" in under three seconds,
  * first thing in the morning, in a van.
  *
- * Anatomy, exactly: greeting + `PendingBadge` · **three figures only**
+ * Anatomy, exactly: greeting · **three figures only**
  * (today's open, done today, overdue — `display` 32 Condensed, tabular;
  * not six, not a chart) · the `TrackingHealthChip`, always visible ·
  * NEXT — the single next job as a full `JobCard` with *Navigate*
  * (secondary) and *Start job* / *Arrive* (primary, the screen's ONE
  * accent) · LATER TODAY as compact rows.
  *
- * **The mirror is the source** (PLAN-FRONTEND.md §4): jobs arrive as
- * props read from SQLite by the route — there is no fetch behind the
- * figures and no loading state, ever; a skeleton here would be a lie
- * about the architecture. Offline raises **no banner** — permanent
- * offline chrome trains people to ignore it; only a failed drain raises
- * anything, and that banner belongs to the drain, not this screen.
- * Pull to refresh drains the outbox and the `PendingBadge` is the
- * indicator — never a platform spinner (02-MOTION.md §6).
+ * **The server's work read is the source** (PLAN-FRONTEND.md §4,
+ * online-only): jobs arrive as props from the route's in-memory query,
+ * and this screen renders only once they have. A missing health answer
+ * raises **no banner** — the chip degrades — and a lost connection is
+ * the no-connection gate's to show, never this screen's. Pull to refresh
+ * reads the server again.
  *
  * Not on this screen, deliberately: revenue, charts, team activity,
  * motivational copy, an earnings figure — §T1 names the dashboard as
@@ -38,7 +36,6 @@ import type { TrackingHealth } from '@servgrid/shared';
 import { DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
 import { TrackingHealthChip, type LadderTarget } from '../../components/domain/TrackingHealthChip';
 import { JobCard } from '../../components/domain/JobCard';
-import { PendingBadge } from '../../components/domain/PendingBadge';
 import { Button, EmptyState } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
@@ -56,19 +53,17 @@ const ENTER_EASING = easing(EASING.enter);
 export interface DashboardDeps {
   /** His name, for the greeting. */
   name: string;
-  /** Every job in his mirror, joined to its customer — no fetch. */
+  /** His jobs from the server's work read, joined to their customers. */
   jobs: JobView[];
-  /** Job id → the instant its completion left this device (outbox). */
+  /** Job id → when the server closed a completed job. */
   completedAtById: Record<string, string>;
   /** Last known tracking health; null degrades to "never reported". */
   health: TrackingHealth | null;
   /** Red and amber only — into the permission ladder (§T7). */
   onHealthFix?: (target: LadderTarget) => void;
-  /** Queued + inflight outbox rows — the badge, not a spinner. */
-  pendingCount: number;
-  /** A drain cycle is running (pull to refresh). */
-  draining: boolean;
-  /** Pull to refresh drains the outbox (T1.14's `drainNow`). */
+  /** A read of the server is running (pull to refresh). */
+  refreshing: boolean;
+  /** Pull to refresh reads the server again. */
   onRefresh: () => void;
   onStartJob: (view: JobView) => void;
   onNavigate: (view: JobView) => void;
@@ -173,25 +168,14 @@ export function DashboardScreen(deps: DashboardDeps): React.ReactNode {
       testID="dashboard-screen"
       style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
       contentContainerStyle={{ padding: SPACE[4], paddingBottom: SPACE[8], gap: SPACE[4] }}
-      // Pull to refresh drains the outbox; the PendingBadge is the
-      // indicator. The platform control exists only to carry the
-      // gesture — painted transparent so no spinner ever appears
-      // (02-MOTION.md §6).
-      refreshControl={
-        <RefreshControl
-          refreshing={deps.draining}
-          onRefresh={deps.onRefresh}
-          colors={['transparent']}
-          progressBackgroundColor="transparent"
-          tintColor="transparent"
-        />
-      }
+      // Pull to refresh reads the server again; the platform control is
+      // the indicator while it runs.
+      refreshControl={<RefreshControl refreshing={deps.refreshing} onRefresh={deps.onRefresh} />}
     >
       <View style={styles.headerRow}>
         <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary, flex: 1 }} testID="dashboard-greeting">
           {`${istGreeting(deps.now)}, ${deps.name}`}
         </Text>
-        <PendingBadge count={deps.pendingCount} draining={deps.draining} onPress={deps.onRefresh} testID="dashboard-pending" />
       </View>
 
       <View style={styles.figuresRow}>

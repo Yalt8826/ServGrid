@@ -5,12 +5,9 @@
  * `./model.ts`, so the screens' tests never drag the API client into
  * their import graph.
  *
- * Reads go through the online API — the sales/payments/companies surface
- * (T3.2–T3.5) has no sync working set; the mirror stays the outbox's home
- * (PLAN-FRONTEND.md §4), and its pending count is what marks the
- * dashboard's figures stale. Writes run directly today exactly like the
- * cash-handover route's: the screens' `record`/`create` seams make
- * rewiring to enqueue a route-file change only.
+ * Reads and writes go through the online API — the app is online-only for
+ * every role (PLAN-FRONTEND.md §4, decision 2026-09-15). Each write pins
+ * one idempotency key per intent, so a retry replays instead of repeating.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -555,11 +552,9 @@ export interface PendingRecord {
 
 /**
  * The route-owned POST /v1/payments (T3.4's surface, `sales.payments`).
- * Runs directly today, exactly like the cash-handover route's calls; the
- * sheet's `record` seam makes rewiring to enqueue an outbox row a
- * route-file change only. The proof photo (a local URI) would travel as
- * an attachment row after its parent — the capture seam is not wired in
- * this build, so no URI ever arrives here yet.
+ * Runs directly against the API, like every write in the app. The proof
+ * photo uploads as an attachment row right after its parent payment
+ * (`uploadProofPhoto` below).
  */
 export function useRecordPayment(): { pendingRecord: PendingRecord; record: (input: RecordPaymentInput) => Promise<void> } {
   const [pendingRecord, setPendingRecord] = useState<PendingRecord>({ busy: false, error: null });
@@ -604,8 +599,7 @@ export function useRecordPayment(): { pendingRecord: PendingRecord; record: (inp
  * The proof photo rides POST /v1/attachments (ownerType `payment`) — the
  * same immutable attachment row the technician's completion photos use,
  * and which §S4's read side already scopes to the rep's own collections.
- * It runs DIRECT after the payment (the rep writes are direct; the
- * outbox's dependsOn ordering only applies to outboxed parents). A
+ * It runs directly after the payment. A
  * failure throws after the money is committed: the sheet's intent key
  * makes the rep's natural re-press replay the SAME payment and retry
  * only the photo, never a second charge.

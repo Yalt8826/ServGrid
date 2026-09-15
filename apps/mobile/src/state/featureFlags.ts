@@ -2,7 +2,7 @@
  * Process-level feature-flag store (PLAN-EXECUTION.md §3). The flags the
  * server evaluated for the signed-in employee ride `GET /v1/auth/me`;
  * this module is where every consumer reads them without each owning a
- * fetch. `useTechnicianMirror`'s flag loader writes here; the location
+ * fetch. `useTechnicianWork`'s flag loader writes here; the location
  * task reads here.
  *
  * Session rules, per PLAN-FRONTEND.md §4: the answer is cached for the

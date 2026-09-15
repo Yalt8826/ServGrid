@@ -6,7 +6,6 @@ import {
   type EmployeeListFilter,
   type EmployeePatchRequest,
   type EmployeePublic,
-  type Role,
 } from '@servgrid/shared';
 import { AppError } from '../../plugins/errors.js';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
@@ -36,15 +35,6 @@ const OPEN_WORK_MESSAGE =
   'accounts, answer the cash — then try again.';
 
 /**
- * The roles whose handset carries a mirror and an outbox (PLAN-FRONTEND.md
- * §4: dispatchers and owners are online-only, and Phase 3's rep reuses the
- * Phase 1 outbox unchanged). A role change out of one of these roles is
- * what removes offline capability at his next login, so it is the change
- * the fourth blocking condition guards.
- */
-const OFFLINE_CAPABLE_ROLES: ReadonlySet<Role> = new Set<Role>(['technician', 'sales_rep']);
-
-/**
  * One row the owner must clear before the account can change (T4.5,
  * PLAN.md §5, PLAN-GAPS.md G15). `kind` tells the owner's screen which
  * reassignment link to render; the 409 is a list of these, not an error
@@ -53,38 +43,31 @@ const OFFLINE_CAPABLE_ROLES: ReadonlySet<Role> = new Set<Role>(['technician', 's
 export type BlockingRow =
   | { kind: 'job'; id: string; jobNumber: string; title: string; status: string }
   | { kind: 'company'; id: string; name: string }
-  | { kind: 'cash'; id: string; businessDate: string; status: string; declaredAmount: string }
-  | { kind: 'outbox'; id: string; endpoint: string };
+  | { kind: 'cash'; id: string; businessDate: string; status: string; declaredAmount: string };
 
 /**
  * The deactivation and role-change preconditions (T4.5), completing the
- * Phase 0 stub. Three conditions block both, and a real role change adds
- * a fourth:
+ * Phase 0 stub. Three conditions block both:
  *
  *   1. open jobs assigned to the employee        (job_cards)
  *   2. companies he owns                         (companies.owner_rep_id)
  *   3. cash reconciliations submitted/disputed   (cash_reconciliations)
- *   4. (role change out of an offline role) an undrained operation
  *
  * A technician silently deactivated mid-week leaves six jobs assigned to
  * someone who can no longer log in; a rep's accounts become invisible to
  * both reps at once; and an unconfirmed handover is a row in a queue the
  * owner may not have reached — deactivating the person is how a real
- * discrepancy becomes an unanswerable one. The promoted technician loses
- * offline capability at his next login, so his outbox must be empty
- * first; the server cannot count queued rows on a handset, so it refuses
- * on the drain evidence it does have (see repo.listUndrainedOperations),
- * with §4.1's client-side drain-first rule carrying the rest.
+ * discrepancy becomes an unanswerable one. (A fourth condition — an
+ * undrained offline outbox on a role change — went with the outbox when
+ * the app became online-only, 2026-09-15.)
  */
 async function collectBlockingRows(
   client: PoolClient,
   employeeId: string,
-  includeOutbox: boolean,
 ): Promise<BlockingRow[]> {
   const jobs = await repo.listOpenJobs(client, employeeId);
   const companies = await repo.listOwnedCompanies(client, employeeId);
   const cash = await repo.listUnconfirmedCash(client, employeeId);
-  const outbox = includeOutbox ? await repo.listUndrainedOperations(client, employeeId) : [];
   return [
     ...jobs.map((j): BlockingRow => ({ kind: 'job', id: j.id, jobNumber: j.job_number, title: j.title, status: j.status })),
     ...companies.map((c): BlockingRow => ({ kind: 'company', id: c.id, name: c.name })),
@@ -97,7 +80,6 @@ async function collectBlockingRows(
         declaredAmount: c.declared_amount,
       }),
     ),
-    ...outbox.map((o): BlockingRow => ({ kind: 'outbox', id: o.key, endpoint: o.endpoint })),
   ];
 }
 
@@ -220,14 +202,7 @@ export function createEmployeesService() {
     const deactivates = patch.isActive === false && row.is_active;
     if (roleChanges || deactivates) {
       return withTransaction(async (client) => {
-        // The fourth condition is a role change's alone: promotion is what
-        // strips offline capability at his next login, so his queue must
-        // have drained first (§4.1).
-        const blocking = await collectBlockingRows(
-          client,
-          id,
-          roleChanges && OFFLINE_CAPABLE_ROLES.has(row.role),
-        );
+        const blocking = await collectBlockingRows(client, id);
         if (blocking.length > 0) {
           throw new AppError('EMPLOYEE_HAS_OPEN_WORK', OPEN_WORK_MESSAGE, blocking);
         }

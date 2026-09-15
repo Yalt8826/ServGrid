@@ -2,7 +2,7 @@
  * Route-level wiring for the dispatcher's D1 dashboard (T2.7). The
  * screen is pure over injected data; this module is the seam that feeds
  * it — and, because the dispatcher is ONLINE-ONLY (PLAN-FRONTEND.md §4:
- * no mirror, no outbox, an explicit error state on every section), the
+ * an explicit error state on every section), the
  * seam is a set of react-query reads against the api client:
  *
  * - **figures** — `GET /v1/jobs/summary`, the four figures counted
@@ -134,9 +134,7 @@ function jobOf(now: Date, card: JobCardDispatcher, nameOf: (id: string | null) =
 /**
  * The three NEEDS ATTENTION sections, in the spec's order: overdue
  * jobs, then unassigned, then jobs still `assigned` past their
- * scheduled time. Deliberately NO outbox-rejection section — the server
- * keeps no queue of rejected operations, so there is nothing here to
- * read (UI/plan-2/05-DISPATCHER.md §D1).
+ * scheduled time (UI/plan-2/05-DISPATCHER.md §D1).
  */
 export function sectionsOf(
   now: Date,

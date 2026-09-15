@@ -22,9 +22,9 @@ import { ULID, validEnv } from '../helpers/env.js';
  * a 409 whose `details` name the blocking rows so the owner's screen can
  * render reassignment links instead of an error message.
  *
- * The four blocking conditions are each proven independently — open jobs,
- * owned companies, an unconfirmed cash reconciliation, and (role change
- * only) an undrained outbox — then the success path is proven in full:
+ * The three blocking conditions are each proven independently — open jobs,
+ * owned companies, an unconfirmed cash reconciliation — then the success
+ * path is proven in full:
  * tokens revoked, devices inactive, out of the tracking-health view, and
  * history (completions, payments) still attributing to the deactivated
  * account, because `is_active` was never a delete.
@@ -171,22 +171,6 @@ async function seedCash(
 
 function now(): Date {
   return new Date();
-}
-
-/**
- * The server-side shadow of a queued outbox row: the idempotency
- * middleware's claim (T4.5 — the outbox itself lives on the handset, and
- * a drain the server has seen but not resolved is the evidence of it).
- * Same shape `plugins/idempotency.ts` writes at claim time.
- */
-async function seedUndrainedOperation(employeeId: string): Promise<string> {
-  const key = `op-${randomBytes(8).toString('hex')}`;
-  await db.query(
-    `INSERT INTO idempotency_keys (employee_id, key, endpoint, request_hash, locked_at)
-     VALUES ($1, $2, '/v1/jobs/00000000-0000-4000-8000-000000000000/status', $3, now())`,
-    [employeeId, key, randomBytes(32).toString('hex')],
-  );
-  return key;
 }
 
 /** Confirms a reconciliation the way the owner's confirm does (§10) — the T4.2 queue endpoints are a later task. */
@@ -348,34 +332,12 @@ describe('PATCH /v1/employees/:id — the three-way deactivation gate (T4.5)', (
     expect(ok.statusCode).toBe(200);
   });
 
-  it('refuses a role change while an outbox operation is undrained — and lands it once the drain resolves', async () => {
-    // A technician with NO other open work: this proves the fourth condition
-    // independently of the first three.
+  it('a role change with no open work lands — no outbox condition exists any more (online-only)', async () => {
     const tech = await seedEmployee('technician');
-    const key = await seedUndrainedOperation(tech.id);
-
-    const refused = await patchEmployee(tech.id, { role: 'dispatcher' });
-    expect(refused.statusCode).toBe(409);
-    const error = envelopeOf(refused.statusCode, refused.body);
-    expect(error.code).toBe('EMPLOYEE_HAS_OPEN_WORK');
-    const details = error.details as BlockingDetail[];
-    expect(details).toHaveLength(1);
-    expect(details[0]!.kind).toBe('outbox');
-    expect(details[0]!.id).toBe(key);
-    expect(details[0]!.endpoint).toBe('/v1/jobs/00000000-0000-4000-8000-000000000000/status');
-
-    // The drain resolves the operation (the verdict the middleware stores).
-    await db.query(
-      `UPDATE idempotency_keys SET response_status = 200, response_body = '{"ok":true}', locked_at = NULL
-       WHERE employee_id = $1 AND key = $2`,
-      [tech.id, key],
-    );
-
     const ok = await patchEmployee(tech.id, { role: 'dispatcher' });
-    expect(ok.statusCode).toBe(200);
+    expect(ok.statusCode, ok.body).toBe(200);
     expect(ok.json<{ role: string; isActive: boolean }>().role).toBe('dispatcher');
-    // A role change is not a deactivation: his sessions survive (the
-    // capability change lands at his next login, §4.1).
+    // A role change is not a deactivation: his sessions survive.
     expect(ok.json<{ isActive: boolean }>().isActive).toBe(true);
   });
 });
