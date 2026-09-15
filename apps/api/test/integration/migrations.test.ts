@@ -231,15 +231,19 @@ describe('touch_updated_at — optimistic-concurrency trigger', () => {
  * migrations were written, phases record when they run". The up → down →
  * up rehearsal above applies files in numeric order, so it can never see
  * the case production actually meets. This one rebuilds the dev database
- * as it stood on 12 Sep 2026: 016 applied in Phase 1, 011 and 013 still
- * pending. node-pg-migrate's default order check refused to go on from
- * there ("Not run migration 011_… is preceding already run migration
- * 016_…"), and Phase 2B's 015 would have hit the same refusal.
+ * as it stands on 15 Sep 2026: 016 applied in Phase 1 and 019 in the
+ * online-only pivot, while 011, 013 and Phase 2B's 015 are still pending.
+ * node-pg-migrate's default order check refused to go on from the 12 Sep
+ * shape ("Not run migration 011_… is preceding already run migration
+ * 016_…"), and 015 joining the held-back set is what keeps the rehearsal
+ * honest now that its up re-creates v_job_cards_dispatcher, which 013
+ * first creates: applied before 013 it would leave a view for 013's
+ * plain CREATE VIEW to trip over.
  */
 describe('out-of-order history — a lower number still applies after a higher one', () => {
   const ORDER_DB = 'servgrid_migrate_order_test';
   const MIGRATIONS_DIR = fileURLToPath(new URL('../../src/db/migrations', import.meta.url));
-  const HELD_BACK = ['011_assignment_notifications', '013_views_ops'];
+  const HELD_BACK = ['011_assignment_notifications', '013_views_ops', '015_contracts'];
 
   let orderDb: Pool;
   let subsetDir: string;
@@ -259,7 +263,7 @@ describe('out-of-order history — a lower number still applies after a higher o
     if (subsetDir) rmSync(subsetDir, { recursive: true, force: true });
   });
 
-  it('016 applied before 011 and 013 migrates forward, then down and up again', async () => {
+  it('016 and 019 applied before 011, 013 and 015 migrates forward, then down and up again', async () => {
     const files = readdirSync(MIGRATIONS_DIR);
     for (const file of files) {
       if (!HELD_BACK.some((name) => file.startsWith(`${name}.`))) {
