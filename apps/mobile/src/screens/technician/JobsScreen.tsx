@@ -220,7 +220,15 @@ export function JobsScreen(deps: JobsDeps): React.ReactNode {
         </View>
       ) : null}
 
-      <Animated.View style={[{ flex: 1, paddingHorizontal: SPACE[4] }, fadeStyle]}>
+      <Animated.View
+        style={[
+          // `paddingTop` is the breath between the search field (or the
+          // frame, when no search shows) and the first card — the same
+          // rhythm a section gap carries elsewhere (2026-09-16).
+          { flex: 1, paddingHorizontal: SPACE[4], paddingTop: SPACE[4] },
+          fadeStyle,
+        ]}
+      >
         {shown.length === 0 ? (
           <JobsEmpty tab={active} onCheckUpcoming={() => setActive('upcoming')} />
         ) : (
