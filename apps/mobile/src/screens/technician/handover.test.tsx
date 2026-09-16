@@ -221,19 +221,23 @@ describe('HandoverScreen (§T6)', () => {
     expect(handoverError('boom')).toBe('The declaration could not be saved. Try again.');
   });
 
-  it('history renders below the form with date, amount and status pill', async () => {
+  it('renders no declarations list — he declares, he does not browse (2026-09-16)', async () => {
+    // Three past days sit behind the screen; none of them renders. The
+    // selected day's own state (row for `date`) is the only read.
     const { deps } = fake([
       row({ status: 'submitted' }),
       row({ businessDate: shiftBusinessDate(TODAY, -1), status: 'confirmed', declaredAmount: '12000' }),
       row({ businessDate: shiftBusinessDate(TODAY, -3), status: 'disputed', declaredAmount: '900' }),
     ]);
     const r = await create(<HandoverScreen {...deps} />);
-    const texts = allText(toJson(r));
-    expect(texts).toContain('Submitted');
-    expect(texts).toContain('Confirmed');
-    expect(texts).toContain('Disputed');
-    expect(texts).toContain('₹ 12,000');
-    expect(findByTestID(toJson(r), `handover-history-row-${shiftBusinessDate(TODAY, -1)}`)).toBeDefined();
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'handover-history-empty')).toBeUndefined();
+    expect(
+      findAll(tree, (n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('handover-history-row-')),
+    ).toHaveLength(0);
+    const texts = allText(tree);
+    expect(texts).not.toContain('₹ 12,000');
+    expect(texts).not.toContain('Your declarations'.toUpperCase());
   });
 
   it('istBusinessDate reads the IST calendar, not the device clock', () => {

@@ -6,8 +6,9 @@
  * owner's whole queue exists to catch.
  *
  * Anatomy: date (today, changeable back 7 days) · one large `MoneyField`
- * · optional note · *Submit declaration* · his own history with status
- * pills.
+ * · optional note · *Submit declaration* · the selected day's state with
+ * its status pill. The declarations LIST is gone (2026-09-16, Yashas: he
+ * declares — he does not browse his past).
  *
  * The two absences, both deliberate (§T6): **no expected figure** — he
  * declares, and the system's expectation is the check; showing the
@@ -38,7 +39,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { CashAmendRequest, CashDeclareRequest, CashHandover, ReconciliationStatus } from '@servgrid/shared';
 import { formatMoneyEnIN, alpha, COLORS, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
-import { Banner, Button, DatePicker, EmptyState, MoneyField, SectionHeader, TextField, formatDateEnIN } from '../../components/ui';
+import { Banner, Button, DatePicker, MoneyField, SectionHeader, TextField, formatDateEnIN } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 
@@ -373,26 +374,6 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
         </View>
       )}
 
-      <SectionHeader
-        label="Your declarations"
-        icon="list"
-        count={history === null ? undefined : history.length}
-      />
-      {history === null ? null : history.length === 0 ? (
-        <EmptyState message="Nothing declared yet." icon="wallet" testID="handover-history-empty" />
-      ) : (
-        history.map((h) => {
-          const historyPill = STATUS_PILL[h.status];
-          return (
-            <View key={h.id} style={styles.historyRow} testID={`handover-history-row-${h.businessDate}`}>
-              <Text style={styles.historyDate}>{dateOptionLabel(h.businessDate, deps.today)}</Text>
-              <Text style={styles.historyAmount}>{`₹ ${formatMoneyEnIN(h.declaredAmount)}`}</Text>
-              <Text style={[styles.historyPill, { color: historyPill.color }]}>{historyPill.label}</Text>
-            </View>
-          );
-        })
-      )}
-
       </View>
     </ScrollView>
   );
@@ -481,28 +462,6 @@ const styles = StyleSheet.create({
     color: SEMANTIC.text.secondary,
     marginBottom: SPACE[2],
     marginTop: SPACE[2],
-  },
-  historyRow: {
-    alignSelf: 'stretch',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: SPACE[3],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
-  },
-  historyDate: {
-    ...textStyle('body'),
-    color: SEMANTIC.text.primary,
-    flex: 1,
-  },
-  historyAmount: {
-    ...textStyle('mono'),
-    color: SEMANTIC.text.primary,
-    fontVariant: ['tabular-nums'],
-    marginRight: SPACE[3],
-  },
-  historyPill: {
-    ...textStyle('label'),
   },
   sheet: {
     alignSelf: 'stretch',
