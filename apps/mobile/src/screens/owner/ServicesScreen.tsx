@@ -19,6 +19,8 @@ export interface OwnerServicesScreenProps {
   rows: OwnerServiceRow[];
   error: string | null;
   loading: boolean;
+  /** Opens the create form (OW.3). Absent on a phone build that has no room for it. */
+  onNew?: () => void;
   onDeactivate: (serviceId: string) => void;
   deactivateBusyId: string | null;
   onRetry: () => void;
@@ -32,7 +34,10 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
   const rows = props.rows;
 
   return (
-    <DeskListShell title="Services" subtitle={desk ? `${rows.length} job types` : undefined} testID={props.testID ?? 'owner-services'}>
+    <DeskListShell title="Services" subtitle={desk ? `${rows.length} job types` : undefined} actions={props.onNew === undefined ? undefined : (
+          <Button label="+ New service" onPress={props.onNew} testID="owner-services-new" />
+        )}
+        testID={props.testID ?? 'owner-services'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-services-error" />
       ) : null}

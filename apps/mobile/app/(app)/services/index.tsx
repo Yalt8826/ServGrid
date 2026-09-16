@@ -5,6 +5,7 @@
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { OwnerServicesScreen } from '../../../src/screens/owner/ServicesScreen';
@@ -16,12 +17,14 @@ const styles = StyleSheet.create({
 });
 
 function OwnerServicesRoute(): React.ReactNode {
+  const router = useRouter();
   const services = useOwnerServices();
   const { busyId, deactivate } = useDeactivateCatalogItem('services', services.reload);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
       <OwnerServicesScreen
+        onNew={() => router.push('/services/new')}
         rows={services.rows}
         error={services.error}
         loading={services.loading}

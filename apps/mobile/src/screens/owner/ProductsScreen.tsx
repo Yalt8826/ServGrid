@@ -23,6 +23,8 @@ export interface OwnerProductsScreenProps {
   rows: OwnerProductRow[];
   error: string | null;
   loading: boolean;
+  /** Opens the create form (OW.3). Absent on a phone build that has no room for it. */
+  onNew?: () => void;
   onDeactivate: (productId: string) => void;
   deactivateBusyId: string | null;
   onRetry: () => void;
@@ -36,7 +38,10 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
   const rows = props.rows;
 
   return (
-    <DeskListShell title="Products" subtitle={desk ? `${rows.length} in the catalogue` : undefined} testID={props.testID ?? 'owner-products'}>
+    <DeskListShell title="Products" subtitle={desk ? `${rows.length} in the catalogue` : undefined} actions={props.onNew === undefined ? undefined : (
+          <Button label="+ New product" onPress={props.onNew} testID="owner-products-new" />
+        )}
+        testID={props.testID ?? 'owner-products'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-products-error" />
       ) : null}
