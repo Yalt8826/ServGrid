@@ -2,7 +2,12 @@
  * Dispatch Job route (UI/plan-2/05-DISPATCHER.md §D3, T2.9). The seam
  * where the pure DispatchJobScreen meets the api — `useDispatchForm`
  * owns the reads and the submit, and `dispatch.console` keeps the
- * screen dark until the server turns it on (PLAN-EXECUTION.md §3).
+ * DISPATCHER's screen dark until the server turns it on
+ * (PLAN-EXECUTION.md §3). **The owner is exempt** (OW.1, 2026-09-16):
+ * that flag is the dispatcher console's rollback, and the owner is who
+ * covers the desk while it is off — his copy of this screen answered a
+ * blank placeholder for exactly as long as he lacked a flag that was
+ * never his. The server agrees (`flags/gates.ts`).
  *
  * The route needs no navmap entry of its own: `/jobs/new` carries the
  * `job` × `create` guard in ROUTE_GUARDS, dispatcher + owner, and sits
@@ -17,6 +22,7 @@ import { SEMANTIC } from '@servgrid/shared';
 import { DispatchJobScreen } from '../../../src/screens/dispatcher/dispatch';
 import { useDispatchForm } from '../../../src/screens/dispatcher/useDispatchForm';
 import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
+import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -24,6 +30,7 @@ const styles = StyleSheet.create({
 
 export default function Screen() {
   const flags = useDispatchJobLogsFlags();
+  const actor = useSessionStore((s) => s.actor);
   // The AMC tab's Dispatch deep-link (`/jobs/new?customerId=…`) lands
   // with the customer already chosen; the plain Operations entry has no
   // param and starts from an empty search.
@@ -31,7 +38,7 @@ export default function Screen() {
   const initialCustomerId = Array.isArray(params.customerId) ? params.customerId[0] : params.customerId;
   const deps = useDispatchForm({ initialCustomerId: initialCustomerId ?? null });
 
-  if (!flags.consoleOn) {
+  if (actor?.role !== 'owner' && !flags.consoleOn) {
     // Dark without the flag — the honest placeholder, nothing spinning.
     return (
       <View style={styles.root}>

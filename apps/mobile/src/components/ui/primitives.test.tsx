@@ -16,7 +16,7 @@ import { Skeleton } from './Skeleton';
 import { Chip } from './Chip';
 import { EmptyState } from './EmptyState';
 import { ConfirmDialog } from './ConfirmDialog';
-import { allText, create, findByTestID, toJson } from './testing';
+import { allText, create, findByTestID, toJson, type Node } from './testing';
 
 function mount(ui: React.ReactElement, density: 'field' | 'console' | 'desk' = 'field') {
   return create(<DensityProvider density={density}>{ui}</DensityProvider>);
@@ -40,6 +40,109 @@ describe('Select', () => {
     const r = await mount(<Select label="Role" value="te" options={opts} onSelect={() => {}} testID="sel" />);
     expect(allText(toJson(r))).toContain('Technician');
     expect(allText(toJson(r))).not.toContain('Select');
+  });
+});
+
+/**
+ * The dropdown itself (OW.1, 2026-09-16). Until this task the trigger
+ * rendered and nothing opened — pressing it re-selected the value already
+ * chosen — so every filter built on `Select` was dead on every screen.
+ * These are the behaviours a filter needs to actually be one. Under the
+ * test stub `Platform.OS` is `android`, so the native `Sheet` path is what
+ * runs here; the web popover shares this state machine and differs only in
+ * where the rows are painted.
+ */
+describe('Select — the menu opens, filters, chooses and closes', () => {
+  const opts = [
+    { value: 'te', label: 'Technician' },
+    { value: 'di', label: 'Dispatcher' },
+  ];
+
+  async function press(node: Node | undefined): Promise<void> {
+    expect(node).toBeDefined();
+    await act(async () => {
+      (node!.props as { onPress: () => void }).onPress();
+    });
+  }
+
+  it('starts closed — no options in the tree until asked', async () => {
+    const r = await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} testID="sel" />);
+    expect(findByTestID(toJson(r), 'sel-options')).toBeUndefined();
+    expect(findByTestID(toJson(r), 'sel-option-te')).toBeUndefined();
+  });
+
+  it('the trigger opens it, and every option is a row', async () => {
+    const r = await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} testID="sel" />);
+    await press(findByTestID(toJson(r), 'sel-trigger'));
+    expect(findByTestID(toJson(r), 'sel-option-te')).toBeDefined();
+    expect(findByTestID(toJson(r), 'sel-option-di')).toBeDefined();
+  });
+
+  it('choosing a row reports that value and closes the menu', async () => {
+    const chosen: string[] = [];
+    const r = await mount(
+      <Select label="Role" value={null} options={opts} onSelect={(v) => chosen.push(v)} testID="sel" />,
+    );
+    await press(findByTestID(toJson(r), 'sel-trigger'));
+    await press(findByTestID(toJson(r), 'sel-option-di'));
+    expect(chosen).toEqual(['di']);
+    expect(findByTestID(toJson(r), 'sel-option-di')).toBeUndefined();
+  });
+
+  it('marks the chosen row as selected, so the open menu says where you are', async () => {
+    const r = await mount(<Select label="Role" value="te" options={opts} onSelect={() => {}} testID="sel" />);
+    await press(findByTestID(toJson(r), 'sel-trigger'));
+    const row = findByTestID(toJson(r), 'sel-option-te');
+    expect((row!.props as { accessibilityState?: { selected?: boolean } }).accessibilityState?.selected).toBe(true);
+  });
+
+  it('the caret says which way it opens', async () => {
+    const r = await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} testID="sel" />);
+    expect(allText(findByTestID(toJson(r), 'sel-caret') ?? null).join('')).toBe('▼');
+    await press(findByTestID(toJson(r), 'sel-trigger'));
+    expect(allText(findByTestID(toJson(r), 'sel-caret') ?? null).join('')).toBe('▲');
+  });
+
+  it('a long list carries a filter field; a short one does not', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ value: `t${i}`, label: `Technician ${i}` }));
+    const short = await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} testID="sel" />);
+    await press(findByTestID(toJson(short), 'sel-trigger'));
+    expect(findByTestID(toJson(short), 'sel-search')).toBeUndefined();
+
+    const long = await mount(<Select label="Who" value={null} options={many} onSelect={() => {}} testID="who" />);
+    await press(findByTestID(toJson(long), 'who-trigger'));
+    expect(findByTestID(toJson(long), 'who-search')).toBeDefined();
+  });
+
+  it('typing filters the rows, and nothing matching says so', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ value: `t${i}`, label: `Technician ${i}` }));
+    const r = await mount(<Select label="Who" value={null} options={many} onSelect={() => {}} testID="who" />);
+    await press(findByTestID(toJson(r), 'who-trigger'));
+
+    const type = async (text: string): Promise<void> => {
+      const field = findByTestID(toJson(r), 'who-search');
+      await act(async () => {
+        (field!.props as { onChangeText: (next: string) => void }).onChangeText(text);
+      });
+    };
+
+    await type('Technician 1');
+    expect(findByTestID(toJson(r), 'who-option-t1')).toBeDefined();
+    expect(findByTestID(toJson(r), 'who-option-t2')).toBeUndefined();
+
+    await type('plumber');
+    expect(findByTestID(toJson(r), 'who-no-match')).toBeDefined();
+  });
+
+  it('dismissing without choosing changes nothing', async () => {
+    const chosen: string[] = [];
+    const r = await mount(
+      <Select label="Role" value={null} options={opts} onSelect={(v) => chosen.push(v)} testID="sel" />,
+    );
+    await press(findByTestID(toJson(r), 'sel-trigger'));
+    await press(findByTestID(toJson(r), 'sel-sheet-scrim'));
+    expect(chosen).toEqual([]);
+    expect(findByTestID(toJson(r), 'sel-option-te')).toBeUndefined();
   });
 });
 

@@ -21,6 +21,14 @@ export const CONSOLE_DISABLED_MESSAGE = 'The dispatch console is switched off fo
 export async function dispatchConsoleEnabled(request: FastifyRequest): Promise<void> {
   const auth = request.auth;
   if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
+  // The OWNER is exempt (OW.1, 2026-09-16). This flag is the DISPATCHER
+  // console's T0 rollback, and the owner is who covers the desk when it is
+  // switched off — gating him on it disarms the fallback at exactly the
+  // moment it is needed, and it silently emptied his own Dispatch,
+  // Customers and Employees screens (they read /v1/jobs/summary,
+  // /v1/technicians/load and /v1/location/health). His own surfaces keep
+  // their own flags: owner.cash, owner.amend, owner.location.
+  if (auth.role === 'owner') return;
   if (!(await isFlagOn(auth.sub, 'dispatch.console'))) {
     throw new AppError('FLAG_DISABLED', CONSOLE_DISABLED_MESSAGE);
   }
