@@ -20,6 +20,7 @@ import { act } from 'react';
 // The stub module DIRECTLY: same instance the vitest alias feeds
 // `haptics.ts` under test, and the one with the `__fired` surface.
 import * as Haptics from '../../test-stubs/expo-haptics';
+import { alpha, COLORS, FRAME, SEMANTIC, TINT } from '@servgrid/shared';
 
 import { allText, create, findAll, findByTestID, firstDescendantOfType, toJson, type Node } from '../../components/ui/testing';
 import { CancelSheet, type CancelSheetDeps } from './CancelSheet';
@@ -392,5 +393,79 @@ describe('CancelSheet — Done when (§T5)', () => {
     ]);
     expect(entries.map((entry) => entry.label)).toEqual(['In progress', 'Cancelled']);
     expect(entries[1]).toEqual({ id: '42', label: 'Cancelled', at: '2026-09-11T10:05:00.000Z', to: 'cancelled' });
+  });
+});
+
+/**
+ * The sheet's own pass (2026-09-16, mobile UI overhaul): the reason list
+ * reads as a list of choices, the note states its rule where the rule
+ * matters, and the day he chose is a strip he can read back to the
+ * customer.
+ */
+describe('CancelSheet — the reasons, the note, and the date', () => {
+  it('marks the chosen reason with a shape as well as a colour', async () => {
+    const renderer = await create(<CancelSheet {...baseDeps()} />);
+    let tree = toJson(renderer);
+
+    // Nine identical outlined rows read as nine text fields. Each carries a
+    // mark now, and the chosen one's is the accent tick — a change of shape
+    // beside the colour, never colour alone.
+    const before = findAll(findByTestID(tree, 'cancel-reason-no_access')!, (n) => typeof n.props['data-icon'] === 'string');
+    expect(before).toHaveLength(1);
+    expect(before[0]!.props.color).toBe(SEMANTIC.text.placeholder);
+
+    await press(tree, 'cancel-reason-no_access');
+    tree = toJson(renderer);
+    const after = findAll(findByTestID(tree, 'cancel-reason-no_access')!, (n) => typeof n.props['data-icon'] === 'string');
+    expect(after).toHaveLength(1);
+    expect(after[0]!.props.color).toBe(FRAME.accent);
+  });
+
+  it('states the note rule on the field when Other is chosen', async () => {
+    const deps = baseDeps();
+    const renderer = await create(<CancelSheet {...deps} />);
+    let tree = toJson(renderer);
+
+    // No reason yet: the note is optional, and says so.
+    expect(allText(findByTestID(tree, 'cancel-note') ?? null).join(' ')).toContain('Optional');
+
+    await press(tree, 'cancel-reason-other');
+    tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'cancel-note') ?? null).join(' ')).toContain('Other needs a note');
+    expect(isDisabled(tree)).toBe(true);
+
+    await typeInto(tree, 'cancel-note', 'The gate was locked and nobody called back.');
+    tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'cancel-note') ?? null).join(' ')).not.toContain('Other needs a note');
+    expect(isDisabled(tree)).toBe(false);
+
+    await trySubmit(tree);
+    expect(submittedPayload(deps).reasonCode).toBe('other');
+  });
+
+  it('tints the day he chose inside the picker, and confirms it in a strip', async () => {
+    const renderer = await create(<CancelSheet {...baseDeps()} />);
+    let tree = toJson(renderer);
+    await press(tree, 'cancel-reschedule-open');
+    tree = toJson(renderer);
+
+    const unchosen = findByTestID(tree, 'cancel-reschedule-option-2026-09-12')!;
+    expect(styleOf(unchosen).backgroundColor).toBeUndefined(); // no tint until it is his answer
+
+    // Choosing a day is the choice AND the close (`chooseDate` does both),
+    // so the confirmation is what a technician sees — §T5's sentence, in a
+    // strip he can read back to the customer.
+    await press(tree, 'cancel-reschedule-option-2026-09-12');
+    tree = toJson(renderer);
+    const confirm = findByTestID(tree, 'cancel-reschedule-confirm')!;
+    expect(allText(confirm).join(' ')).toBe('Visit moves to 12 Sep.');
+    expect(findByTestID(tree, 'cancel-reschedule-picker')).toBeUndefined();
+
+    // Reopened, the day he chose is the tinted row — and "Never mind"
+    // leaves it chosen, because it is his answer already.
+    await press(tree, 'cancel-reschedule-open');
+    tree = toJson(renderer);
+    const chosen = findByTestID(tree, 'cancel-reschedule-option-2026-09-12')!;
+    expect(styleOf(chosen).backgroundColor).toBe(alpha(COLORS.accent, TINT.chip));
   });
 });
