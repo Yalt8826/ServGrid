@@ -39,6 +39,13 @@ export interface TechnicianWorkViews {
   completedAtById: Record<string, string>;
   /** The active catalogue, in name order — the complete sheet's parts picker. */
   products: Array<{ id: string; name: string; category: string }>;
+  /**
+   * The service catalogue, in name order (2026-09-16) — the complete
+   * sheet's first question, and where the cost comes from. The server
+   * answers with the active rows only, so a retired service cannot be
+   * chosen here even though a completion may still reference one.
+   */
+  services: Array<{ id: string; name: string; defaultCharge: string | null }>;
 }
 
 export function buildJobViews(work: TechnicianWork): TechnicianWorkViews {
@@ -80,5 +87,11 @@ export function buildJobViews(work: TechnicianWork): TechnicianWorkViews {
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((product) => ({ id: product.id, name: product.name, category: product.category }));
 
-  return { views, completedAtById, products: catalogue };
+  // The service catalogue the complete sheet prices a visit from — name
+  // order, like the parts catalogue, so the dropdown reads as a list.
+  const serviceCatalogue = [...work.services]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((service) => ({ id: service.id, name: service.name, defaultCharge: service.defaultCharge }));
+
+  return { views, completedAtById, products: catalogue, services: serviceCatalogue };
 }

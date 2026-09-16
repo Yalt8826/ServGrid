@@ -29,6 +29,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { createIntentWriter } from '../../../../src/lib/intentWrite';
+import { choosePhoto, takePhoto, uploadAttachment } from '../../../../src/lib/photo';
 import { CompleteSheet } from '../../../../src/screens/technician/CompleteSheet';
 import { bodyKeyedWriters, withSiteFix, type PartProduct } from '../../../../src/screens/technician/completeSheet';
 import { captureSiteFix, type SiteFix } from '../../../../src/location/siteFix';
@@ -89,7 +90,16 @@ export default function Screen() {
       <CompleteSheet
         view={view}
         products={products}
+        services={deps.services}
         role={actor.role}
+        // The camera, the library and the upload — wired here so the sheet
+        // itself stays renderable without a device (2026-09-16). Photos are
+        // filed against the job CARD: it exists the moment he taps, where
+        // the completion row only exists after submit (migration 008's
+        // before/after split).
+        takePhoto={takePhoto}
+        choosePhoto={choosePhoto}
+        uploadPhoto={(fileUri) => uploadAttachment({ ownerType: 'job_card', ownerId: view.job.id, kind: 'photo', fileUri })}
         now={new Date()}
         onDismiss={() => router.back()}
         onSubmit={async (payload) => {

@@ -26,7 +26,7 @@ import {
   useOwnerReps,
   useReassignCompany,
 } from '../../../src/screens/owner/useOwnerData';
-import { captureProofPhoto } from '../../../src/lib/captureProof';
+import { takePhoto } from '../../../src/lib/photo';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -51,7 +51,7 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
         pendingRecord={pendingRecord}
         online={online}
         record={record}
-        captureProof={captureProofPhoto}
+        captureProof={takePhoto}
         onRecorded={() => {
           ledger.reload();
           payments.reload();

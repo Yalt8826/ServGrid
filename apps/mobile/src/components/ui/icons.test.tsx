@@ -29,7 +29,7 @@ const VOCABULARY: IconName[] = [
   'phone', 'location',
   'warning', 'alert', 'check', 'checkFilled', 'info', 'tick', 'close',
   'back', 'chevronRight', 'chevronDown', 'chevronUp', 'forward',
-  'wrench', 'cube', 'camera', 'document', 'business', 'people', 'wallet',
+  'wrench', 'cube', 'camera', 'image', 'document', 'business', 'people', 'wallet',
   'plus', 'search', 'list', 'edit', 'key', 'logout', 'send', 'trending',
   'shield', 'battery', 'rocket', 'bell',
 ];

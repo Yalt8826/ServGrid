@@ -894,6 +894,75 @@ async function seedJobWithContract(contractId: string): Promise<string> {
   return jobId;
 }
 
+
+/**
+ * The service performed (migration 022, 2026-09-16). The technician's
+ * sheet picks a service from the catalogue and the cost comes from it, so
+ * the completion has to say *which* service — the office counts water
+ * top-ups, it does not read prose. Two things are asserted: the write
+ * stores the FK, and the owner's job detail reads the name back.
+ */
+describe('the service performed (§6.2, migration 022)', () => {
+  it('stores the service and reads it back by name on the owner’s detail', async () => {
+    const jobId = await seedJob('in_progress');
+    const res = await postComplete(
+      TECH_A.token,
+      jobId,
+      completeBody({ serviceId, cost: '750.00', collectionMode: 'cash' }),
+    );
+    expect(res.statusCode).toBe(200);
+
+    const stored = await db.query<{ service_id: string }>(
+      'SELECT service_id FROM job_completions WHERE job_card_id = $1',
+      [jobId],
+    );
+    expect(stored.rows[0]!.service_id).toBe(serviceId);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/v1/jobs/${jobId}/events`,
+      headers: { authorization: `Bearer ${OWNER.token}`, 'x-client-source': 'mobile' },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect((JSON.parse(detail.body) as { completion: { serviceName: string | null } }).completion.serviceName).toBe(
+      'T1.6 suite service',
+    );
+  });
+
+  it('refuses a service the catalogue does not have — a 422, never a foreign-key error', async () => {
+    const jobId = await seedJob('in_progress');
+    const res = await postComplete(TECH_A.token, jobId, completeBody({ serviceId: crypto.randomUUID() }));
+    expect(res.statusCode).toBe(422);
+    expect(envelopeOf(res.statusCode, res.body).code).toBe('VALIDATION_FAILED');
+
+    // And nothing was filed: the refusal happens before the transaction.
+    const rows = await db.query('SELECT 1 FROM job_completions WHERE job_card_id = $1', [jobId]);
+    expect(rows.rowCount).toBe(0);
+  });
+
+  it('refuses a service that has been retired — a stale list on his phone', async () => {
+    const jobId = await seedJob('in_progress');
+    await db.query('UPDATE services SET is_active = false WHERE id = $1', [serviceId]);
+    try {
+      const res = await postComplete(TECH_A.token, jobId, completeBody({ serviceId }));
+      expect(res.statusCode).toBe(422);
+    } finally {
+      await db.query('UPDATE services SET is_active = true WHERE id = $1', [serviceId]);
+    }
+  });
+
+  it('leaves the column null when no service is named — old rows and today’s free-text closes', async () => {
+    const jobId = await seedJob('in_progress');
+    const res = await postComplete(TECH_A.token, jobId, completeBody({ cost: '100.00', collectionMode: 'cash' }));
+    expect(res.statusCode).toBe(200);
+    const stored = await db.query<{ service_id: string | null }>(
+      'SELECT service_id FROM job_completions WHERE job_card_id = $1',
+      [jobId],
+    );
+    expect(stored.rows[0]!.service_id).toBeNull();
+  });
+});
+
 describe('the on-site capture becomes the site’s pin (§6.4, 2026-09-17)', () => {
   /**
    * The owner asked for a customer `location` that a technician updates

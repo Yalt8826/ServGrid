@@ -121,55 +121,84 @@ export function Sheet({
   }
 
   return (
-    <View testID={testID} style={{ alignSelf: 'stretch' }}>
-      <Pressable
-        testID={testID ? `${testID}-scrim` : undefined}
-        accessibilityLabel={hasUnsavedInput ? 'Sheet holds unsaved input' : 'Close sheet'}
-        onPress={() => {
-          if (!hasUnsavedInput) onDismiss();
-        }}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          backgroundColor: ELEVATION.overlay.scrim,
-        }}
-      />
-      <View
-        style={{
-          marginTop: 64,
-          backgroundColor: SEMANTIC.bg.raised,
-          borderTopLeftRadius: RADII.control,
-          borderTopRightRadius: RADII.control,
-          borderWidth: 1,
-          borderColor: SEMANTIC.line.default,
-          overflow: 'hidden',
-        }}
-      >
-        <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 4 }}>
-          <View style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: SEMANTIC.line.stale }} />
-        </View>
-        {title ? (
-          <Text style={{ ...textStyle('h2'), color: SEMANTIC.text.primary, paddingHorizontal: SPACE[4], paddingVertical: SPACE[2] }}>
-            {title}
-          </Text>
-        ) : null}
-        <View style={{ paddingHorizontal: SPACE[4], paddingVertical: SPACE[3] }}>{children}</View>
+    // A real overlay (2026-09-16). The phone branch used to render the
+    // panel in flow, with a scrim stretched over its own container — fine
+    // for a sheet on a full screen, wrong for a sheet inside one: the
+    // `Select`'s options are a `Sheet` on this platform, so a picker inside
+    // the complete sheet drew its options *within* that sheet's scrolling
+    // body instead of over it. The Modal keeps the geometry (the panel
+    // still rides the bottom edge under the same 64pt, the context strip
+    // above it still shows through the scrim) and makes the overlay true
+    // wherever a sheet is mounted.
+    //
+    // `flex: 1` inside the modal is the height ceiling: the complete sheet
+    // is the longest form in the app, and it used to grow past the bottom
+    // of the screen with its footer — the submit caption was half cut off.
+    // `flexShrink` on the panel lets the body scroll while the action bar
+    // keeps its own height.
+    <Modal transparent visible onRequestClose={onDismiss}>
+      <View testID={testID} style={{ flex: 1 }}>
+        <Pressable
+          testID={testID ? `${testID}-scrim` : undefined}
+          accessibilityLabel={hasUnsavedInput ? 'Sheet holds unsaved input' : 'Close sheet'}
+          onPress={() => {
+            if (!hasUnsavedInput) onDismiss();
+          }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: ELEVATION.overlay.scrim,
+          }}
+        />
         <View
           style={{
-            minHeight: TAP.thumbBar,
-            borderTopWidth: 1,
-            borderTopColor: SEMANTIC.line.default,
-            paddingHorizontal: SPACE[4],
-            paddingVertical: SPACE[3],
-            justifyContent: 'center',
+            marginTop: 64,
+            flexShrink: 1,
+            backgroundColor: SEMANTIC.bg.raised,
+            borderTopLeftRadius: RADII.control,
+            borderTopRightRadius: RADII.control,
+            borderWidth: 1,
+            borderColor: SEMANTIC.line.default,
+            overflow: 'hidden',
           }}
         >
-          {actions}
+          <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 4 }}>
+            <View style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: SEMANTIC.line.stale }} />
+          </View>
+          {title ? (
+            <Text style={{ ...textStyle('h2'), color: SEMANTIC.text.primary, paddingHorizontal: SPACE[4], paddingVertical: SPACE[2] }}>
+              {title}
+            </Text>
+          ) : null}
+          {/* The body scrolls, so a long form keeps its footer. `handled`
+              taps: a form sheet is full of buttons, and losing the keyboard
+              (or the tap itself) on the way to one is its own small trap. */}
+          <ScrollView
+            testID={testID ? `${testID}-body` : undefined}
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={{ paddingHorizontal: SPACE[4], paddingVertical: SPACE[3] }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
+          <View
+            style={{
+              minHeight: TAP.thumbBar,
+              flexShrink: 0,
+              borderTopWidth: 1,
+              borderTopColor: SEMANTIC.line.default,
+              paddingHorizontal: SPACE[4],
+              paddingVertical: SPACE[3],
+              justifyContent: 'center',
+            }}
+          >
+            {actions}
+          </View>
         </View>
+        <Text style={[captionStyle.caption, { paddingHorizontal: SPACE[4], paddingTop: 4 }]} testID={testID ? `${testID}-unsaved` : undefined}>
+          {hasUnsavedInput ? 'Unsaved changes — confirm to close' : ''}
+        </Text>
       </View>
-      <Text style={[captionStyle.caption, { paddingHorizontal: SPACE[4], paddingTop: 4 }]} testID={testID ? `${testID}-unsaved` : undefined}>
-        {hasUnsavedInput ? 'Unsaved changes — confirm to close' : ''}
-      </Text>
-    </View>
+    </Modal>
   );
 }

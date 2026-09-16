@@ -63,6 +63,7 @@ const GLYPH = {
   wrench: 'construct-outline',
   cube: 'cube-outline',
   camera: 'camera-outline',
+  image: 'image-outline',
   document: 'document-text-outline',
   business: 'business-outline',
   people: 'people-outline',

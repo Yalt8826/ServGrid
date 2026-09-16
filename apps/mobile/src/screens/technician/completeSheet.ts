@@ -117,7 +117,20 @@ export interface PartLine {
 export interface CompleteSheetPayload {
   completedAt: string;
   workSummary: string;
+  /**
+   * The catalogue service performed (migration 022, 2026-09-16) — what the
+   * office can count and price, which a sentence in `workSummary` never
+   * could. The sheet always sends it; the API validates the id and answers
+   * 422 when the catalogue has moved on.
+   */
+  serviceId: string;
   cost?: string;
+  /**
+   * A discount is no longer offered on this sheet (Yashas, 2026-09-16), so
+   * the technician never sets one. Kept in the payload shape because the
+   * server still accepts it and the office's amend path still corrects it —
+   * an absent discount is the honest zero.
+   */
   discountAmount?: string;
   discountReason?: string;
   collectionMode?: CollectionMode;
@@ -250,25 +263,14 @@ function quantityOf(line: PartLine): number | null {
  * Charge side can never block a free completion.
  */
 export function submitBlockerOf(input: {
-  workSummary: string;
+  /** The catalogue service performed — required, and the record of *what*
+   * was done (migration 022). */
+  serviceId: string | null;
   amount: string;
-  discountAmount: string;
-  discountReason: string;
   lines: readonly PartLine[];
 }): string | null {
-  if (input.workSummary.trim() === '') {
-    return 'Say what work was done.';
-  }
-  const amount = input.amount.trim();
-  const discount = input.discountAmount.trim();
-  const discountEntered = discount !== '' && Number(discount) > 0;
-  if (discountEntered && input.discountReason.trim() === '') {
-    return 'A discount needs a reason — say why the amount was reduced.';
-  }
-  // An empty amount is a zero charge (the server's absent-means-0, §3.4),
-  // so a discount on it is already larger than what is owed.
-  if (discountEntered && Number(discount) > (amount === '' ? 0 : Number(amount))) {
-    return 'The discount is larger than the amount — a discount reduces what is owed, it cannot exceed it.';
+  if (input.serviceId === null) {
+    return 'Choose the service you did.';
   }
   for (const line of input.lines) {
     if (line.name.trim() === '') {
@@ -298,10 +300,11 @@ export function submitBlockerOf(input: {
  */
 export function payloadOf(input: {
   view: JobView;
+  /** The service's name — what `work_summary` carries. The service itself
+   * rides beside it as `serviceId`. */
   workSummary: string;
+  serviceId: string;
   amount: string;
-  discountAmount: string;
-  discountReason: string;
   selectedMode: Exclude<CollectionMode, 'bank_transfer' | 'none'>;
   /** The AMC job's Free/Charge choice (decision 9) — Free sends no money at all. */
   amcChoice: AmcChoice;
@@ -312,9 +315,12 @@ export function payloadOf(input: {
   completedAt: string;
 }): CompleteSheetPayload {
   const free = isFreeUnderAmc(input.view, input.amcChoice);
-  const charged = !free && chargeApplies(input.amount, input.discountAmount);
+  // No discount is offered on this sheet any more (Yashas, 2026-09-16), so
+  // the charge test is the amount alone. The server and the database still
+  // accept a discount — the office's amend path uses one — the technician
+  // simply has no way to set it.
+  const charged = !free && chargeApplies(input.amount, '');
   const amount = input.amount.trim();
-  const discount = input.discountAmount.trim();
   const workSummary = input.workSummary.trim();
 
   const parts: JobCompletionPart[] = [];
@@ -347,12 +353,12 @@ export function payloadOf(input: {
   return {
     completedAt: input.completedAt,
     workSummary,
+    serviceId: input.serviceId,
     // Absent money fields are the server's honest zeros (§3.4) — a free
     // job sends no money at all, and a Free-under-AMC visit is the purest
     // case: nothing typed, nothing sent, whatever was left on the Charge
     // side before the technician switched back.
     ...(free || amount === '' ? {} : { cost: amount }),
-    ...(free || discount === '' || Number(discount) <= 0 ? {} : { discountAmount: discount, discountReason: input.discountReason.trim() }),
     // `none` is a consequence, not a choice (§T4): no charge → none,
     // whatever the segments showed before the amount emptied. On an AMC
     // job, Free is always none — the choice, not the amount, decides.
