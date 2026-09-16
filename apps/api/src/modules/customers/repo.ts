@@ -22,18 +22,43 @@ import type { ScopePredicate } from '../../plugins/rbac.js';
  * test/integration/customers.test.ts pins this against the same SQL the
  * endpoint runs (buildCustomersPage, INLINE mode).
  *
- * The phone arm is an EXACT match. A prefix (LIKE 'q%') would read
- * better in a search box, but `customers_phone_idx` is a plain btree and
- * the database runs en_US.utf8, where byte-order patterns cannot use it —
- * serving a prefix would take a text_pattern_ops index, i.e. a new
- * migration, and an arm that cannot use an index drags the whole OR back
- * to a sequential scan (proven by the EXPLAIN assertion while it was
- * tried). Both arms being indexable is what keeps the search off the seq
- * scan path; if prefix search is wanted later, it arrives WITH its index.
+ * BOTH arms are prefix matches since OW.6, and both are still indexed —
+ * the condition the earlier design set for exactly this change. The name
+ * arm asks the same GIN with a `lexeme:*` query, which is what tsquery
+ * prefixes are for; the phone arm is `LIKE 'digits%'`, served by
+ * `customers_phone_prefix_idx` (text_pattern_ops, migration 020) because
+ * a plain btree cannot answer a byte-order pattern under en_US.utf8. The
+ * EXPLAIN assertion still pins both: one unindexed arm would drag the
+ * whole OR back to a sequential scan.
  */
 
 /** The name-search expression — keep it byte-identical to the index expression or the GIN is dead weight (migration 005). */
 export const NAME_TSV_SQL = "to_tsvector('simple', name::text)";
+
+
+/**
+ * `q` as a prefix tsquery: `ravi kum` → `ravi:* & kum:*` (OW.6).
+ *
+ * Built here rather than in SQL because `to_tsquery` is strict about its
+ * operators — a stray `&`, `!` or quote in a search box would be a
+ * syntax error from the database instead of a result. Tokens are letters
+ * and digits only, which is also what `simple` would keep.
+ */
+export function tsqueryPrefix(q: string): string | null {
+  const tokens = q.toLowerCase().match(/[\p{L}\p{N}]+/gu);
+  if (tokens === null || tokens.length === 0) return null;
+  return tokens.map((token) => `${token}:*`).join(' & ');
+}
+
+/**
+ * The phone arm's prefix: the digits of `q`, or null when it carries
+ * none. A name search never reaches the phone index, and a number typed
+ * with spaces or a +91 still finds its site.
+ */
+export function phonePrefixOf(q: string): string | null {
+  const digits = q.replace(/\D/g, '');
+  return digits === '' ? null : digits;
+}
 
 /** Which of this file's customer projections to build. The dispatcher's omits `company_id`. */
 export type CustomerVariant = 'full' | 'dispatcher';
@@ -269,9 +294,21 @@ function buildCustomersPage(args: {
     clauses.push(`(${scope.sql})`);
   }
   if (filter.q !== undefined) {
-    const tsquery = bind(filter.q);
-    const phone = bind(filter.q);
-    clauses.push(`(${NAME_TSV_SQL} @@ plainto_tsquery('simple', ${tsquery}::text) OR c.phone = ${phone})`);
+    // Both arms are PREFIX matches (OW.6): a search box answers while the
+    // word is still being typed, or it is not a search box. Both stay
+    // indexed — the GIN serves `lexeme:*` as it stands, and migration 020
+    // adds the text_pattern_ops index the phone's LIKE needs.
+    const arms: string[] = [];
+    const prefix = tsqueryPrefix(filter.q);
+    if (prefix !== null) {
+      arms.push(`${NAME_TSV_SQL} @@ to_tsquery('simple', ${bind(prefix)}::text)`);
+    }
+    const digits = phonePrefixOf(filter.q);
+    if (digits !== null) {
+      arms.push(`c.phone LIKE ${bind(`${digits}%`)}`);
+    }
+    // A query of punctuation alone matches nothing rather than everything.
+    clauses.push(arms.length === 0 ? 'false' : `(${arms.join(' OR ')})`);
   }
   if (cursor !== null) {
     const at = bind(cursor.createdAt);
