@@ -287,3 +287,150 @@ export async function attentionFeed(db: Db): Promise<AttentionRow[]> {
   );
   return r.rows;
 }
+
+// ── the performance series (OW.3, 2026-09-16) ──────────────────────────────
+
+/**
+ * The four charts the owner asked for: revenue collected and jobs closed
+ * per technician, sales value and sales count per rep — each per day,
+ * per person, over one chosen range.
+ *
+ * Every series is grouped in SQL, per day and per employee, and the
+ * client only stacks what it is given: money is never derived on a
+ * phone or in a browser (PLAN.md §6). Revenue means CASH COLLECTED
+ * (`job_completions.amount_collected` by `business_date`) — the
+ * definition the month-to-date figure and the weekly chart already use,
+ * chosen by the owner on 2026-09-16 so no two figures on this screen can
+ * disagree.
+ */
+export type PerformanceRangeKey = 'week' | '30d' | '90d';
+
+export interface RangeBounds {
+  from: string;
+  to: string;
+}
+
+/**
+ * `week` is the CURRENT IST week, Monday to Sunday — a calendar week the
+ * owner can name, not a rolling seven days. `30d` and `90d` are rolling
+ * windows ending today, because "the last 30 days" is what those mean to
+ * everyone. All three are computed from `business_date(now())`, so the
+ * range never depends on the server's UTC clock.
+ */
+export async function performanceRange(db: Db, key: PerformanceRangeKey): Promise<RangeBounds> {
+  const sql =
+    key === 'week'
+      ? `SELECT date_trunc('week', business_date(now()))::date::text AS from,
+                (date_trunc('week', business_date(now()))::date + 6)::text AS to`
+      : `SELECT (business_date(now()) - ($1::int - 1))::text AS from, business_date(now())::text AS to`;
+  const params = key === 'week' ? [] : [key === '30d' ? 30 : 90];
+  const r = await db.query<RangeBounds>(sql, params);
+  return r.rows[0]!;
+}
+
+/** Every day in the range, so a day nobody worked is a gap in the bars, not a missing column. */
+export async function daysIn(db: Db, bounds: RangeBounds): Promise<string[]> {
+  const r = await db.query<{ day: string }>(
+    `SELECT generate_series($1::date, $2::date, interval '1 day')::date::text AS day`,
+    [bounds.from, bounds.to],
+  );
+  return r.rows.map((row) => row.day);
+}
+
+export interface EmployeeRow {
+  id: string;
+  full_name: string;
+}
+
+/**
+ * The people a chart can stack or filter by. Active employees of the
+ * role, plus anyone inactive who nevertheless has data in the range —
+ * a technician who left last month still did the work the bars show,
+ * and dropping him would silently change the totals.
+ */
+export async function performancePeople(
+  db: Db,
+  role: 'technician' | 'sales_rep',
+  bounds: RangeBounds,
+): Promise<EmployeeRow[]> {
+  const worked =
+    role === 'technician'
+      ? `SELECT DISTINCT completed_by AS id FROM job_completions WHERE business_date BETWEEN $2 AND $3`
+      : `SELECT DISTINCT sales_rep_id AS id FROM sales_cards WHERE status = 'confirmed' AND sale_date BETWEEN $2 AND $3`;
+  const r = await db.query<EmployeeRow>(
+    `SELECT e.id, e.full_name
+       FROM employees e
+      WHERE e.role = $1::employee_role
+        AND (e.is_active OR e.id IN (${worked}))
+      ORDER BY e.full_name`,
+    [role, bounds.from, bounds.to],
+  );
+  return r.rows;
+}
+
+export interface SeriesPointRow {
+  date: string;
+  employee_id: string;
+  /** Money as a decimal string; counts as a string too, so one mapper serves both. */
+  value: string;
+}
+
+/** Cash collected per technician per day — the owner's definition of revenue. */
+export async function technicianRevenueSeries(db: Db, b: RangeBounds): Promise<SeriesPointRow[]> {
+  const r = await db.query<SeriesPointRow>(
+    `SELECT jc.business_date::text AS date,
+            jc.completed_by        AS employee_id,
+            SUM(jc.amount_collected)::text AS value
+       FROM job_completions jc
+      WHERE jc.business_date BETWEEN $1 AND $2
+      GROUP BY 1, 2`,
+    [b.from, b.to],
+  );
+  return r.rows;
+}
+
+/** Jobs closed per technician per day — a completion is a job done. */
+export async function technicianJobsSeries(db: Db, b: RangeBounds): Promise<SeriesPointRow[]> {
+  const r = await db.query<SeriesPointRow>(
+    `SELECT jc.business_date::text AS date,
+            jc.completed_by        AS employee_id,
+            count(*)::text         AS value
+       FROM job_completions jc
+      WHERE jc.business_date BETWEEN $1 AND $2
+      GROUP BY 1, 2`,
+    [b.from, b.to],
+  );
+  return r.rows;
+}
+
+/**
+ * Sales value per rep per day — CONFIRMED cards only, on the day the rep
+ * says the sale was made (`sale_date`, §3.5). A draft is not a sale and a
+ * void never was one.
+ */
+export async function repSalesValueSeries(db: Db, b: RangeBounds): Promise<SeriesPointRow[]> {
+  const r = await db.query<SeriesPointRow>(
+    `SELECT t.sale_date::text  AS date,
+            t.sales_rep_id     AS employee_id,
+            SUM(t.total)::text AS value
+       FROM v_sales_card_totals t
+      WHERE t.status = 'confirmed' AND t.sale_date BETWEEN $1 AND $2
+      GROUP BY 1, 2`,
+    [b.from, b.to],
+  );
+  return r.rows;
+}
+
+/** How many sales each rep confirmed per day, beside what they were worth. */
+export async function repSalesCountSeries(db: Db, b: RangeBounds): Promise<SeriesPointRow[]> {
+  const r = await db.query<SeriesPointRow>(
+    `SELECT sc.sale_date::text AS date,
+            sc.sales_rep_id    AS employee_id,
+            count(*)::text     AS value
+       FROM sales_cards sc
+      WHERE sc.status = 'confirmed' AND sc.sale_date BETWEEN $1 AND $2
+      GROUP BY 1, 2`,
+    [b.from, b.to],
+  );
+  return r.rows;
+}

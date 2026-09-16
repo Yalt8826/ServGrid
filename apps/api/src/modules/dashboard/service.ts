@@ -1,6 +1,11 @@
 import { getPool } from '../../db/pool.js';
 import type { AttentionItem } from './schemas.js';
-import type { OwnerAttentionResponse, OwnerDashboardResponse } from './schemas.js';
+import type {
+  OwnerAttentionResponse,
+  OwnerDashboardResponse,
+  OwnerPerformanceResponse,
+  PerformanceRangeKey,
+} from './schemas.js';
 import * as repo from './repo.js';
 
 /**
@@ -12,6 +17,43 @@ import * as repo from './repo.js';
  * would be exactly the second definition the endpoint exists to refuse.
  */
 export function createDashboardService() {
+  /**
+   * GET /v1/dashboard/owner/performance (OW.3) — the four charts in one
+   * read, over one range. The mapper's only work is Postgres text
+   * becoming JSON: counts to numbers, money left as the decimal strings
+   * the schema carries everywhere else.
+   */
+  async function ownerPerformance(range: PerformanceRangeKey): Promise<OwnerPerformanceResponse> {
+    const db = getPool();
+    const bounds = await repo.performanceRange(db, range);
+    const [days, technicians, reps, techRevenue, techJobs, salesValue, salesCount] = await Promise.all([
+      repo.daysIn(db, bounds),
+      repo.performancePeople(db, 'technician', bounds),
+      repo.performancePeople(db, 'sales_rep', bounds),
+      repo.technicianRevenueSeries(db, bounds),
+      repo.technicianJobsSeries(db, bounds),
+      repo.repSalesValueSeries(db, bounds),
+      repo.repSalesCountSeries(db, bounds),
+    ]);
+
+    const money = (rows: repo.SeriesPointRow[]) =>
+      rows.map((row) => ({ date: row.date, employeeId: row.employee_id, value: row.value }));
+    const counted = (rows: repo.SeriesPointRow[]) =>
+      rows.map((row) => ({ date: row.date, employeeId: row.employee_id, count: Number(row.value) }));
+    const people = (rows: repo.EmployeeRow[]) => rows.map((row) => ({ id: row.id, name: row.full_name }));
+
+    return {
+      range: { key: range, from: bounds.from, to: bounds.to },
+      days,
+      technicians: people(technicians),
+      reps: people(reps),
+      technicianRevenue: money(techRevenue),
+      technicianJobs: counted(techJobs),
+      repSalesValue: money(salesValue),
+      repSalesCount: counted(salesCount),
+    };
+  }
+
   async function ownerDashboard(): Promise<OwnerDashboardResponse> {
     const db = getPool();
     const [openJobs, cashAwaiting, mtdRevenue, dues, perDay, perWeek] = await Promise.all([
@@ -65,5 +107,5 @@ export function createDashboardService() {
     return { items };
   }
 
-  return { ownerDashboard, ownerAttention };
+  return { ownerDashboard, ownerAttention, ownerPerformance };
 }

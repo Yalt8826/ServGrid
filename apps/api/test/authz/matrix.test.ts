@@ -19,7 +19,7 @@ import {
 import { loadConfig, type Config } from '../../src/config.js';
 import { closePool } from '../../src/db/pool.js';
 import { runMigrations } from '../../src/db/migrate.js';
-import { ownerAttentionResponseSchema, ownerDashboardResponseSchema } from '../../src/modules/dashboard/schemas.js';
+import { ownerAttentionResponseSchema, ownerDashboardResponseSchema, ownerPerformanceResponseSchema } from '../../src/modules/dashboard/schemas.js';
 import { hashPassword } from '../../src/lib/password.js';
 import { buildServer } from '../../src/server.js';
 import { ULID, validEnv } from '../helpers/env.js';
@@ -1498,6 +1498,22 @@ const ENDPOINTS: EndpointRow[] = [
     expect: OWNER_ONLY,
     assertOk: (_actor, res) => {
       ownerAttentionResponseSchema.parse(res.json());
+    },
+  },
+  {
+    name: 'GET /v1/dashboard/owner/performance',
+    method: 'GET',
+    url: '/v1/dashboard/owner/performance',
+    // OW.3: the four charts. Same door as the rest of the dashboard —
+    // `cash.confirm` × `read`, the owner's alone — because every series is
+    // money or the work behind it.
+    probe: (actor) =>
+      app.inject({ method: 'GET', url: '/v1/dashboard/owner/performance', headers: bearer(actor) }),
+    expect: OWNER_ONLY,
+    assertOk: (_actor, res) => {
+      const body = ownerPerformanceResponseSchema.parse(res.json());
+      expect(body.range.key).toBe('week');
+      expect(body.days).toHaveLength(7);
     },
   },
   {
