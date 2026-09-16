@@ -15,6 +15,16 @@ export { Skeleton, type SkeletonProps } from './Skeleton';
 export { Chip, type ChipProps } from './Chip';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog';
+export {
+  DeskListShell,
+  PageHeader,
+  Panel,
+  PanelRow,
+  pageContentStyle,
+  type PageHeaderProps,
+  type PanelProps,
+  type DeskListShellProps,
+} from './desk';
 export { DensityProvider, useDensity, useDensityMetrics } from './DensityProvider';
 export { haptic } from './haptics';
 export { captionStyle, labelStyle, tapTargetForDensity } from './uiBase';

@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, EmptyState, useDensity } from '../../components/ui';
+import { Banner, Button, DeskListShell, EmptyState, Panel, useDensity } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { DeskTable } from './deskTable';
@@ -51,7 +51,7 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
   const nowYear = new Date().getFullYear();
 
   return (
-    <View style={styles.root} testID={props.testID ?? 'owner-employees'}>
+    <DeskListShell title="Employees" subtitle={desk ? `${rows.length} ${rows.length === 1 ? 'person' : 'people'} on the roster` : undefined} testID={props.testID ?? 'owner-employees'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-employees-error" />
       ) : null}
@@ -59,7 +59,8 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
       {!props.loading && props.error === null && rows.length === 0 ? (
         <EmptyState message="No employees yet." testID="owner-employees-empty" />
       ) : desk ? (
-        <DeskTable
+        <Panel padded={false} grow>
+          <DeskTable
           data={rows}
           rowKey={(r) => r.id}
           sort={sort}
@@ -123,6 +124,7 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
             },
           ]}
         />
+        </Panel>
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
           {rows.map((row) => (
@@ -154,7 +156,7 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
       <View style={styles.actionBar}>
         <Button label="+ New employee" onPress={props.onNewEmployee} testID="employees-new" />
       </View>
-    </View>
+    </DeskListShell>
   );
 }
 

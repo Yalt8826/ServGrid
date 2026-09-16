@@ -196,6 +196,74 @@ export const ELEVATION = {
 } as const;
 
 /**
+ * The desk vocabulary — the owner's web console only (OW.2, 2026-09-16).
+ *
+ * Everything here is additive and read at `desk` density alone, so the
+ * technician, dispatcher and rep screens cannot shift a pixel: the phone
+ * apps keep their look until the whole-app pass.
+ *
+ * What it fixes. The console was one flat white page against one flat
+ * slate rail, with the 4pt scale applied as though a 1900px window were a
+ * 360dp phone — no page rhythm, no card, nothing to tell a section from
+ * the gap beside it, and a rail whose only state was "the accent bar is
+ * somewhere". The answer is not new colour: it is LAYERS. The page sits
+ * one step down (`page.bg`), content sits on white cards a hair above it,
+ * and the rail keeps the slate identity while gaining the states a
+ * pointer expects — hover, active ground, and the accent still reserved
+ * for where you are.
+ *
+ * Radius 8 on a desk card is a deliberate amendment to §3.2's "square
+ * corners are a signature": the square edge belongs to the job docket,
+ * and a docket is a phone object. A 1400px console of square white
+ * rectangles reads as an unstyled page, which is the complaint this
+ * phase exists to answer.
+ */
+export const DESK = {
+  page: {
+    /** The console's ground: one step below the cards, so a card is visible without a shadow doing all the work. */
+    bg: SLATE[50],
+    padX: 32,
+    padY: 24,
+    /** Between stacked sections — the console's vertical rhythm, not the phone's 12. */
+    gap: 24,
+    /** Tables want width; past this a line of text stops being scannable. */
+    maxWidth: 1440,
+  },
+  card: {
+    bg: '#FFFFFF',
+    border: SLATE[200],
+    radius: RADII.dialog,
+    pad: 20,
+    /** Barely there by design: the layer does the work, the shadow only settles it. */
+    webShadow: '0 1px 2px rgba(22,32,43,0.06)',
+    webShadowHover: '0 4px 14px rgba(22,32,43,0.10)',
+  },
+  rail: {
+    /** 240 as specified (07-OWNER.md) — the width was never the dull part. */
+    width: 240,
+    bg: SLATE[900],
+    /** A pointer needs to see what it is over; slate.700 is the one step up that is not a colour change. */
+    hover: SLATE[700],
+    activeBg: SLATE[700],
+    heading: SLATE[400],
+    item: SLATE[300],
+    itemActive: COLORS.surface,
+    activeBar: COLORS.accent,
+    /** 2px, the same bar the phone's tab bar draws — what makes the two layouts one product. */
+    barWidth: 2,
+    itemHeight: 38,
+  },
+  table: {
+    headBg: SLATE[100],
+    headText: SLATE[500],
+    /** Zebra at the lightest slate — a guide for the eye across a wide row, never a border. */
+    zebra: SLATE[50],
+    rowHover: SLATE[100],
+    rowHeight: 44,
+  },
+} as const;
+
+/**
  * Motion tokens — six durations, four easings, three springs
  * (02-MOTION.md §1–3). Easings are stored as cubic-bezier control
  * points so no import from any animation library is needed at token
