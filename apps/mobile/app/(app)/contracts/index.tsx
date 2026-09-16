@@ -15,6 +15,7 @@ import { AmcScreen } from '../../../src/screens/contracts/AmcScreen';
 import { useContractSections } from '../../../src/screens/contracts/useContracts';
 import { istBusinessDate } from '../../../src/screens/dispatcher/useDispatcherDashboard';
 import { isFlagOn } from '../../../src/state/featureFlags';
+import { useFlagsReady } from '../../../src/state/useFlagsReady';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -61,8 +62,20 @@ function AmcRoute({ role }: { role: 'dispatcher' | 'owner' }): React.ReactNode {
 
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
+  const flagsReady = useFlagsReady();
   if (actor === null) return null;
   if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
+    return (
+      <View style={styles.root}>
+        <Text>AMC</Text>
+      </View>
+    );
+  }
+  // Unknown flags read as off on a cold browser load (the cache is
+  // process-local), which walled the owner's own AMC tab behind a bare
+  // placeholder until he logged in again. Wait for the /auth/me answer;
+  // after it, the flag gate below is the honest one.
+  if (!flagsReady) {
     return (
       <View style={styles.root}>
         <Text>AMC</Text>

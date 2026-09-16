@@ -48,6 +48,13 @@ export function pageContentStyle(desk: boolean): ViewStyle {
 
 export interface PageHeaderProps {
   title: string;
+  /**
+   * A line above the title naming who the page is for — "Welcome back,
+   * Yashas" on the dashboard. Its own line rather than folded into the
+   * subtitle: a greeting and the date are two different facts, and a
+   * caption carrying both reads as neither.
+   */
+  greeting?: string;
   /** One line under the title: what this page is for, or what it is showing. */
   subtitle?: string;
   /** Right-hand side — the page's actions, or its filters. */
@@ -61,7 +68,7 @@ export interface PageHeaderProps {
  * with a bare `h1` and whatever spacing they chose, which is half of why
  * no two of them looked related.
  */
-export function PageHeader({ title, subtitle, actions, testID }: PageHeaderProps): ReactNode {
+export function PageHeader({ title, greeting, subtitle, actions, testID }: PageHeaderProps): ReactNode {
   const desk = useDensity() === 'desk';
   return (
     <View
@@ -72,11 +79,30 @@ export function PageHeader({ title, subtitle, actions, testID }: PageHeaderProps
         justifyContent: 'space-between',
         gap: SPACE[3],
         ...(desk
-          ? { paddingBottom: SPACE[4], borderBottomWidth: 1, borderBottomColor: SEMANTIC.line.default }
+          ? {
+              paddingBottom: SPACE[4],
+              borderBottomWidth: 1,
+              borderBottomColor: SEMANTIC.line.default,
+              // A dropdown in the header must outrank the page below it.
+              // A CSS z-index only competes inside its own stacking
+              // context, and the content after the header is a later
+              // sibling — so the filter menu painted under the table it
+              // filters (companies, 2026-09-17). The dashboard's panel row
+              // and the job-logs filter bar carry the same fix.
+              zIndex: 20,
+            }
           : {}),
       }}
     >
       <View style={{ flexShrink: 1, gap: 2 }}>
+        {greeting === undefined ? null : (
+          <Text
+            style={{ ...textStyle('bodyStrong'), color: SEMANTIC.text.primary }}
+            testID={testID ? `${testID}-greeting` : undefined}
+          >
+            {greeting}
+          </Text>
+        )}
         <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary }} testID={testID ? `${testID}-title` : undefined}>
           {title}
         </Text>

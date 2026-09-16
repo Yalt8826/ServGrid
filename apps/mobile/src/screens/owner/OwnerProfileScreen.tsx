@@ -102,6 +102,12 @@ const styles = StyleSheet.create({
   content: {
     padding: SPACE[4],
     paddingBottom: SPACE[8],
+    // A form reads at a sentence's measure: centred and capped on the
+    // desk instead of stretching fields edge to edge (a phone never
+    // reaches the cap).
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   heading: {
     ...textStyle('h1'),

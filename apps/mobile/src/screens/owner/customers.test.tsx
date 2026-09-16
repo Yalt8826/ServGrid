@@ -122,6 +122,7 @@ const SITE: CustomerDetail = {
   altPhone: null,
   addressLine1: '3rd Block, Peenya',
   addressLine2: null,
+  area: null,
   city: 'Bengaluru',
   state: null,
   pincode: '560058',
@@ -170,7 +171,6 @@ function detailDeps(overrides?: Partial<OwnerCustomerDetailDeps>): OwnerCustomer
     onSaveStackItem: () => {},
     onRemoveStackItem: () => {},
     onCall: () => {},
-    onEdit: () => {},
     onOpenJob: () => {},
     onOpenCompany: () => {},
     onRetry: () => {},
@@ -245,7 +245,9 @@ describe('OwnerCustomerDetailBody — the stack is editable, stamping nothing (�
 const CUSTOMER_ROW: OwnerCustomerRow = {
   id: SITE.id,
   name: 'Meenakshi Enterprises — Peenya',
-  area: '3rd Block, Peenya',
+  area: 'Peenya',
+  address: '3rd Block, Peenya, Bengaluru 560058',
+  location: '13.028700, 77.519700',
   phone: '9847000001',
   companyId: COMPANIES[0]!.id,
   companyName: 'Sterling Industries',
@@ -256,15 +258,12 @@ const CUSTOMER_ROW: OwnerCustomerRow = {
 
 function listDeps(rows: OwnerCustomerRow[]): OwnerCustomersDeps {
   return {
-    ...detailDeps({ editing: null, detail: null, stack: null, loading: false }),
     offline: false,
     error: null,
     loading: false,
     rows,
     onRetryList: () => {},
     onOpenCustomer: () => {},
-    selectedCustomerId: null,
-    onSelectCustomer: () => {},
   };
 }
 
@@ -295,11 +294,11 @@ describe('OwnerCustomersScreen — desk is a table, phone is cards, at all four 
     });
   }
 
-  it('a row click opens the side detail (the desk frame of the detail)', async () => {
-    let selected: string | null = null;
+  it('a row click opens the site’s own page (not a pane beside the list)', async () => {
+    let opened: string | null = null;
     const deps = listDeps([CUSTOMER_ROW]);
-    deps.onSelectCustomer = (id) => {
-      selected = id;
+    deps.onOpenCustomer = (id) => {
+      opened = id;
     };
     const r = await create(
       <DensityProvider density="desk">
@@ -310,7 +309,7 @@ describe('OwnerCustomersScreen — desk is a table, phone is cards, at all four 
     await act(async () => {
       findByTestID(tree, `data-row-${SITE.id}`)!.props.onPress?.();
     });
-    expect(selected).toBe(SITE.id);
+    expect(opened).toBe(SITE.id);
   });
 });
 

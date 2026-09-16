@@ -59,6 +59,7 @@ function toCustomer(row: repo.WorkCustomerRow): TechnicianWork['customers'][numb
     phone: row.phone,
     altPhone: row.alt_phone,
     addressLine1: row.address_line1,
+    area: row.area,
     addressLine2: row.address_line2,
     city: row.city,
     state: row.state,

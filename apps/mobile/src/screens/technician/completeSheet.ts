@@ -124,6 +124,32 @@ export interface CompleteSheetPayload {
   customerSigned?: boolean;
   stackChanges?: JobStackChange[];
   parts?: JobCompletionPart[];
+  /**
+   * Where the technician stood (2026-09-17). Absent when the device could
+   * not say — no permission, no lock, or the web console, which is not a
+   * place at all. The server files it on the completion and makes it the
+   * customer's own pin, so the next visit can find the gate.
+   */
+  latitude?: number;
+  longitude?: number;
+}
+
+/**
+ * The payload with the on-site fix attached, or unchanged when there is
+ * none.
+ *
+ * A separate step because of the WRITE, not the shape: the completion is
+ * keyed by its body (`bodyKeyedWriters`), so a fix that differed between
+ * a first attempt and its retry would mint a second idempotency key and
+ * could file the job twice. The routing layer captures one fix per sheet
+ * and hands the same value in every time — this function is what makes
+ * "the same value" produce "the same body".
+ */
+export function withSiteFix(
+  payload: CompleteSheetPayload,
+  fix: { latitude: number; longitude: number } | null,
+): CompleteSheetPayload {
+  return fix === null ? payload : { ...payload, latitude: fix.latitude, longitude: fix.longitude };
 }
 
 // ── the conditional branches ─────────────────────────────────────────────────

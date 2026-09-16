@@ -84,7 +84,7 @@ describe('NavTabBar renders the role group map', () => {
     technician: ['Dashboard', 'Jobs', 'Cash', 'Profile'],
     dispatcher: ['Dashboard', 'Operations', 'AMC', 'Profile'],
     sales_rep: ['Dashboard', 'Sales', 'Companies', 'Cash', 'Profile'],
-    owner: ['Dashboard', 'Operations', 'Sales', 'People', 'Profile'],
+    owner: ['Dashboard', 'Operations', 'Sales', 'People', 'Catalogue', 'Profile'],
   };
 
   for (const [role, labels] of Object.entries(LABELS)) {

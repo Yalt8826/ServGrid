@@ -159,3 +159,26 @@ export async function findPaymentReceivedBy(db: Db, paymentId: string): Promise<
   );
   return r.rows[0]?.received_by ?? null;
 }
+
+/**
+ * The newest attachment of one kind on one owner row — the payment
+ * proof-photo lookup behind GET /v1/payments/:id/proof. The ledger's
+ * payment rows carry no attachment id (§9: the photo is its own
+ * document, uploaded after the money), so the read goes owner → latest
+ * photo, newest upload wins. NULL owner columns ride WITH_OWNER_SELECT
+ * so checkReadAccess sees the same row shape as the by-id read.
+ */
+export async function findLatestOwnerAttachment(
+  db: Db,
+  ownerType: AttachmentOwnerType,
+  ownerId: string,
+  kind: AttachmentKind,
+): Promise<AttachmentWithOwnerRow | null> {
+  const r = await db.query<AttachmentWithOwnerRow>(
+    `${WITH_OWNER_SELECT} WHERE a.owner_type = $1 AND a.owner_id = $2 AND a.kind = $3
+     ORDER BY a.uploaded_at DESC
+     LIMIT 1`,
+    [ownerType, ownerId, kind],
+  );
+  return r.rows[0] ?? null;
+}

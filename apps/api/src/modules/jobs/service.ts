@@ -22,6 +22,7 @@ import type { PoolClient } from 'pg';
 import type { RequestSource } from '../../plugins/request-context.js';
 import type { JobCompletionPart, JobStackChange } from '@servgrid/shared';
 import type { AssignmentPush } from '../notifications/service.js';
+import * as customersRepo from '../customers/repo.js';
 import * as repo from './repo.js';
 import * as dispatcherRepo from './repo.dispatcher.js';
 
@@ -1237,6 +1238,12 @@ export interface CompletionInput {
   stackChanges?: JobStackChange[];
   /** §6.2 step 6 — what was fitted or consumed. A record, not a bill: nothing here touches cost. */
   parts?: JobCompletionPart[];
+  /**
+   * The device's on-site fix (§6.4, 2026-09-17). Both or neither — the
+   * completion row stores it and the customer's site pin takes it.
+   */
+  latitude?: number;
+  longitude?: number;
 }
 
 /** POST /v1/jobs/:id/complete (§6.2) — one transaction, eight steps. */
@@ -1307,7 +1314,22 @@ export async function completeJob(
         collectionMode,
         paymentReference,
         customerSigned,
+        // Where he stood when he filed it. Absent when the device had no
+        // fix (permission refused, no lock, capture never ran) — the
+        // columns are nullable and the schema enforces the pair.
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
       });
+
+      // Step 2b — the site's own pin. The person who had to find the
+      // place is the best source for where it is, so an on-site fix
+      // becomes the customer's coordinates; that is what makes the next
+      // visit findable. It rides THIS transaction (both or neither) and
+      // overwrites: the completion row keeps every point ever captured,
+      // so the latest on-site truth is the one worth keeping on the site.
+      if (input.latitude !== undefined && input.longitude !== undefined) {
+        await customersRepo.setSitePin(client, job.customer_id, input.latitude, input.longitude);
+      }
 
       // Step 3 — close the card at the moment the work happened.
       await repo.completeJobCard(client, jobId, completedAt);

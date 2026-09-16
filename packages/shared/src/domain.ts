@@ -61,6 +61,8 @@ export interface Customer {
   altPhone: string | null;
   addressLine1: string | null;
   addressLine2: string | null;
+  /** The locality — "Rajajinagar", "HSR Layout" (migration 021). */
+  area: string | null;
   city: string | null;
   pincode: string | null;
   notes: string | null;

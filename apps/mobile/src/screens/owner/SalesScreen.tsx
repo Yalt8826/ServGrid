@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import type { SaleRecord } from '@servgrid/shared';
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button, EmptyState } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
@@ -22,6 +23,7 @@ import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from '../../components/ui';
 import { DeskTable } from './deskTable';
 import type { SortState } from './deskTable';
+import { SaleItemsSheet, type PreviewSubject } from './ledgerPreviews';
 import { salesRunningTotalOf, sortOwnerSales, type OwnerSaleRow } from './model';
 import { VoidReasonSheet } from './VoidReasonSheet';
 
@@ -35,6 +37,8 @@ export interface OwnerSalesScreenProps {
   voidBusy: boolean;
   voidError: string | null;
   onRetry: () => void;
+  /** A row, pressed — resolves the card's line items for the preview. */
+  onLoadSale: (saleId: string) => Promise<SaleRecord | null>;
   testID?: string;
 }
 
@@ -47,6 +51,8 @@ export const SALE_STATUS_PILL: Record<OwnerSaleRow['status'], { label: string; c
 export function OwnerSalesScreen(props: OwnerSalesScreenProps): React.ReactNode {
   const [sort, setSort] = useState<SortState>({ key: 'saleDate', dir: 'desc' });
   const [voidTarget, setVoidTarget] = useState<OwnerSaleRow | null>(null);
+  // One state: which row is previewing. The sheet owns its own read.
+  const [preview, setPreview] = useState<PreviewSubject | null>(null);
   const density = useDensity();
   const desk = density === 'desk';
   const rows = sortOwnerSales(props.rows);
@@ -75,13 +81,16 @@ export function OwnerSalesScreen(props: OwnerSalesScreenProps): React.ReactNode 
             sort={sort}
             onSort={setSort}
             scrollTestID="owner-sales-table"
+            // The row IS the door to its products (owner, 2026-09-17) —
+            // the same preview the company ledger's rows open.
+            onRowPress={(r) => setPreview({ id: r.id, number: r.saleNumber })}
             columns={[
               {
                 key: 'saleNumber',
                 label: 'Number',
                 width: 140,
                 render: (r) => (
-                  <Text style={styles.monoCell} testID={`sale-number-${r.id}`}>
+                  <Text numberOfLines={1} style={styles.monoCell} testID={`sale-number-${r.id}`}>
                     {r.saleNumber ?? 'Draft'}
                   </Text>
                 ),
@@ -91,21 +100,21 @@ export function OwnerSalesScreen(props: OwnerSalesScreenProps): React.ReactNode 
                 key: 'companyName',
                 label: 'Company',
                 width: null,
-                render: (r) => <Text style={styles.cell}>{r.companyName}</Text>,
+                render: (r) => <Text style={styles.cell} numberOfLines={1}>{r.companyName}</Text>,
                 sortValue: (r) => r.companyName,
               },
               {
                 key: 'repName',
                 label: 'Rep',
                 width: 120,
-                render: (r) => <Text style={styles.cell}>{r.repName ?? '—'}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.cell}>{r.repName ?? '—'}</Text>,
                 sortValue: (r) => r.repName ?? '',
               },
               {
                 key: 'saleDate',
                 label: 'Date',
                 width: 96,
-                render: (r) => <Text style={styles.monoCell}>{formatDateEnIN(r.saleDate, nowYear)}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{formatDateEnIN(r.saleDate, nowYear)}</Text>,
                 sortValue: (r) => r.saleDate,
               },
               {
@@ -113,15 +122,15 @@ export function OwnerSalesScreen(props: OwnerSalesScreenProps): React.ReactNode 
                 label: 'Total',
                 width: 110,
                 align: 'right',
-                render: (r) => <Text style={styles.monoCell}>{`₹${formatMoneyEnIN(r.total)}`}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{`₹${formatMoneyEnIN(r.total)}`}</Text>,
                 sortValue: (r) => Number(r.total),
               },
               {
                 key: 'status',
                 label: 'Status',
-                width: 90,
+                width: 96,
                 render: (r) => (
-                  <Text style={[styles.pill, { color: SALE_STATUS_PILL[r.status].color }]} testID={`sale-status-${r.id}`}>
+                  <Text numberOfLines={1} style={[styles.pill, { color: SALE_STATUS_PILL[r.status].color }]} testID={`sale-status-${r.id}`}>
                     {SALE_STATUS_PILL[r.status].label}
                   </Text>
                 ),
@@ -172,6 +181,13 @@ export function OwnerSalesScreen(props: OwnerSalesScreenProps): React.ReactNode 
           })}
         </ScrollView>
       )}
+
+      <SaleItemsSheet
+        sale={preview}
+        onLoad={props.onLoadSale}
+        onDismiss={() => setPreview(null)}
+        testID="owner-sales-items-sheet"
+      />
 
       <VoidReasonSheet
         visible={voidTarget !== null}

@@ -48,7 +48,10 @@ export function AttentionTable({
     {
       key: 'detail',
       label: 'Detail',
-      width: 280,
+      // The feed is a full-width row on the dashboard now, so Detail can
+      // carry a whole line ("Collected ₹19,000 on 14 Sep") instead of
+      // shedding characters (2026-09-17).
+      width: 320,
       sortValue: (row) => row.meta,
       render: (row) => (
         <Text numberOfLines={1} style={[textStyle('body', 'desk'), { color: SEMANTIC.text.secondary }]}>
@@ -59,7 +62,10 @@ export function AttentionTable({
     {
       key: 'flag',
       label: 'Flag',
-      width: 150,
+      // Wide enough for the longest flag word ("missing submission") to
+      // read whole — the flag IS the reason the row is on this screen, so
+      // an ellipsis here costs the owner the one word he came for.
+      width: 168,
       align: 'right',
       sortValue: (row) => row.note,
       render: (row) => (

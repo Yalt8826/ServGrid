@@ -135,6 +135,99 @@ export function StackSection({
   );
 }
 
+/**
+ * The site's address and its captured location — one block, both detail
+ * screens (2026-09-17).
+ *
+ * The owner asked for a site to read as three distinct things: its
+ * **area** (the locality), its **address**, and its **location** (where
+ * the technician actually stood). This renders the last two; the area
+ * leads the address line, because a locality is the part of an address
+ * a person navigates by. The owner's console and the dispatcher's phone
+ * mount the same block through the same import — `StackSection`'s
+ * precedent — so the two can never describe a site differently.
+ *
+ * The coordinates are shown to six decimals, which is ~10cm: enough that
+ * a technician reading them off one screen into another lands on the
+ * gate rather than the street. `onOpenMap` is the caller's, because only
+ * the caller knows how its platform opens a map.
+ */
+export interface SiteFactFields {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  area: string | null;
+  city: string | null;
+  pincode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/** "Rajajinagar · Bengaluru 560010", skipping whatever is unknown. */
+export function areaLineOf(facts: {
+  area: string | null;
+  city: string | null;
+  pincode: string | null;
+}): string | null {
+  const place = [facts.city, facts.pincode].filter((p): p is string => p !== null && p !== '').join(' ');
+  const parts = [facts.area, place].filter((p) => p !== null && p !== '');
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
+export function SiteFacts({
+  facts,
+  onOpenMap,
+}: {
+  facts: SiteFactFields;
+  onOpenMap?: (latitude: number, longitude: number) => void;
+}): React.ReactNode {
+  const areaLine = areaLineOf(facts);
+  const pinned = facts.latitude !== null && facts.longitude !== null;
+  return (
+    <>
+      <View style={styles.section} testID="customer-address-block">
+        <Text style={styles.sectionLabel}>Address</Text>
+        {facts.addressLine1 !== null && facts.addressLine1 !== '' ? (
+          <Text style={styles.body} testID="customer-address">
+            {facts.addressLine1}
+          </Text>
+        ) : null}
+        {facts.addressLine2 !== null && facts.addressLine2 !== '' ? (
+          <Text style={styles.body}>{facts.addressLine2}</Text>
+        ) : null}
+        {areaLine !== null ? (
+          <Text style={[styles.body, styles.areaText]} testID="customer-area">
+            {areaLine}
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={styles.section} testID="customer-location-block">
+        <Text style={styles.sectionLabel}>Location</Text>
+        {pinned ? (
+          <Pressable
+            testID="customer-location"
+            accessibilityRole={onOpenMap === undefined ? undefined : 'link'}
+            accessibilityLabel="Open the site on a map"
+            onPress={onOpenMap === undefined ? undefined : () => onOpenMap(facts.latitude!, facts.longitude!)}
+            style={styles.stackRow}
+          >
+            <Text style={styles.body}>
+              {`${facts.latitude!.toFixed(6)}, ${facts.longitude!.toFixed(6)}`}
+            </Text>
+            {onOpenMap === undefined ? null : <Text style={styles.stackEditLabel}>Map</Text>}
+          </Pressable>
+        ) : (
+          // No pin yet is a fact about the site, not a broken screen — and
+          // it says who fills it, because the office cannot.
+          <Text style={[styles.body, styles.areaText]} testID="customer-location-empty">
+            Not recorded yet — a technician captures this on site.
+          </Text>
+        )}
+      </View>
+    </>
+  );
+}
+
 // ── the history row — the `JobRow` (03-COMPONENTS.md), 56 tall ───────────
 
 /** `assigned` has no dedicated ramp entry — it rides the unassigned
@@ -292,6 +385,8 @@ export interface CustomerDetailDeps {
   historyError: string | null;
   /** Phones are tappable to call (§D4) — the route owns the dialler. */
   onCall(phone: string): void;
+  /** The site's captured location, opened in whatever map the platform has. */
+  onOpenMap?(latitude: number, longitude: number): void;
   onEdit(): void;
   onOpenJob(jobId: string): void;
   onRetry(): void;
@@ -331,22 +426,7 @@ export function CustomerDetailScreen(deps: CustomerDetailDeps): React.ReactNode 
             {detail.altPhone !== null ? phoneRow(detail.altPhone, 'customer-call-alt', deps.onCall) : null}
           </View>
 
-          <View style={styles.section} testID="customer-address-block">
-            <Text style={styles.sectionLabel}>Address</Text>
-            {detail.addressLine1 !== null ? (
-              <Text style={styles.body} testID="customer-address">
-                {detail.addressLine1}
-              </Text>
-            ) : null}
-            {detail.addressLine2 !== null ? (
-              <Text style={styles.body}>{detail.addressLine2}</Text>
-            ) : null}
-            {detail.city !== null || detail.pincode !== null ? (
-              <Text style={[styles.body, styles.areaText]} testID="customer-area">
-                {[detail.city, detail.pincode].filter((part) => part !== null).join(' · ')}
-              </Text>
-            ) : null}
-          </View>
+          <SiteFacts facts={detail} onOpenMap={deps.onOpenMap} />
 
           {/* The stack, READ-ONLY: the capability is passed down as a prop
           (`editable={false}`), never read from a role — §D4's second
@@ -517,6 +597,15 @@ export function CustomerFormScreen(deps: CustomerFormDeps): React.ReactNode {
       ) : null}
       <View style={styles.fieldWrap}>
         <TextField label="Alt phone" value={fields.altPhone} onChangeText={change('altPhone')} testID="customer-field-alt-phone" />
+      </View>
+      <View style={styles.fieldWrap}>
+        <TextField
+          label="Area"
+          value={fields.area}
+          onChangeText={change('area')}
+          placeholder="Rajajinagar, Koramangala…"
+          testID="customer-field-area"
+        />
       </View>
       <View style={styles.fieldWrap}>
         <TextField label="Address line 1" value={fields.addressLine1} onChangeText={change('addressLine1')} testID="customer-field-address1" />

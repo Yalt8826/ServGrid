@@ -49,20 +49,21 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
       {!props.loading && props.error === null && rows.length === 0 ? (
         <EmptyState message="No products in the catalogue yet." testID="owner-products-empty" />
       ) : desk ? (
-        <Panel padded={false} grow>
+        <Panel padded={false}>
           <DeskTable
           data={rows}
           rowKey={(r) => r.id}
           sort={sort}
           onSort={setSort}
           scrollTestID="owner-products-table"
+          maxHeight={640}
           columns={[
             {
               key: 'sku',
               label: 'SKU',
-              width: 120,
+              width: 156,
               render: (r) => (
-                <Text style={styles.monoCell} testID={`product-sku-${r.id}`}>
+                <Text numberOfLines={1} style={styles.monoCell} testID={`product-sku-${r.id}`}>
                   {r.sku}
                 </Text>
               ),
@@ -72,45 +73,45 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
               key: 'name',
               label: 'Name',
               width: null,
-              render: (r) => <Text style={styles.cell}>{r.name}</Text>,
+              render: (r) => <Text numberOfLines={1} style={styles.cell}>{r.name}</Text>,
               sortValue: (r) => r.name,
             },
             {
               key: 'category',
               label: 'Category',
               width: 96,
-              render: (r) => <Text style={styles.cell}>{PRODUCT_CATEGORY_LABELS[r.category]}</Text>,
+              render: (r) => <Text numberOfLines={1} style={styles.cell}>{PRODUCT_CATEGORY_LABELS[r.category]}</Text>,
               sortValue: (r) => r.category,
             },
             {
               key: 'brand',
               label: 'Brand',
               width: 110,
-              render: (r) => <Text style={styles.cell}>{r.brand ?? '—'}</Text>,
+              render: (r) => <Text numberOfLines={1} style={styles.cell}>{r.brand ?? '—'}</Text>,
               sortValue: (r) => r.brand ?? '',
             },
             {
               key: 'defaultPrice',
               label: 'Default price',
-              width: 110,
+              width: 120,
               align: 'right',
-              render: (r) => <Text style={styles.monoCell}>{r.defaultPrice === null ? '—' : `₹${formatMoneyEnIN(r.defaultPrice)}`}</Text>,
+              render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{r.defaultPrice === null ? '—' : `₹${formatMoneyEnIN(r.defaultPrice)}`}</Text>,
               sortValue: (r) => (r.defaultPrice === null ? -1 : Number(r.defaultPrice)),
             },
             {
               key: 'warrantyMonths',
               label: 'Warranty',
-              width: 88,
+              width: 96,
               align: 'right',
-              render: (r) => <Text style={styles.monoCell}>{r.warrantyMonths === null ? '—' : `${r.warrantyMonths} mo`}</Text>,
+              render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{r.warrantyMonths === null ? '—' : `${r.warrantyMonths} mo`}</Text>,
               sortValue: (r) => (r.warrantyMonths === null ? -1 : r.warrantyMonths),
             },
             {
               key: 'isActive',
               label: 'Active',
-              width: 70,
+              width: 76,
               render: (r) => (
-                <Text style={[styles.cell, { color: r.isActive ? SEMANTIC.text.primary : SEMANTIC.text.secondary }]} testID={`product-active-${r.id}`}>
+                <Text numberOfLines={1} style={[styles.cell, { color: r.isActive ? SEMANTIC.text.primary : SEMANTIC.text.secondary }]} testID={`product-active-${r.id}`}>
                   {r.isActive ? 'Yes' : 'No'}
                 </Text>
               ),

@@ -14,8 +14,16 @@ import type { JobStatus } from '@servgrid/shared';
 export interface OwnerCustomerRow {
   id: string;
   name: string;
-  /** `addressLine1`, or the city when the line is missing. */
+  /**
+   * The locality — "Rajajinagar", "HSR Layout" — from the column the
+   * migration added. It used to be derived from `addressLine1 ?? city`,
+   * which is why the console's "area" column showed a street.
+   */
   area: string | null;
+  /** The full address, composed for one cell: both lines, then area/city/pincode. */
+  address: string | null;
+  /** Where a technician last stood, as "12.971600, 77.594600"; null = never captured. */
+  location: string | null;
   phone: string;
   companyId: string | null;
   companyName: string | null;

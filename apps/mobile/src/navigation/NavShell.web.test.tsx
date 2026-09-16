@@ -15,17 +15,19 @@
  *   language — never a filled pill (no accent background anywhere in
  *   the rail, no radius on any item);
  * - the shell sets density `desk` on this branch and only here;
- * - no collapse control exists — 14 route links, nothing else
- *   pressable, and no collapse notion in the source.
+ * - the rail collapses and expands (owner, 2026-09-17) — the reversal of
+ *   this file's original "no collapse control exists" guard, which
+ *   encoded the FIRST phase's decision. The owner asked for the control
+ *   for the reason that decision missed: his widest screens are tables,
+ *   and a rail spending 168px on labels is a table's last column.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
 
 import { act } from 'react';
 
-import { COLORS, type Density } from '@servgrid/shared';
+import { COLORS, DESK, type Density } from '@servgrid/shared';
+
+const DESK_RAIL_COLLAPSED_WIDTH = DESK.rail.collapsedWidth;
 
 const viewport = vi.hoisted(() => ({ width: 1280 }));
 const route = vi.hoisted(() => ({ pathname: '/dashboard', navigated: '' }));
@@ -51,8 +53,6 @@ import { useSessionStore } from '../state/sessionStore';
 import { useDensity } from '../components/ui/DensityProvider';
 import { findAll, findByTestID, allText, create, toJson, type Node } from '../components/ui/testing';
 
-const NAV_SHELL_SOURCE = readFileSync(join(fileURLToPath(new URL('./', import.meta.url).href), 'NavShell.tsx'), 'utf8');
-
 /** The owner's rail, top to bottom (07-OWNER.md): five sections matching
  * the phone's five groups exactly, expanded to individual routes. The
  * Dashboard section is a bare item — no heading repeated under itself —
@@ -70,7 +70,10 @@ const OWNER_RAIL_TEXTS = [
   'Operations', 'Jobs', 'Dispatch', 'Customers', 'AMC',
   'Sales', 'Sales', 'Payments', 'Companies',
   'People', 'Employees', 'Location', 'Cash queue',
-  'Profile', 'Profile', 'Products', 'Services',
+  'Catalogue', 'Products', 'Services',
+  // The Profile section head is skipped by design: a group whose single
+  // route is named like the group renders the link alone (07-OWNER.md).
+  'Profile',
 ];
 
 let densitySeen: Density | null = null;
@@ -116,12 +119,13 @@ beforeEach(() => {
 });
 
 describe('NavShell desk branch — the 240px rail at ≥1024px', () => {
-  it('renders the owner’s five sections in order, expanded to routes', async () => {
+  it('renders the owner’s six sections in order, expanded to routes', async () => {
     const renderer = await mountShell();
     const tree = toJson(renderer);
     expect(findByTestID(tree, 'desk-rail')).toBeTruthy();
     expect(allText(tree)).toEqual(OWNER_RAIL_TEXTS);
-    // 14 individual routes: 1 + 4 + 3 + 3 + 3.
+    // 14 individual routes: 1 + 4 + 3 + 3 + 2 + 1. The catalogue is its
+    // own section — under PROFILE the lists read as profile settings.
     expect(railLinks(tree)).toHaveLength(14);
     // The phone presentation is gone on this branch.
     expect(findByTestID(tree, 'nav-underline')).toBeUndefined();
@@ -153,7 +157,7 @@ describe('NavShell below the breakpoint — tabs render', () => {
     expect(findByTestID(tree, 'desk-rail')).toBeUndefined();
     expect(findByTestID(tree, 'nav-underline')).toBeTruthy();
     expect(findAll(tree, (n) => n.props.accessibilityRole === 'tablist')).toHaveLength(1);
-    expect(allText(tree)).toEqual(['Dashboard', 'Operations', 'Sales', 'People', 'Profile']);
+    expect(allText(tree)).toEqual(['Dashboard', 'Operations', 'Sales', 'People', 'Catalogue', 'Profile']);
     expect(densitySeen).toBe('field');
   });
 });
@@ -197,21 +201,95 @@ describe('NavShell active state — the 2px accent bar, never a filled pill', ()
   });
 });
 
-describe('no collapse control exists', () => {
-  // The spec's own words ("The rail does not collapse") live in the doc
-  // comment; the CODE must never act on the idea. Strip comments, then
-  // read what remains.
-  const NAV_SHELL_CODE = NAV_SHELL_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-
-  it('the code never speaks of collapsing', () => {
-    expect(/collaps/i.test(NAV_SHELL_CODE)).toBe(false);
-  });
-
-  it('the rail is 14 route links and nothing else pressable', async () => {
+describe('the rail collapses and expands (owner, 2026-09-17)', () => {
+  it('opens expanded at the full 240, with the control the only non-link pressable', async () => {
     const renderer = await mountShell();
     const rail = findByTestID(toJson(renderer), 'desk-rail');
     const pressables = findAll(rail ?? null, (n) => n.type === 'Pressable');
-    expect(pressables).toHaveLength(14);
-    expect(pressables.every((n) => n.props.accessibilityRole === 'link')).toBe(true);
+    // 14 route links plus the collapse control — and the control is a
+    // button, never a link: it navigates nowhere.
+    expect(pressables).toHaveLength(15);
+    const links = pressables.filter((n) => n.props.accessibilityRole === 'link');
+    expect(links).toHaveLength(14);
+    const control = pressables.filter((n) => n.props.accessibilityRole === 'button');
+    expect(control).toHaveLength(1);
+    expect(control[0]!.props.testID).toBe('desk-rail-collapse');
+    expect(flatStyle(control[0]!).backgroundColor).not.toBe(COLORS.accent);
+  });
+
+  it('collapsing narrows the rail to the token width and drops the labels, never the marks', async () => {
+    const renderer = await mountShell();
+    const control = () => findByTestID(toJson(renderer), 'desk-rail-collapse')!;
+    const rail = () => flatStyle(findByTestID(toJson(renderer), 'desk-rail')!);
+
+    expect(rail().flexBasis).toBe(240);
+    await act(async () => {
+      (control().props.onPress as () => void)();
+    });
+    expect(rail().flexBasis).toBe(DESK_RAIL_COLLAPSED_WIDTH);
+    expect(rail().width).toBe(DESK_RAIL_COLLAPSED_WIDTH);
+
+    // The labels are gone; the marks — the whole interface at this width
+    // — are all still there, one per route.
+    const texts = allText(toJson(renderer));
+    expect(texts).not.toContain('Jobs');
+    expect(texts).not.toContain('Customers');
+    const marks = findAll(toJson(renderer), (n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('rail-mark-'));
+    // 14 route marks + the 5 section marks' 4 headings (Dashboard is bare).
+    expect(marks.length).toBeGreaterThanOrEqual(14);
+
+    // …and it comes back.
+    await act(async () => {
+      (control().props.onPress as () => void)();
+    });
+    expect(rail().flexBasis).toBe(240);
+    expect(allText(toJson(renderer))).toContain('Jobs');
+  });
+
+  it('the control is never navigation — pressing it does not route', async () => {
+    const renderer = await mountShell();
+    route.navigated = '';
+    const control = findByTestID(toJson(renderer), 'desk-rail-collapse')!;
+    await act(async () => {
+      (control.props.onPress as () => void)();
+    });
+    expect(route.navigated).toBe('');
+  });
+});
+
+describe('the rail lights exactly ONE route — the most specific match', () => {
+  it('Dispatch (/jobs/new) lights Dispatch alone, never Jobs', async () => {
+    // The reported bug (owner, 2026-09-17): `/jobs/new` is inside `/jobs`
+    // by prefix, so testing each item on its own lit both entries.
+    route.pathname = '/jobs/new';
+    const renderer = await mountShell();
+    const links = railLinks(toJson(renderer));
+    const selected = links.filter(
+      (n) => (n.props.accessibilityState as { selected?: boolean } | undefined)?.selected === true,
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.props.accessibilityLabel).toBe('Dispatch');
+  });
+
+  it('Jobs lights Jobs alone — the parent is not shadowed by its child', async () => {
+    route.pathname = '/jobs';
+    const renderer = await mountShell();
+    const links = railLinks(toJson(renderer));
+    const selected = links.filter(
+      (n) => (n.props.accessibilityState as { selected?: boolean } | undefined)?.selected === true,
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.props.accessibilityLabel).toBe('Jobs');
+  });
+
+  it('a job detail page lights its own section, not the create form', async () => {
+    route.pathname = '/jobs/2627-00086';
+    const renderer = await mountShell();
+    const links = railLinks(toJson(renderer));
+    const selected = links.filter(
+      (n) => (n.props.accessibilityState as { selected?: boolean } | undefined)?.selected === true,
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.props.accessibilityLabel).toBe('Jobs');
   });
 });

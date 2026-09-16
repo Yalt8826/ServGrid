@@ -58,9 +58,23 @@ export const NOTHING_NEEDS_ATTENTION = 'Nothing needs attention.';
 /** §O1 States/offline: the banner's words — the owner's figures are not live. */
 export const OFFLINE_BANNER_MESSAGE = 'No connection. Figures are not live.';
 
+/**
+ * The console greets the owner by name (owner, 2026-09-17). "Welcome
+ * back" and not "Good morning": the owner opens this console at whatever
+ * hour his day ended, and a clock-dependent greeting is wrong exactly
+ * when he is tired. Empty when the name has not resolved yet — the
+ * header's shape must not jump when it lands.
+ */
+export function welcomeGreeting(name: string): string {
+  const trimmed = name.trim();
+  return trimmed === '' ? '' : `Welcome back, ${trimmed}`;
+}
+
 export interface OwnerDashboardDeps {
   /** Injectable clock — chart captions and relative times are judged by it. */
   now: Date;
+  /** The signed-in owner's name, for the header's greeting. Empty until it resolves. */
+  ownerName: string;
   offline: boolean;
   /** The four figures, display-formatted; null = not loaded yet. */
   figures: OwnerFigure[] | null;
@@ -190,7 +204,12 @@ function AttentionSection({
         <EmptyState message={NOTHING_NEEDS_ATTENTION} testID="owner-attention-empty" />
       ) : deps.attention !== null ? (
         desk ? (
-          <AttentionTable rows={deps.attention} onOpen={deps.onOpenRow} />
+          // The bound keeps an 80-row feed from stretching the page into
+          // a blank half-screen beside the short charts column — the
+          // table scrolls inside its card instead (2026-09-16 walk).
+          <View style={{ height: 560 }}>
+            <AttentionTable rows={deps.attention} onOpen={deps.onOpenRow} />
+          </View>
         ) : (
           <AttentionRows rows={deps.attention} onOpen={deps.onOpenRow} testIDPrefix="owner-attention-row" />
         )
@@ -254,6 +273,8 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
       </View>
     );
 
+  const greeting = welcomeGreeting(deps.ownerName);
+
   return (
     <ScrollView
       testID="owner-dashboard"
@@ -262,7 +283,12 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
       style={{ flex: 1, backgroundColor: desk ? 'transparent' : SEMANTIC.bg.app }}
       contentContainerStyle={pageContentStyle(desk)}
     >
-      <PageHeader title="Dashboard" subtitle={dashboardSubtitle(deps.now)} testID="owner" />
+      <PageHeader
+        title="Dashboard"
+        greeting={greeting === '' ? undefined : greeting}
+        subtitle={dashboardSubtitle(deps.now)}
+        testID="owner"
+      />
 
       {deps.offline ? (
         <Banner tone="danger" message={OFFLINE_BANNER_MESSAGE} testID="owner-offline-banner" />
@@ -303,30 +329,17 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
 
       {deps.performanceSlot ?? null}
 
-      {desk ? (
-        // Desk anatomy: charts side by side, the attention table to their right.
-        <View style={{ flexDirection: 'row', gap: SPACE[6], alignSelf: 'stretch' }}>
-          <View style={{ flex: 1 }}>
-            {showChartSkeleton ? (
-              <Skeleton width="100%" height={chartHeight} radius={0} testID="owner-charts-skeleton" />
-            ) : (
-              charts
-            )}
-          </View>
-          <View style={{ width: 420, flexShrink: 0 }} testID="owner-attention-column">
-            <AttentionSection deps={deps} desk={desk} showSkeleton={showAttentionSkeleton} />
-          </View>
-        </View>
+      {/* Both densities agree now: the charts, then Needs attention in its
+      own full-width row beneath them. The desk used to hold the feed in a
+      600px column beside the charts, which read as a sidebar rather than
+      the section that earns the screen — and it starved the charts of the
+      width they were just given (owner, 2026-09-17). */}
+      {showChartSkeleton ? (
+        <Skeleton width="100%" height={chartHeight} radius={0} testID="owner-charts-skeleton" />
       ) : (
-        <>
-          {showChartSkeleton ? (
-            <Skeleton width="100%" height={chartHeight} radius={0} testID="owner-charts-skeleton" />
-          ) : (
-            charts
-          )}
-          <AttentionSection deps={deps} desk={desk} showSkeleton={showAttentionSkeleton} />
-        </>
+        charts
       )}
+      <AttentionSection deps={deps} desk={desk} showSkeleton={showAttentionSkeleton} />
     </ScrollView>
   );
 }

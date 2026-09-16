@@ -241,11 +241,37 @@ export const DESK = {
   rail: {
     /** 240 as specified (07-OWNER.md) — the width was never the dull part. */
     width: 240,
+    /**
+     * Collapsed: wide enough for a 16px mark, its two paddings and the
+     * active bar — the rail gives the page back when a wide table needs
+     * the room. The owner asked for a collapse control on 2026-09-17;
+     * the control lives in the rail's head.
+     */
+    collapsedWidth: 72,
     bg: SLATE[900],
     /** A pointer needs to see what it is over; slate.700 is the one step up that is not a colour change. */
     hover: SLATE[700],
     activeBg: SLATE[700],
+    /**
+     * `heading` tints the rail's icons and its collapse control — the
+     * neutral chrome tones.
+     */
     heading: SLATE[400],
+    /**
+     * The section labels, in the product's safety yellow (owner,
+     * 2026-09-17: "change the color of the section heads to the safety
+     * yellow that is throughout the web and app").
+     *
+     * Accent TEXT, never an accent fill. The rail's one filled accent is
+     * the active route's 2px bar, and NavShell.web.test.tsx holds that
+     * line by asserting no element in the rail carries an accent
+     * backgroundColor. A yellow label breaks none of it: 9.8:1 on
+     * slate.900, and the headings read as the groups they name rather
+     * than as another grey row.
+     */
+    headingStrong: COLORS.accent,
+    /** The hairline above a section, and the one a collapsed rail shows instead of a heading. */
+    divider: SLATE[700],
     item: SLATE[300],
     itemActive: COLORS.surface,
     activeBar: COLORS.accent,

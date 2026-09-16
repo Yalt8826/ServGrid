@@ -130,6 +130,8 @@ describe('OwnerCompanyDetailScreen — the control lives here too, and only here
         error={null}
         loading={false}
         reps={REPS}
+        onLoadSale={async () => null}
+        onLoadPaymentProof={async () => null}
         onReassign={() => {}}
         reassignBusy={false}
         reassignError={null}

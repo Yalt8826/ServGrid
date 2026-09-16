@@ -37,6 +37,7 @@ import {
   NOTHING_NEEDS_ATTENTION,
   OFFLINE_BANNER_MESSAGE,
   OwnerDashboardScreen,
+  welcomeGreeting,
   type OwnerDashboardDeps,
 } from './dashboard';
 import type { AttentionItem, AttentionRowVm, JobsPerDayPoint, RevenuePerWeekPoint } from './model';
@@ -75,6 +76,7 @@ const figuresFixture = [
 function baseDeps(overrides: Partial<OwnerDashboardDeps> = {}): OwnerDashboardDeps {
   return {
     now: NOW,
+    ownerName: 'Yashas',
     offline: false,
     figures: figuresFixture.map((f) => ({ ...f })),
     jobsPerDay: jobsPerDayFixture(),
@@ -139,6 +141,38 @@ function accentNodes(root: Node): Node[] {
 }
 
 // ── the tests ────────────────────────────────────────────────────────────
+
+describe('OwnerDashboardScreen (§O1) — the welcome', () => {
+  it('greets the owner by name, above the title, on both densities', async () => {
+    for (const density of ['field', 'desk'] as const) {
+      const renderer = await renderScreen(baseDeps({ ownerName: 'Yashas' }), density);
+      expect(textOf(renderer, 'owner-greeting')).toBe('Welcome back, Yashas');
+      // The page's identity is still the title beneath it — the greeting
+      // names the person, not the screen.
+      expect(textOf(renderer, 'owner-title')).toBe('Dashboard');
+    }
+  });
+
+  it('degrades to the username before the name resolves, and never greets nobody', async () => {
+    // The route passes the session's username until `/auth/me` lands, so
+    // the greeting reads a real name from the first frame.
+    const viaUsername = await renderScreen(baseDeps({ ownerName: 'owner' }));
+    expect(textOf(viaUsername, 'owner-greeting')).toBe('Welcome back, owner');
+
+    // An unresolved EMPTY name renders no greeting line at all — the
+    // header must not reserve a line and then fill it, and "Welcome
+    // back, " over nothing reads as a broken screen.
+    const blank = await renderScreen(baseDeps({ ownerName: '   ' }));
+    expect(findByTestID(toJson(blank), 'owner-greeting')).toBeUndefined();
+    expect(textOf(blank, 'owner-title')).toBe('Dashboard');
+  });
+
+  it('says "Welcome back" whatever the hour — the owner opens this when his day ends', () => {
+    expect(welcomeGreeting('Yashas')).toBe('Welcome back, Yashas');
+    expect(welcomeGreeting('')).toBe('');
+    expect(welcomeGreeting('  ')).toBe('');
+  });
+});
 
 describe('OwnerDashboardScreen (§O1)', () => {
   it('renders the four figures in order, tabular, en-IN grouped — ₹1,00,000, not ₹100,000', async () => {

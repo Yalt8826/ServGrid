@@ -45,20 +45,21 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
       {!props.loading && props.error === null && rows.length === 0 ? (
         <EmptyState message="No services in the catalogue yet." testID="owner-services-empty" />
       ) : desk ? (
-        <Panel padded={false} grow>
+        <Panel padded={false}>
           <DeskTable
           data={rows}
           rowKey={(r) => r.id}
           sort={sort}
           onSort={setSort}
           scrollTestID="owner-services-table"
+          maxHeight={640}
           columns={[
             {
               key: 'code',
               label: 'Code',
               width: 110,
               render: (r) => (
-                <Text style={styles.monoCell} testID={`service-code-${r.id}`}>
+                <Text numberOfLines={1} style={styles.monoCell} testID={`service-code-${r.id}`}>
                   {r.code}
                 </Text>
               ),
@@ -67,15 +68,15 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
             {
               key: 'name',
               label: 'Name',
-              width: null,
-              render: (r) => <Text style={styles.cell}>{r.name}</Text>,
+              width: 160,
+              render: (r) => <Text numberOfLines={1} style={styles.cell}>{r.name}</Text>,
               sortValue: (r) => r.name,
             },
             {
               key: 'description',
               label: 'Description',
-              width: 240,
-              render: (r) => <Text style={styles.secondary}>{r.description ?? '—'}</Text>,
+              width: null,
+              render: (r) => <Text numberOfLines={1} style={styles.secondary}>{r.description ?? '—'}</Text>,
               sortValue: (r) => r.description ?? '',
             },
             {
@@ -83,15 +84,15 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
               label: 'Default charge',
               width: 120,
               align: 'right',
-              render: (r) => <Text style={styles.monoCell}>{r.defaultCharge === null ? '—' : `₹${formatMoneyEnIN(r.defaultCharge)}`}</Text>,
+              render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{r.defaultCharge === null ? '—' : `₹${formatMoneyEnIN(r.defaultCharge)}`}</Text>,
               sortValue: (r) => (r.defaultCharge === null ? -1 : Number(r.defaultCharge)),
             },
             {
               key: 'isActive',
               label: 'Active',
-              width: 70,
+              width: 76,
               render: (r) => (
-                <Text style={[styles.cell, { color: r.isActive ? SEMANTIC.text.primary : SEMANTIC.text.secondary }]} testID={`service-active-${r.id}`}>
+                <Text numberOfLines={1} style={[styles.cell, { color: r.isActive ? SEMANTIC.text.primary : SEMANTIC.text.secondary }]} testID={`service-active-${r.id}`}>
                   {r.isActive ? 'Yes' : 'No'}
                 </Text>
               ),

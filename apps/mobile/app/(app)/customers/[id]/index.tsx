@@ -19,7 +19,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
-import { CustomerDetailScreen } from '../../../../src/screens/dispatcher/customer';
+import { areaLineOf, CustomerDetailScreen } from '../../../../src/screens/dispatcher/customer';
+import { openSiteInMaps } from '../../../../src/lib/maps';
+import { Button, DeskListShell } from '../../../../src/components/ui';
 import { useCustomerDetail } from '../../../../src/screens/dispatcher/useCustomer';
 import { useDispatchJobLogsFlags } from '../../../../src/screens/dispatcher/useJobLogs';
 import { OwnerCustomerDetailBody } from '../../../../src/screens/owner/CustomerDetailBody';
@@ -36,7 +38,37 @@ function OwnerCustomerDetailRoute({ customerId }: { customerId: string }): React
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+      {/* The console's page furniture, like every other list's detail:
+          the site's name in the header, where it came from on the right.
+          The body below no longer paints its own name (showName={false})
+          — two headings for one site is what this console spent a phase
+          removing. */}
+      <DeskListShell
+        title={deps.detail?.name ?? 'Customer'}
+        subtitle={
+          deps.detail === null
+            ? undefined
+            : (areaLineOf(deps.detail) ?? 'No address recorded yet')
+        }
+        actions={
+          <>
+            <Button
+              label="← All customers"
+              variant="secondary"
+              onPress={() => router.push('/customers')}
+              testID="owner-customer-back"
+            />
+            <Button
+              label="Edit customer"
+              onPress={() => router.push(`/customers/${customerId}/edit`)}
+              testID="owner-customer-edit"
+            />
+          </>
+        }
+        testID="owner-customer-page"
+      >
       <OwnerCustomerDetailBody
+        showName={false}
         detail={deps.detail}
         loading={deps.loading}
         detailError={deps.detailError}
@@ -52,11 +84,10 @@ function OwnerCustomerDetailRoute({ customerId }: { customerId: string }): React
         onSaveStackItem={deps.onSaveStackItem}
         onRemoveStackItem={deps.onRemoveStackItem}
         onCall={deps.onCall}
-        onEdit={() => {
-          const id = deps.detail?.id;
-          if (id !== undefined) router.push(`/customers/${id}/edit`);
-        }}
         onOpenJob={deps.onOpenJob}
+        onOpenMap={(latitude, longitude) => {
+          void openSiteInMaps(latitude, longitude);
+        }}
         onOpenCompany={() => {
           const companyId = deps.detail?.companyId ?? null;
           if (companyId !== null) router.push(`/companies/${companyId}`);
@@ -64,6 +95,7 @@ function OwnerCustomerDetailRoute({ customerId }: { customerId: string }): React
         onRetry={deps.reload}
         testID="owner-customer-detail-screen"
       />
+      </DeskListShell>
     </SafeAreaView>
   );
 }
@@ -90,7 +122,12 @@ export default function Screen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
-      <CustomerDetailScreen {...deps} />
+      <CustomerDetailScreen
+        {...deps}
+        onOpenMap={(latitude, longitude) => {
+          void openSiteInMaps(latitude, longitude);
+        }}
+      />
     </SafeAreaView>
   );
 }

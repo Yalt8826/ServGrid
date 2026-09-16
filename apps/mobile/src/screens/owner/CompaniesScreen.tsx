@@ -11,11 +11,11 @@
  *
  * Phone: cards. Desktop: table with a running total of outstanding dues.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, DeskListShell, EmptyState, Panel, useDensity } from '../../components/ui';
+import { Banner, Button, DeskListShell, EmptyState, Panel, Select, TextField, useDensity } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView } from '../rep/money';
 import { DeskTable } from './deskTable';
@@ -27,6 +27,16 @@ import type { RepOption } from './ReassignSheet';
 /** The house-account option — first, because it is the answer when
  * nobody owns the account (§O5: how leave gets covered). */
 const HOUSE_OPTION: RepOption = { id: null, name: 'Nobody — house account' };
+
+/** The filter select's facets — the questions the owner actually asks
+ * of this list: who do I chase, what runs on the house. */
+const FILTER_OPTIONS = [
+  { value: 'all', label: 'All accounts' },
+  { value: 'dues', label: 'With outstanding dues' },
+  { value: 'house', label: 'House accounts' },
+] as const;
+
+type AccountFilter = (typeof FILTER_OPTIONS)[number]['value'];
 
 export interface OwnerCompaniesScreenProps {
   rows: OwnerCompanyRow[];
@@ -46,20 +56,35 @@ export interface OwnerCompaniesScreenProps {
 export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.ReactNode {
   const [sort, setSort] = useState<SortState>({ key: 'balance', dir: 'desc' });
   const [reassignTarget, setReassignTarget] = useState<OwnerCompanyRow | null>(null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<AccountFilter>('all');
   const density = useDensity();
   const desk = density === 'desk';
-  const rows = sortOwnerCompanies(props.rows);
+  const sorted = sortOwnerCompanies(props.rows);
+
+  // Client-side by design: the account list is small (it is the whole
+  // customer base of the business, capped well under the table's 200),
+  // and the reads already carry every field the facets need.
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return sorted.filter((r) => {
+      if (q !== '' && !r.name.toLowerCase().includes(q)) return false;
+      if (filter === 'dues') return r.balance !== null && Number(r.balance) > 0;
+      if (filter === 'house') return r.shared;
+      return true;
+    });
+  }, [sorted, query, filter]);
 
   const openReassign = (row: OwnerCompanyRow): void => setReassignTarget(row);
 
-  const totalDues = rows.reduce((acc, r) => (r.balance !== null && Number(r.balance) > 0 ? acc + Number(r.balance) : acc), 0);
+  const totalDues = sorted.reduce((acc, r) => (r.balance !== null && Number(r.balance) > 0 ? acc + Number(r.balance) : acc), 0);
 
   const repColumn = {
     key: 'ownerRepName',
     label: 'Owner rep',
-    width: 140,
+    width: 150,
     render: (r: OwnerCompanyRow) => (
-      <Text style={styles.cell} testID={`company-rep-${r.companyId}`}>
+      <Text numberOfLines={1} style={styles.cell} testID={`company-rep-${r.companyId}`}>
         {r.shared ? 'House account' : (r.ownerRepName ?? '—')}
       </Text>
     ),
@@ -69,7 +94,7 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
   const reassignColumn = {
     key: 'reassign',
     label: '',
-    width: 100,
+    width: 112,
     render: (r: OwnerCompanyRow) => (
       <Button
         label="Reassign"
@@ -80,8 +105,36 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
     ),
   };
 
+  const filtered = query.trim() !== '' || filter !== 'all';
+
   return (
-    <DeskListShell title="Companies" subtitle={desk ? `${rows.length} accounts` : undefined} testID={props.testID ?? 'owner-companies'}>
+    <DeskListShell
+      title="Companies"
+      subtitle={
+        desk
+          ? filtered
+            ? `${rows.length} of ${sorted.length} accounts`
+            : `${sorted.length} accounts`
+          : undefined
+      }
+      actions={
+        <>
+          <View style={{ minWidth: 240 }}>
+            <TextField label="Search" value={query} onChangeText={setQuery} placeholder="Company name" testID="owner-companies-search" />
+          </View>
+          <View style={{ minWidth: 220 }}>
+            <Select
+              label="Filter"
+              value={filter}
+              options={FILTER_OPTIONS.map((o) => ({ ...o }))}
+              onSelect={(v) => setFilter(v as AccountFilter)}
+              testID="owner-companies-filter"
+            />
+          </View>
+        </>
+      }
+      testID={props.testID ?? 'owner-companies'}
+    >
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-companies-error" />
       ) : null}
@@ -94,7 +147,7 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
             <Text style={styles.totalsLabel}>Outstanding dues</Text>
             <Text style={styles.totalsValue}>{`₹${formatMoneyEnIN(String(totalDues))}`}</Text>
           </View>
-          <Panel padded={false} grow>
+          <Panel padded={false}>
             <DeskTable
               data={rows}
               rowKey={(r) => r.companyId}
@@ -102,13 +155,14 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
               onSort={setSort}
               scrollTestID="owner-companies-table"
               onRowPress={(r) => props.onOpenCompany(r.companyId)}
+              maxHeight={640}
               columns={[
                 {
                   key: 'name',
                   label: 'Company',
                   width: null,
                   render: (r) => (
-                    <Text style={styles.cell} testID={`company-name-${r.companyId}`}>
+                    <Text numberOfLines={1} style={styles.cell} testID={`company-name-${r.companyId}`}>
                       {r.name}
                     </Text>
                   ),
@@ -117,13 +171,13 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
                 {
                   key: 'balance',
                   label: 'Balance',
-                  width: 110,
+                  width: 130,
                   align: 'right',
                   render: (r) => {
                     const view = r.balance === null ? null : creditView(r.balance);
                     if (view === null) return null;
                     return (
-                      <Text style={[styles.monoCell, { color: view.color }]} testID={`company-balance-${r.companyId}`}>
+                      <Text numberOfLines={1} style={[styles.monoCell, { color: view.color }]} testID={`company-balance-${r.companyId}`}>
                         {view.text}
                       </Text>
                     );

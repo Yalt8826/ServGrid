@@ -14,11 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
+import { DeskListShell } from '../../../src/components/ui';
 import { SalesScreen } from '../../../src/screens/rep/SalesScreen';
 import { useRepFlags, useRepSales } from '../../../src/screens/rep/useRepData';
 import { OwnerSalesScreen } from '../../../src/screens/owner/SalesScreen';
-import { useOwnerSales, useVoidSale } from '../../../src/screens/owner/useOwnerData';
+import { fetchSaleWithItems, useOwnerSales, useVoidSale } from '../../../src/screens/owner/useOwnerData';
 import { isFlagOn } from '../../../src/state/featureFlags';
+import { useFlagsReady } from '../../../src/state/useFlagsReady';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -63,8 +65,11 @@ function RepSalesRoute(): React.ReactNode {
 function OwnerSalesRoute(): React.ReactNode {
   const sales = useOwnerSales();
   const { voidBusy, voidError, voidSale } = useVoidSale(sales.reload);
+  const flagsReady = useFlagsReady();
 
-  if (!isFlagOn('sales.cards')) {
+  if (!flagsReady || !isFlagOn('sales.cards')) {
+    // Unknown flags read as off on a cold browser load — wait for the
+    // /auth/me answer before rendering the honest dark placeholder.
     return (
       <View style={styles.root}>
         <Text>Sales</Text>
@@ -74,17 +79,20 @@ function OwnerSalesRoute(): React.ReactNode {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
-      <OwnerSalesScreen
-        rows={sales.rows}
-        error={sales.error}
-        loading={sales.loading}
-        onVoid={(sale, reason) => {
-          void voidSale(sale.id, reason).catch(() => {});
-        }}
-        voidBusy={voidBusy}
-        voidError={voidError}
-        onRetry={sales.reload}
-      />
+      <DeskListShell title="Sales" testID="owner-sales-page">
+        <OwnerSalesScreen
+          rows={sales.rows}
+          error={sales.error}
+          loading={sales.loading}
+          onVoid={(sale, reason) => {
+            void voidSale(sale.id, reason).catch(() => {});
+          }}
+          voidBusy={voidBusy}
+          voidError={voidError}
+          onRetry={sales.reload}
+          onLoadSale={(saleId) => fetchSaleWithItems(saleId)}
+        />
+      </DeskListShell>
     </SafeAreaView>
   );
 }

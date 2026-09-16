@@ -145,7 +145,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(technicianRoutes);
   app.register(cashRoutes);
   app.register(salesRoutes);
-  app.register(paymentsRoutes);
+  app.register(paymentsRoutes, { s3: config.s3 });
   app.register(dashboardRoutes);
 
   const ownsPool = options.db === undefined;

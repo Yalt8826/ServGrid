@@ -304,8 +304,7 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
 
   return (
     <View style={styles.screen} testID="dispatch-screen">
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Dispatch Job</Text>
+      <ScrollView contentContainerStyle={styles.content}>        <Text style={styles.title}>Dispatch Job</Text>
 
         {deps.offline ? (
           <Banner tone="danger" message={DISPATCH_OFFLINE_MESSAGE} testID="dispatch-offline-banner" />
@@ -612,7 +611,16 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
-  content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8] },
+  // The form is a sentence: capped at a readable measure and centred on
+  // the desk instead of stretching a text field across 1160px (a phone
+  // never reaches the cap, so the field layout is unchanged there).
+  content: {
+    paddingHorizontal: SPACE[4],
+    paddingBottom: SPACE[8],
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
+  },
   title: { ...textStyle('h1'), color: SEMANTIC.text.primary, paddingTop: SPACE[3], paddingBottom: SPACE[2] },
   selectedRow: {
     flexDirection: 'row',

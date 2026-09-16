@@ -770,6 +770,86 @@ describe('the proof photo uploads after its parent payment', () => {
     expect(errorOf(readOther.statusCode, readOther.body).code).toBe('OUT_OF_SCOPE');
   });
 
+  /**
+   * The ledger's payment row, clicked (owner console 2026-09-17): GET
+   * /v1/payments/:id/proof resolves the newest photo of that payment to a
+   * presigned URL. Same access rule as the by-id attachment read — the
+   * owner reads all, the collector reads his own, nobody else — but JSON,
+   * because the browser cannot put an Authorization header on an <img>.
+   */
+  it('the proof reads by owner id, under the same scope rule as the by-id read', async () => {
+    const parent = (await listPayments(OWNER)).find(
+      (p) => p.receivedBy === REP_A.id && p.amount === '1200.00' && p.businessDate === '2026-09-12',
+    );
+    expect(parent).toBeDefined();
+
+    const ownerRead = await app.inject({
+      method: 'GET',
+      url: `/v1/payments/${parent!.id}/proof`,
+      headers: bearer(OWNER),
+    });
+    expect(ownerRead.statusCode, ownerRead.body).toBe(200);
+    const { url } = JSON.parse(ownerRead.body) as { url: string };
+    expect(url).toMatch(/^https?:\/\//);
+
+    // The collector reads his own collection's photo.
+    const own = await app.inject({
+      method: 'GET',
+      url: `/v1/payments/${parent!.id}/proof`,
+      headers: bearer(REP_A),
+    });
+    expect(own.statusCode, own.body).toBe(200);
+
+    // The other rep took nobody's money here — the photo is not his.
+    const other = await app.inject({
+      method: 'GET',
+      url: `/v1/payments/${parent!.id}/proof`,
+      headers: bearer(REP_B),
+    });
+    expect(other.statusCode, other.body).toBe(403);
+
+    // A payment that was never photographed says NOT_FOUND, never a 500
+    // and never an empty URL: the sheet renders "no photo", not a broken
+    // image.
+    const bare = await createPaymentOk(REP_A, {
+      companyId,
+      amount: '77.00',
+      mode: 'cash',
+      receivedAt: '2026-09-12T20:00:00+05:30',
+    });
+    const none = await app.inject({
+      method: 'GET',
+      url: `/v1/payments/${bare.id}/proof`,
+      headers: bearer(OWNER),
+    });
+    expect(none.statusCode, none.body).toBe(404);
+    expect(errorOf(none.statusCode, none.body).code).toBe('NOT_FOUND');
+
+    // A malformed id and a missing payment are both 404, not 500.
+    const malformed = await app.inject({
+      method: 'GET',
+      url: '/v1/payments/not-a-uuid/proof',
+      headers: bearer(OWNER),
+    });
+    expect(malformed.statusCode, malformed.body).toBe(404);
+    const missing = await app.inject({
+      method: 'GET',
+      url: `/v1/payments/${randomUUID()}/proof`,
+      headers: bearer(OWNER),
+    });
+    expect(missing.statusCode, missing.body).toBe(404);
+
+    // The flag is this surface's rollback tier, the proof route
+    // included: a rep without sales.payments never reaches the read.
+    const unflagged = await app.inject({
+      method: 'GET',
+      url: `/v1/payments/${parent!.id}/proof`,
+      headers: bearer(REP_NO_FLAG),
+    });
+    expect(unflagged.statusCode, unflagged.body).toBe(409);
+    expect(errorOf(unflagged.statusCode, unflagged.body).code).toBe('FLAG_DISABLED');
+  });
+
   it('a refused payment never gets a proof — there is no parent to attach it to', async () => {
     // The create is refused at submit time (no such account), so the app
     // has no id to upload against; a photo sent at a made-up id is refused

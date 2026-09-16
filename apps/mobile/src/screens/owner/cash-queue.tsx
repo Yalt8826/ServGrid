@@ -43,7 +43,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
+import { DESK, DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
 import type { CashQueueFlag, CashQueueRow } from '@servgrid/shared';
 import { formatMoneyEnIN } from '@servgrid/shared';
 import {
@@ -671,7 +671,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
       label: 'Employee',
       width: null,
       render: (r) => (
-        <Text style={styles.cellStrong} testID={`cash-employee-${queueRowKey(r)}`}>
+        <Text numberOfLines={1} style={styles.cellStrong} testID={`cash-employee-${queueRowKey(r)}`}>
           {r.employeeName}
         </Text>
       ),
@@ -681,7 +681,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
       key: 'businessDate',
       label: 'Date',
       width: 96,
-      render: (r) => <Text style={styles.cell}>{formatDateEnIN(r.businessDate, nowYear)}</Text>,
+      render: (r) => <Text numberOfLines={1} style={styles.cell}>{formatDateEnIN(r.businessDate, nowYear)}</Text>,
       sortValue: (r) => r.businessDate,
     },
     {
@@ -689,7 +689,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
       label: 'Expected',
       width: 110,
       align: 'right',
-      render: (r) => <Text style={styles.cellMoney}>{amountOrDash(r.expectedCash)}</Text>,
+      render: (r) => <Text numberOfLines={1} style={styles.cellMoney}>{amountOrDash(r.expectedCash)}</Text>,
       sortValue: (r) => (r.expectedCash === null ? -1 : Number(r.expectedCash)),
     },
     {
@@ -697,7 +697,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
       label: 'Declared',
       width: 110,
       align: 'right',
-      render: (r) => <Text style={styles.cellMoney}>{amountOrDash(r.declaredAmount)}</Text>,
+      render: (r) => <Text numberOfLines={1} style={styles.cellMoney}>{amountOrDash(r.declaredAmount)}</Text>,
       sortValue: (r) => (r.declaredAmount === null ? -1 : Number(r.declaredAmount)),
     },
     {
@@ -705,13 +705,13 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
       label: 'Variance',
       width: 120,
       align: 'right',
-      render: (r) => <Text style={styles.cellMoney}>{r.variance === null ? '—' : varianceLabel(r.variance)}</Text>,
+      render: (r) => <Text numberOfLines={1} style={styles.cellMoney}>{r.variance === null ? '—' : varianceLabel(r.variance)}</Text>,
       sortValue: (r) => (r.variance === null ? -1 : Number(r.variance)),
     },
     {
       key: 'flag',
       label: 'Flag',
-      width: 160,
+      width: 170,
       render: (r) => <FlagPill flag={r.flag} />,
       sortValue: (r) => FLAG_ORDER[r.flag],
     },
@@ -724,7 +724,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
   ];
 
   return (
-    <View style={styles.root} testID="owner-cash-queue">
+    <View style={[styles.root, desk && styles.rootDesk]} testID="owner-cash-queue">
       <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary }} testID="cash-title">
         Cash reconciliation
       </Text>
@@ -777,6 +777,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
               onSort={setSort}
               edgeColor={(r) => FLAG_PILL[r.flag].color}
               scrollTestID="cash-queue-table"
+              maxHeight={640}
             />
           </>
         ) : (
@@ -831,6 +832,16 @@ const styles = StyleSheet.create({
     backgroundColor: SEMANTIC.bg.app,
     padding: SPACE[4],
     gap: SPACE[3],
+  },
+  // The console's page furniture — the same measure the DeskListShell
+  // gives the other lists, since this screen owns its own header.
+  rootDesk: {
+    paddingHorizontal: DESK.page.padX,
+    paddingTop: DESK.page.padY,
+    paddingBottom: DESK.page.padY,
+    maxWidth: DESK.page.maxWidth,
+    width: '100%',
+    alignSelf: 'center',
   },
   filters: { gap: SPACE[3] },
   cardList: { flex: 1 },

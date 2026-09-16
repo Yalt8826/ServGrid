@@ -51,7 +51,12 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
   const nowYear = new Date().getFullYear();
 
   return (
-    <DeskListShell title="Employees" subtitle={desk ? `${rows.length} ${rows.length === 1 ? 'person' : 'people'} on the roster` : undefined} testID={props.testID ?? 'owner-employees'}>
+    <DeskListShell
+      title="Employees"
+      subtitle={desk ? `${rows.length} ${rows.length === 1 ? 'person' : 'people'} on the roster` : undefined}
+      actions={desk ? <Button label="+ New employee" onPress={props.onNewEmployee} testID="employees-new" /> : undefined}
+      testID={props.testID ?? 'owner-employees'}
+    >
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-employees-error" />
       ) : null}
@@ -59,7 +64,7 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
       {!props.loading && props.error === null && rows.length === 0 ? (
         <EmptyState message="No employees yet." testID="owner-employees-empty" />
       ) : desk ? (
-        <Panel padded={false} grow>
+        <Panel padded={false}>
           <DeskTable
           data={rows}
           rowKey={(r) => r.id}
@@ -67,18 +72,22 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
           onSort={setSort}
           scrollTestID="owner-employees-table"
           onRowPress={(r) => props.onOpenEmployee(r.id)}
+          maxHeight={640}
           columns={[
             {
               key: 'fullName',
               label: 'Name',
               width: null,
               render: (r) => (
-                <View>
+                // One line — a fixed 40pt row clips two, and the clipped
+                // usernames read as a rendering fault (2026-09-16 walk).
+                <Text numberOfLines={1}>
                   <Text style={styles.cellStrong} testID={`employee-name-${r.id}`}>
                     {r.fullName}
                   </Text>
+                  {'  '}
                   <Text style={styles.secondary}>{r.username}</Text>
-                </View>
+                </Text>
               ),
               sortValue: (r) => r.fullName,
             },
@@ -153,9 +162,13 @@ export function OwnerEmployeesScreen(props: OwnerEmployeesScreenProps): React.Re
         </ScrollView>
       )}
 
-      <View style={styles.actionBar}>
-        <Button label="+ New employee" onPress={props.onNewEmployee} testID="employees-new" />
-      </View>
+      {/* The phone keeps the bottom action bar; the desk's door to
+      create lives in the page header's actions. */}
+      {!desk ? (
+        <View style={styles.actionBar}>
+          <Button label="+ New employee" onPress={props.onNewEmployee} testID="employees-new-phone" />
+        </View>
+      ) : null}
     </DeskListShell>
   );
 }

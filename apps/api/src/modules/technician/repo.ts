@@ -73,6 +73,7 @@ export interface WorkCustomerRow {
   alt_phone: string | null;
   address_line1: string | null;
   address_line2: string | null;
+  area: string | null;
   city: string | null;
   state: string | null;
   pincode: string | null;
@@ -86,7 +87,7 @@ export interface WorkCustomerRow {
 export async function workCustomers(db: Db, actorId: string, windowDays: number, limit: number): Promise<WorkCustomerRow[]> {
   const r = await db.query<WorkCustomerRow>(
     `SELECT c.id, c.name, c.phone, c.alt_phone, c.address_line1, c.address_line2,
-            c.city, c.state, c.pincode, c.latitude, c.longitude, c.notes, c.company_id, c.version
+            c.area, c.city, c.state, c.pincode, c.latitude, c.longitude, c.notes, c.company_id, c.version
        FROM customers c
       WHERE c.is_active
         AND ${HIS_JOB_AT('c.id')}

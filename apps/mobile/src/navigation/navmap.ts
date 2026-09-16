@@ -41,6 +41,7 @@ export type NavGroupKey =
   | 'companies'
   | 'cash'
   | 'people'
+  | 'catalogue'
   | 'profile';
 
 export interface NavGroup {
@@ -53,7 +54,7 @@ export interface NavGroup {
 /**
  * The map per role — one literal per role, transcribed from
  * PLAN-FRONTEND.md §3. Tab counts: technician 4 · dispatcher 4 ·
- * sales rep 5 · owner 5. `/cash` moves by role rather than being hidden:
+ * sales rep 5 · owner 6. `/cash` moves by role rather than being hidden:
  * the owner's reconciliation queue under People, the field roles' own
  * handover as its own tab. `/contracts` is the dispatcher's own AMC tab
  * and an Operations entry for the owner; reps have none (decision
@@ -92,7 +93,10 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
     { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts'] },
     { key: 'sales', label: 'Sales', routes: ['/sales', '/payments', '/companies'] },
     { key: 'people', label: 'People', routes: ['/employees', '/location', '/cash'] },
-    { key: 'profile', label: 'Profile', routes: ['/profile', '/products', '/services'] },
+    // The catalogue is its own section: under PROFILE it read as if the
+    // product and service lists were profile settings (2026-09-16 walk).
+    { key: 'catalogue', label: 'Catalogue', routes: ['/products', '/services'] },
+    { key: 'profile', label: 'Profile', routes: ['/profile'] },
   ],
 };
 
@@ -224,6 +228,29 @@ export function routeIsCovered(mapRoute: string, path: string): boolean {
 /** Index of the tab whose routes cover `path`, or -1 (non-section route). */
 export function coveringGroupIndex(role: Role, path: string): number {
   return NAV_GROUPS[role].findIndex((group) => group.routes.some((route) => routeIsCovered(route, path)));
+}
+
+/**
+ * The ONE route the desk rail should light for this path — the most
+ * specific match, not every match.
+ *
+ * `routeIsCovered` is a prefix rule, and sections nest inside each other:
+ * `/jobs/new` is inside `/jobs`. Testing each rail item on its own lit
+ * BOTH of the owner's Operations entries — pressing Dispatch left Jobs
+ * highlighted too (owner, 2026-09-17) — because a link cannot know that a
+ * sibling matches more precisely. Comparison is by length, which is the
+ * only ordering the map guarantees: the more specific route is always the
+ * longer one, and a true prefix can never be longer than its extension.
+ */
+export function activeRailRoute(role: Role, path: string): string | null {
+  let best: string | null = null;
+  for (const group of NAV_GROUPS[role]) {
+    for (const route of group.routes) {
+      if (!routeIsCovered(route, path)) continue;
+      if (best === null || route.length > best.length) best = route;
+    }
+  }
+  return best;
 }
 
 /**

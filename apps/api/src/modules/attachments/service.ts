@@ -265,7 +265,27 @@ export function createAttachmentsService(s3: StorageConfig) {
     return { url: presignedGetUrl(s3, row.storage_key, PRESIGN_TTL_SECONDS), row };
   }
 
-  return { upload, readUrl };
+  /**
+   * The payment proof photo, by owner — GET /v1/payments/:id/proof. The
+   * ledger's payment rows carry no attachment id (the photo is its own
+   * document, §9), so the read goes owner → newest photo of that owner,
+   * through exactly the same permission check as the by-id read.
+   */
+  async function readUrlForOwner(
+    actor: Actor,
+    ownerType: AttachmentOwnerType,
+    ownerId: string,
+    kind: AttachmentKind,
+  ): Promise<{ url: string; row: repo.AttachmentWithOwnerRow }> {
+    const row = await repo.findLatestOwnerAttachment(getPool(), ownerType, ownerId, kind);
+    if (row === null) {
+      throw new AppError('NOT_FOUND', 'No proof photo was attached to that payment.');
+    }
+    checkReadAccess(actor, row);
+    return { url: presignedGetUrl(s3, row.storage_key, PRESIGN_TTL_SECONDS), row };
+  }
+
+  return { upload, readUrl, readUrlForOwner };
 }
 
 export type AttachmentsService = ReturnType<typeof createAttachmentsService>;

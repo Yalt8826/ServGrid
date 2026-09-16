@@ -30,7 +30,8 @@ import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } fro
 
 import { EASING, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
-import { easing } from '../ui/motion';/** The `v_employee_tracking_health` health values, as the wire spells them. */
+import { easing } from '../ui/motion';
+import { useDensity } from '../ui/DensityProvider';/** The `v_employee_tracking_health` health values, as the wire spells them. */
 export type TrackingHealthValue = 'not_tracked' | 'permission_missing' | 'never_reported' | 'stale' | 'active';
 
 export interface TechnicianHealthState {
@@ -77,6 +78,7 @@ export function TechnicianLoadRow({
 }: TechnicianLoadRowProps): React.ReactNode {
   const enter = easing(EASING.enter);
   const progress = useSharedValue(draw ? 0 : 1);
+  const desk = useDensity() === 'desk';
 
   useEffect(() => {
     if (!draw) return;
@@ -94,7 +96,9 @@ export function TechnicianLoadRow({
 
   return (
     <View testID={testID} style={styles.row}>
-      <Text numberOfLines={1} style={[textStyle('body'), styles.name]}>{name}</Text>
+      {/* 96 is the phone's column; on the desk a full name fits and the
+      ellipsis hid who was actually being assigned (2026-09-16 walk). */}
+      <Text numberOfLines={1} style={[textStyle('body'), styles.name, desk && styles.nameDesk]}>{name}</Text>
       <Text style={[textStyle('mono'), styles.count]}>{load}</Text>
       <View style={styles.track}>
         <Animated.View testID={testID === undefined ? undefined : `${testID}-bar`} style={[styles.fill, barStyle]} />
@@ -127,6 +131,9 @@ const styles = StyleSheet.create({
   name: {
     color: SEMANTIC.text.primary,
     width: 96,
+  },
+  nameDesk: {
+    width: 208,
   },
   count: {
     color: SEMANTIC.text.primary,

@@ -194,7 +194,14 @@ export function OwnerJobDetailBody(deps: OwnerJobDetailDeps): React.ReactNode {
           {/* The full job_events timeline, oldest first. */}
           <View style={styles.section} testID="owner-job-timeline">
             <Text style={styles.sectionLabel}>Timeline</Text>
-            {(detail?.events ?? []).map((event, index) => {
+            {(detail?.events ?? []).length === 0 ? (
+              // A bare heading over nothing reads as a section that
+              // failed to load; say the empty feed outright.
+              <Text style={styles.caption} testID="owner-job-timeline-empty">
+                No events yet.
+              </Text>
+            ) : (
+              (detail?.events ?? []).map((event, index) => {
               const payloadLine = eventPayloadLine(event);
               return (
                 <View key={event.id} style={styles.eventRow} testID={`owner-job-event-${index}`}>
@@ -217,7 +224,8 @@ export function OwnerJobDetailBody(deps: OwnerJobDetailDeps): React.ReactNode {
                   </View>
                 </View>
               );
-            })}
+              })
+            )}
           </View>
 
           {/* The amend action — owner only, and only where there is a completion to correct. */}
