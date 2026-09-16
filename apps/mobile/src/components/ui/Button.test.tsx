@@ -140,3 +140,36 @@ describe('Button press behaviour', () => {
     expect((pressable!.props.accessibilityState as { busy: boolean }).busy).toBe(true);
   });
 });
+
+/**
+ * Alignment contract (2026-09-16). A button must be centreable by the
+ * container it sits in. The wrapper used to carry
+ * `alignSelf: 'flex-start'` — which hugs in a column, its reason for
+ * being there — but in a *row* it pins the button to the row's top edge,
+ * so the job detail's 72pt thumb bar held its 52pt pair 1pt below the top
+ * with 19pt of empty bar beneath them. Only the control hugs itself now.
+ */
+describe('Button — a container can centre it', () => {
+  const flat = (node: Node): Record<string, unknown> =>
+    Object.assign({}, ...(Array.isArray(node.props.style) ? node.props.style : [node.props.style]));
+
+  it('does not pin itself to the cross-axis start', async () => {
+    const renderer = await mount(<Button label="Arrive" testID="btn" />);
+    const wrapper = findByTestID(toJson(renderer), 'btn')!;
+    // Nothing on the wrapper: the row's `alignItems` decides.
+    expect(flat(wrapper).alignSelf).toBeUndefined();
+  });
+
+  it('hugs its content with the control itself', async () => {
+    const renderer = await mount(<Button label="Arrive" testID="btn" />);
+    const pressable = findPressable(toJson(renderer))!;
+    expect(flat(pressable).alignSelf).toBe('flex-start');
+  });
+
+  it('still stretches when the caller asks for fullwidth', async () => {
+    const renderer = await mount(<Button label="Call" fullwidth testID="btn" />);
+    const wrapper = findByTestID(toJson(renderer), 'btn')!;
+    expect(flat(wrapper).alignSelf).toBe('stretch');
+    expect(flat(findPressable(toJson(renderer))!).alignSelf).toBe('stretch');
+  });
+});

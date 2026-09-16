@@ -9,7 +9,7 @@
  * Loading: label stays, a 16px indeterminate bar draws under it; width
  * never changes.
  */
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 import Animated from 'react-native-reanimated';
 
@@ -22,6 +22,13 @@ import { usePressScale } from './motion';
 import { captionStyle } from './uiBase';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+
+const styles = StyleSheet.create({
+  /** `fullwidth` is the caller asking the button to fill its parent — the
+   * one case where the wrapper overrides the parent's cross-axis alignment
+   * instead of obeying it (see the note at the wrapper). */
+  stretch: { alignSelf: 'stretch' },
+});
 
 export interface ButtonProps {
   label: string;
@@ -67,11 +74,16 @@ export function Button({
   return (
     <View
       testID={testID}
-      style={[
-        {
-          alignSelf: fullwidth ? 'stretch' : 'flex-start',
-        },
-      ]}
+      // The wrapper takes the parent's cross-axis alignment; the *control*
+      // is what hugs its content. That distinction is load-bearing: a
+      // wrapper with `alignSelf: 'flex-start'` hugs in a column (which is
+      // why it was there) but pins to the TOP of any row container taller
+      // than the button — the job detail's 72pt thumb bar held its 52pt
+      // buttons one 1pt below the bar's top edge with 19pt of empty bar
+      // under them (Yashas, 2026-09-16: "the complete job and cancel
+      // button … is not centered"). Only the Pressable aligns itself now,
+      // so a row is free to centre the pair.
+      style={fullwidth ? styles.stretch : undefined}
     >
       <Animated.View style={press.style}>
       <Pressable
@@ -101,7 +113,7 @@ export function Button({
           justifyContent: 'center',
           flexDirection: 'row',
           gap: 8,
-          alignSelf: 'stretch',
+          alignSelf: fullwidth ? 'stretch' : 'flex-start',
         }}
       >
         {icon === undefined ? null : <Icon name={icon} size={ICON.sm} color={colors.label} />}
