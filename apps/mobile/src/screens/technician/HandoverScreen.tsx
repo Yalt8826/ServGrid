@@ -37,8 +37,9 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { CashAmendRequest, CashDeclareRequest, CashHandover, ReconciliationStatus } from '@servgrid/shared';
-import { formatMoneyEnIN, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, DatePicker, MoneyField, TextField, formatDateEnIN } from '../../components/ui';
+import { formatMoneyEnIN, alpha, COLORS, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
+import { Banner, Button, DatePicker, EmptyState, MoneyField, SectionHeader, TextField, formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 
 // ── pure date helpers (exported for the route and the tests) ──────────────
@@ -224,16 +225,25 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
 
   const pill = row !== null ? STATUS_PILL[row.status] : null;
 
+  // The navy frame (2026-09-16): the same header the dashboard and the
+  // job detail wear, so the app's money screen opens like its work
+  // screens. The route paints `FRAME.bg` behind the status bar.
   return (
-    <ScrollView contentContainerStyle={styles.content} testID="handover-screen">
-      <Text style={styles.heading} testID="handover-title">
-        Cash handover
-      </Text>
-      <Text style={styles.caption}>Declare the cash you are handing over. One number.</Text>
+    <ScrollView contentContainerStyle={{ paddingBottom: SPACE[8] }} testID="handover-screen">
+      <View style={styles.frame}>
+        <Text style={[styles.heading, { color: FRAME.text }]} testID="handover-title">
+          Cash handover
+        </Text>
+        <Text style={[styles.caption, { color: FRAME.textMuted, marginBottom: 0 }]}>
+          Declare the cash you are handing over. One number.
+        </Text>
+      </View>
 
+      <View style={styles.body}>
       {error !== null ? <Banner tone="danger" message={error} onDismiss={() => setError(null)} testID="handover-banner" /> : null}
 
       <View style={styles.block}>
+        <SectionHeader label="Day" icon="calendar" />
         <DatePicker
           label="Date"
           value={date}
@@ -244,14 +254,40 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
         />
         <Button
           label="Change date"
-          variant="ghost"
+          icon="calendar"
+          variant="secondary"
           onPress={() => setPickerOpen(true)}
           testID="handover-date-open"
         />
       </View>
 
+      {pickerOpen ? (
+        <View style={styles.sheet} testID="handover-date-sheet">
+          <SectionHeader label="Pick a day" icon="calendar" />
+          {handoverWindow(deps.today).map((iso) => {
+            const chosenDay = iso === date;
+            return (
+              <Pressable
+                key={iso}
+                accessibilityRole="button"
+                accessibilityState={{ selected: chosenDay }}
+                onPress={() => chooseDate(iso)}
+                style={[styles.sheetRow, chosenDay ? styles.sheetRowChosen : null]}
+                testID={`handover-date-option-${iso}`}
+              >
+                <Text style={styles.sheetRowLabel}>{dateOptionLabel(iso, deps.today)}</Text>
+                {chosenDay ? <Icon name="check" size={ICON.sm} color={SEMANTIC.text.primary} /> : null}
+                <Text style={styles.sheetRowDate}>{iso}</Text>
+              </Pressable>
+            );
+          })}
+          <Button label="Cancel" variant="ghost" onPress={() => setPickerOpen(false)} testID="handover-date-close" />
+        </View>
+      ) : null}
+
       {row === null ? (
-        <View style={styles.block}>
+        <View style={styles.panel}>
+          <SectionHeader label="Declare" icon="wallet" tint={COLORS.accent} />
           <MoneyField
             label="Amount"
             value={amount}
@@ -277,7 +313,8 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
           />
         </View>
       ) : amending ? (
-        <View style={styles.block}>
+        <View style={styles.panel}>
+          <SectionHeader label="Amend" icon="edit" />
           <MoneyField
             label="Corrected amount"
             value={amount}
@@ -298,18 +335,32 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
           <Button label="Keep original" variant="ghost" onPress={cancelAmend} fullwidth testID="handover-amend-cancel" />
         </View>
       ) : (
-        <View style={styles.block}>
+        <View style={styles.panel}>
+          <SectionHeader
+            label="Declared"
+            icon={pill?.label === 'Confirmed' ? 'checkFilled' : 'wallet'}
+            tint={pill?.color ?? SEMANTIC.text.primary}
+          />
           <Text style={styles.fieldLabel}>Declared for {dateOptionLabel(row.businessDate, deps.today)}</Text>
           <Text style={styles.declaredAmount} testID="handover-declared-amount">
             {`₹ ${formatMoneyEnIN(row.declaredAmount)}`}
           </Text>
-          <Text style={styles.pillText} testID="handover-status-pill">
-            <Text style={{ color: pill?.color }}>● </Text>
-            {pill?.label}
-          </Text>
+          {/* The day's state as a tinted chip — the dot keeps the status
+              ink, the word carries the meaning, the tint is only a ground
+              (the same arithmetic as StatusPill). */}
+          <View
+            testID="handover-status-pill"
+            style={[styles.pillChip, {
+              borderColor: alpha(pill?.color ?? SEMANTIC.text.primary, TINT.chipLine),
+              backgroundColor: alpha(pill?.color ?? SEMANTIC.text.primary, TINT.chip),
+            }]}
+          >
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: pill?.color }} />
+            <Text style={styles.pillText}>{pill?.label}</Text>
+          </View>
           {row.note !== null ? <Text style={styles.note}>{row.note}</Text> : null}
           {row.status === 'submitted' ? (
-            <Button label="Amend" variant="secondary" onPress={beginAmend} testID="handover-amend" />
+            <Button label="Amend" icon="edit" variant="secondary" onPress={beginAmend} testID="handover-amend" />
           ) : (
             <Text style={styles.lockedCopy} testID="handover-locked-copy">
               {lockedCopy(row.status)}
@@ -318,11 +369,13 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
         </View>
       )}
 
-      <Text style={styles.sectionLabel}>Your declarations</Text>
+      <SectionHeader
+        label="Your declarations"
+        icon="list"
+        count={history === null ? undefined : history.length}
+      />
       {history === null ? null : history.length === 0 ? (
-        <Text style={styles.emptyHistory} testID="handover-history-empty">
-          Nothing declared yet.
-        </Text>
+        <EmptyState message="Nothing declared yet." icon="wallet" testID="handover-history-empty" />
       ) : (
         history.map((h) => {
           const historyPill = STATUS_PILL[h.status];
@@ -336,32 +389,27 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
         })
       )}
 
-      {pickerOpen ? (
-        <View style={styles.sheet} testID="handover-date-sheet">
-          <Text style={styles.sheetTitle}>Pick a day</Text>
-          {handoverWindow(deps.today).map((iso) => (
-            <Pressable
-              key={iso}
-              accessibilityRole="button"
-              onPress={() => chooseDate(iso)}
-              style={[styles.sheetRow, iso === date ? styles.sheetRowSelected : null]}
-              testID={`handover-date-option-${iso}`}
-            >
-              <Text style={styles.sheetRowLabel}>{dateOptionLabel(iso, deps.today)}</Text>
-              <Text style={styles.sheetRowDate}>{iso}</Text>
-            </Pressable>
-          ))}
-          <Button label="Cancel" variant="ghost" onPress={() => setPickerOpen(false)} testID="handover-date-close" />
-        </View>
-      ) : null}
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: SPACE[4],
-    paddingBottom: SPACE[8],
+  /** The navy frame: full-bleed header, the route paints the same slate
+   * behind the status bar (2026-09-16). */
+  frame: {
+    alignSelf: 'stretch',
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[5],
+  },
+  body: {
+    alignSelf: 'stretch',
+    flexGrow: 1,
+    backgroundColor: SEMANTIC.bg.app,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[5],
   },
   heading: {
     ...textStyle('h1'),
@@ -372,6 +420,28 @@ const styles = StyleSheet.create({
     ...textStyle('caption'),
     color: SEMANTIC.text.secondary,
     marginBottom: SPACE[4],
+  },
+  panel: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.none,
+    backgroundColor: SEMANTIC.bg.raised,
+    padding: SPACE[4],
+    gap: SPACE[3],
+    marginBottom: SPACE[5],
+  },
+  /** The day's state, as a tinted chip (the StatusPill arithmetic: the dot
+   * carries the status ink, the word the meaning, the tint only a ground). */
+  pillChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 3,
   },
   block: {
     alignSelf: 'stretch',
@@ -391,7 +461,6 @@ const styles = StyleSheet.create({
   pillText: {
     ...textStyle('label'),
     color: SEMANTIC.text.primary,
-    marginBottom: SPACE[2],
   },
   note: {
     ...textStyle('body'),
@@ -408,10 +477,6 @@ const styles = StyleSheet.create({
     color: SEMANTIC.text.secondary,
     marginBottom: SPACE[2],
     marginTop: SPACE[2],
-  },
-  emptyHistory: {
-    ...textStyle('body'),
-    color: SEMANTIC.text.secondary,
   },
   historyRow: {
     alignSelf: 'stretch',
@@ -437,12 +502,13 @@ const styles = StyleSheet.create({
   },
   sheet: {
     alignSelf: 'stretch',
-    marginTop: SPACE[4],
+    marginBottom: SPACE[5],
     borderRadius: RADII.control,
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
     padding: SPACE[3],
+    gap: SPACE[2],
   },
   sheetTitle: {
     ...textStyle('h2'),
@@ -450,19 +516,23 @@ const styles = StyleSheet.create({
     marginBottom: SPACE[2],
   },
   sheetRow: {
+    minHeight: TAP.min,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 52,
-    paddingHorizontal: SPACE[2],
+    gap: SPACE[2],
+    paddingHorizontal: SPACE[3],
+    borderWidth: 1,
+    borderColor: 'transparent',
     borderRadius: RADII.control,
   },
-  sheetRowSelected: {
-    backgroundColor: SEMANTIC.bg.dense,
+  sheetRowChosen: {
+    borderColor: alpha(COLORS.accent, TINT.chipLine),
+    backgroundColor: alpha(COLORS.accent, TINT.chip),
   },
   sheetRowLabel: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
+    flex: 1,
   },
   sheetRowDate: {
     ...textStyle('mono'),
