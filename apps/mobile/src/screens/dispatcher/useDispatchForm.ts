@@ -43,7 +43,6 @@ import type {
   ProductRecord,
   ServiceRecord,
   TechnicianLoad,
-  TrackingHealth,
 } from '@servgrid/shared';
 import { api } from '../../lib/api';
 import {
@@ -110,22 +109,19 @@ export function useDispatchForm(options?: { initialCustomerId?: string | null })
     queryKey: ['dispatch', 'technician-load'],
     queryFn: () => fetchJson<TechnicianLoad[]>('/v1/technicians/load'),
   });
-  const health = useQuery({
-    queryKey: ['dispatch', 'roster-health'],
-    queryFn: () => fetchJson<TrackingHealth[]>('/v1/location/health'),
-  });
-
+  // No tracking-health read here (owner, 2026-09-17): the picker compares
+  // loads, and the dispatcher does not consume the technicians'
+  // location-reporting state.
   const technicians: DispatchTechnician[] = useMemo(
     () =>
       roster.data === undefined
         ? []
-        : loadRowsOf(roster.data, health.data ?? []).map((row) => ({
+        : loadRowsOf(roster.data).map((row) => ({
             employeeId: row.employeeId,
             name: row.name,
             openTotal: row.load,
-            health: row.health,
           })),
-    [roster.data, health.data],
+    [roster.data],
   );
 
   const stackUnits: DispatchUnitOption[] | null = useMemo(() => {

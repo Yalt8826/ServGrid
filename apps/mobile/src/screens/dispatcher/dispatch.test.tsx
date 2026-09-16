@@ -87,10 +87,10 @@ const SERVICES = [
 /** Roster order is the server's answer — deliberately NOT alphabetical,
  * and with a tie (Ravi, Vikram at 3) the sort must keep roster order. */
 const ROSTER: DispatchTechnician[] = [
-  { employeeId: T_ZARA, name: 'Zara Khan', openTotal: 1, health: null },
-  { employeeId: T_RAVI, name: 'Ravi Kumar', openTotal: 3, health: { health: 'active', minutesSince: 2 } },
-  { employeeId: T_VIKRAM, name: 'Vikram Rao', openTotal: 3, health: null },
-  { employeeId: T_AMIT, name: 'Amit Jain', openTotal: 6, health: null },
+  { employeeId: T_ZARA, name: 'Zara Khan', openTotal: 1 },
+  { employeeId: T_RAVI, name: 'Ravi Kumar', openTotal: 3 },
+  { employeeId: T_VIKRAM, name: 'Vikram Rao', openTotal: 3 },
+  { employeeId: T_AMIT, name: 'Amit Jain', openTotal: 6 },
 ];
 
 function baseDeps(overrides: Partial<DispatchJobDeps> = {}): DispatchJobDeps {

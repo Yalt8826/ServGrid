@@ -163,7 +163,6 @@ export function TechnicianPicker({
               name={technician.name}
               load={technician.openTotal}
               maxLoad={busiestLoad}
-              health={technician.health}
               index={index}
               testID={`dispatch-assign-load-${technician.employeeId}`}
             />

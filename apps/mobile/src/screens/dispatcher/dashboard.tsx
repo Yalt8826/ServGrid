@@ -35,7 +35,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { DURATION, EASING, FRAME, SEMANTIC, SPACE } from '@servgrid/shared';
-import { TechnicianLoadRow, type TechnicianHealthState } from '../../components/domain/TechnicianLoadRow';
+import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
 import { Banner, Button, EmptyState, SectionHeader } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
@@ -58,7 +58,6 @@ export interface DashboardLoadRow {
   name: string;
   /** His open jobs — the count and the bar both show it. */
   load: number;
-  health: TechnicianHealthState | null;
 }
 
 /** One NEEDS ATTENTION row, in the words the dispatcher acts on. */
@@ -98,6 +97,8 @@ export interface DispatcherDashboardDeps {
   onRetry: (section: DashboardSection) => void;
   onOpenJob: (jobId: string) => void;
   onDispatch: () => void;
+  /** A load-row tap opens that technician's jobs for today (2026-09-17). */
+  onOpenTechnicianDay: (employeeId: string) => void;
   /** D2 Job Logs (T2.8) — the screen D1 hands to; rendered when wired. */
   onOpenJobLogs?: () => void;
 }
@@ -253,14 +254,19 @@ export function DispatcherDashboardScreen(deps: DispatcherDashboardDeps): React.
             {deps.load.map((row, index) => (
               <View key={row.employeeId} style={{ alignSelf: 'stretch' }}>
                 {index > 0 ? <View style={styles.hairline} /> : null}
-                <TechnicianLoadRow
-                  name={row.name}
-                  load={row.load}
-                  maxLoad={busiest}
-                  health={row.health}
-                  index={index}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${row.name}'s jobs for today`}
+                  onPress={() => deps.onOpenTechnicianDay(row.employeeId)}
                   testID={`dispatch-load-${row.employeeId}`}
-                />
+                >
+                  <TechnicianLoadRow
+                    name={row.name}
+                    load={row.load}
+                    maxLoad={busiest}
+                    index={index}
+                  />
+                </Pressable>
               </View>
             ))}
           </View>

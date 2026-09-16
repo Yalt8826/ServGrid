@@ -57,8 +57,8 @@ function baseDeps(overrides: Partial<DispatcherDashboardDeps> = {}): DispatcherD
     figures: [figure('overdue', 3), figure('unassigned', 7), figure('today', 12), figure('done', 2)],
     figuresError: null,
     load: [
-      { employeeId: TECH_ID, name: 'Ravi', load: 3, health: { health: 'active', minutesSince: 2 } },
-      { employeeId: OTHER_TECH_ID, name: 'Suresh', load: 0, health: { health: 'stale', minutesSince: 95 } },
+      { employeeId: TECH_ID, name: 'Ravi', load: 3 },
+      { employeeId: OTHER_TECH_ID, name: 'Suresh', load: 0 },
     ],
     loadError: null,
     sections: [
@@ -83,6 +83,7 @@ function baseDeps(overrides: Partial<DispatcherDashboardDeps> = {}): DispatcherD
     onRetry: vi.fn(),
     onOpenJob: vi.fn(),
     onDispatch: vi.fn(),
+    onOpenTechnicianDay: vi.fn(),
     ...overrides,
   };
 }
@@ -202,30 +203,27 @@ describe('DispatcherDashboardScreen (§D1)', () => {
     expect(shown[0]).toBe('7');
   });
 
-  it('renders the health warning from health + age, and no coordinate exists anywhere in the tree', async () => {
+  it('renders no tracking state at all, and no coordinate exists anywhere in the tree', async () => {
+    // Yashas, 2026-09-17: the dispatcher does not consume the
+    // technicians' location-reporting state — the health column (warning
+    // and "active" tick alike) is gone from the load rows. The fixture's
+    // Suresh is stale + never-reported; none of that reaches the tree.
     const renderer = await create(<DispatcherDashboardScreen {...baseDeps()} />);
+    const tree = toJson(renderer);
+    expect(findByTestID(tree, `dispatch-load-${OTHER_TECH_ID}-warning`)).toBeUndefined();
+    expect(findByTestID(tree, `dispatch-load-${TECH_ID}-state`)).toBeUndefined();
+    const words = allText(tree).join(' ').toLowerCase();
+    expect(words).not.toContain('tracking off');
+    expect(words).not.toContain('no ping');
+    expect(words).not.toContain('last ping');
 
-    // Ravi is current: availability, no warning.
-    expect(findByTestID(toJson(renderer), `dispatch-load-${TECH_ID}-warning`)).toBeUndefined();
-    expect(textOf(renderer, `dispatch-load-${TECH_ID}-state`)).toBe('active');
-
-    // Suresh's device went quiet: the warning carries the health value
-    // AND the last-ping age — 95 minutes reads as `1h 35m` (§D1: the
-    // dispatcher is the person who will actually notice).
-    const warning = findByTestID(toJson(renderer), `dispatch-load-${OTHER_TECH_ID}-warning`);
-    expect(warning).toBeDefined();
-    const warningText = allText(warning!).join(' ');
-    expect(warningText).toContain('no ping');
-    expect(warningText).toContain('1h 35m');
-    expect(styleOf(renderer, `dispatch-load-${OTHER_TECH_ID}-warning`).color).toBe(SEMANTIC.feedback.warning);
-
-    // The permission boundary, proven on the tree: the dispatcher's
-    // dashboard is a `location.health` read, never `location.read` —
-    // no latitude or longitude arrives, renders, or hides anywhere.
-    const tree = JSON.stringify(toJson(renderer)).toLowerCase();
-    expect(tree).not.toContain('latitude');
-    expect(tree).not.toContain('longitude');
-    expect(tree).not.toContain('coordinates');
+    // The permission boundary, still proven on the tree: the dispatcher's
+    // dashboard reads no location data at all — no latitude or longitude
+    // arrives, renders, or hides anywhere.
+    const serialised = JSON.stringify(tree).toLowerCase();
+    expect(serialised).not.toContain('latitude');
+    expect(serialised).not.toContain('longitude');
+    expect(serialised).not.toContain('coordinates');
   });
 
   it('TechnicianLoadRow is the picker\'s component: load count, relative bar, staggered draw seam', async () => {

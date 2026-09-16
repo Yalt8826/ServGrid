@@ -98,7 +98,10 @@ function DispatcherDashboardRoute(): React.ReactNode {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame's ground, top edge only — the dashboard's treatment: the
+    // screen's navy header runs to the status bar, and the bottom inset
+    // belongs to the shell that draws the tab bar (2026-09-16).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <DispatcherDashboardScreen
         now={new Date()}
         todayLabel={todayLabelOf(new Date())}
@@ -113,6 +116,13 @@ function DispatcherDashboardRoute(): React.ReactNode {
         onOpenJob={(jobId) => router.push(`/jobs/${jobId}`)}
         onDispatch={() => router.push('/jobs/new')}
         onOpenJobLogs={() => router.push('/jobs/logs')}
+        // A load-row tap opens that technician's jobs — all dates, his
+        // open total leading (the Job Logs URL params carry the filter).
+        // The day must be `all`, not `today`: the load count counts his
+        // OPEN jobs whatever date they were scheduled for, and a
+        // `today`-filtered list would read 0 against a load of 17 —
+        // broken, not filtered (2026-09-17).
+        onOpenTechnicianDay={(employeeId) => router.push(`/jobs/logs?tech=${employeeId}&date=all`)}
       />
     </SafeAreaView>
   );

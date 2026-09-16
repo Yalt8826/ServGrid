@@ -8,10 +8,10 @@
  * - **figures** — `GET /v1/jobs/summary`, the four figures counted
  *   server-side from `v_job_cards_dispatcher`; the client never derives
  *   a count by paging.
- * - **load + health** — `GET /v1/technicians/load` joined to
- *   `GET /v1/location/health` by employee id. The health read is the
- *   roster warning's `location.health` surface: health value and
- *   last-ping age, and NO coordinates arrive to render.
+ * - **load** — `GET /v1/technicians/load`, the open-total per
+ *   technician. NO tracking health arrives any more (owner, 2026-09-17:
+ *   the dispatcher does not consume the technicians' location-reporting
+ *   state), and NO coordinates ever did.
  * - **attention** — three `GET /v1/jobs` pages (overdue; unassigned;
  *   assigned today), with "past their scheduled time" judged against
  *   the injected clock. The jobs' technician names come from the load
@@ -34,7 +34,6 @@ import type {
   FeatureFlagState,
   JobCardDispatcher,
   TechnicianLoad,
-  TrackingHealth,
 } from '@servgrid/shared';
 import { defaultFeatureFlags } from '@servgrid/shared';
 import { api } from '../../lib/api';
@@ -97,18 +96,14 @@ export function figuresOf(summary: DispatcherSummary): DispatcherFigure[] {
   ];
 }
 
-/** Load rows joined to the roster health by employee id. */
-export function loadRowsOf(load: TechnicianLoad[], health: TrackingHealth[]): DashboardLoadRow[] {
-  const healthBy = new Map(health.map((h) => [h.employeeId, h]));
-  return load.map((row) => {
-    const h = healthBy.get(row.employeeId);
-    return {
-      employeeId: row.employeeId,
-      name: row.technicianName,
-      load: row.openTotal,
-      health: h === undefined ? null : { health: h.health, minutesSince: h.minutesSince },
-    };
-  });
+/** Load rows from the roster read — the load comparison only (owner,
+ * 2026-09-17: no tracking state reaches the dispatcher's console). */
+export function loadRowsOf(load: TechnicianLoad[]): DashboardLoadRow[] {
+  return load.map((row) => ({
+    employeeId: row.employeeId,
+    name: row.technicianName,
+    load: row.openTotal,
+  }));
 }
 
 function jobOf(now: Date, card: JobCardDispatcher, nameOf: (id: string | null) => string | null): AttentionJob {
@@ -236,10 +231,6 @@ export function useDispatcherDashboard(now: Date): DispatcherDashboardData {
     queryKey: ['dispatch', 'technician-load'],
     queryFn: () => fetchJson<TechnicianLoad[]>('/v1/technicians/load'),
   });
-  const health = useQuery({
-    queryKey: ['dispatch', 'roster-health'],
-    queryFn: () => fetchJson<TrackingHealth[]>('/v1/location/health'),
-  });
   const overdue = useQuery({
     queryKey: ['dispatch', 'attention', 'overdue'],
     queryFn: () => fetchJson<JobListEnvelope>('/v1/jobs?overdue=true&limit=50'),
@@ -265,7 +256,7 @@ export function useDispatcherDashboard(now: Date): DispatcherDashboardData {
   const loadRows =
     load.data === undefined || load.data === null
       ? null
-      : loadRowsOf(load.data, health.data ?? []);
+      : loadRowsOf(load.data);
   const sections =
     overdue.data === undefined ||
     overdue.data === null ||
@@ -281,7 +272,7 @@ export function useDispatcherDashboard(now: Date): DispatcherDashboardData {
     figures: summary.data === undefined || summary.data === null ? null : figuresOf(summary.data),
     figuresError: summary.isError ? message(summary.error) : null,
     load: loadRows,
-    loadError: load.isError || health.isError ? message(load.error ?? health.error) : null,
+    loadError: load.isError ? message(load.error) : null,
     sections,
     sectionsError:
       overdue.isError || unassigned.isError || assignedToday.isError
@@ -291,7 +282,6 @@ export function useDispatcherDashboard(now: Date): DispatcherDashboardData {
       if (section === 'figures') void summary.refetch();
       if (section === 'load') {
         void load.refetch();
-        void health.refetch();
       }
       if (section === 'attention') {
         void overdue.refetch();
