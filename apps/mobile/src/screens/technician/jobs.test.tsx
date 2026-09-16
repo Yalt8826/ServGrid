@@ -172,3 +172,42 @@ describe('JobsScreen (§T2)', () => {
     );
   });
 });
+
+/**
+ * The Completed tab's look-back (2026-09-16, Yashas): **yesterday and
+ * today, nothing older.** The server's work read carries a longer window;
+ * the office owns that history — the tab is a day's review, not an
+ * archive.
+ */
+describe('JobsScreen — the Completed tab looks back one day only', () => {
+  function completedView(id: string): JobView {
+    return viewOf({ id, status: 'completed', scheduledFor: LATER });
+  }
+
+  it('holds yesterday’s and today’s completions; older ones drop out entirely', async () => {
+    const YESTERDAY = '2026-09-10T16:00:00+05:30';
+    const FIVE_BACK = '2026-09-06T16:00:00+05:30';
+    const yesterdayJob = completedView('01890a5e-1000-7000-8000-000000000101');
+    const todayJob = completedView('01890a5e-1000-7000-8000-000000000102');
+    const oldJob = completedView('01890a5e-1000-7000-8000-000000000103');
+
+    const renderer = await create(
+      <JobsScreen
+        {...baseDeps({
+          jobs: [yesterdayJob, todayJob, oldJob],
+          completedAtById: {
+            [yesterdayJob.job.id]: YESTERDAY,
+            [todayJob.job.id]: '2026-09-11T09:40:00+05:30',
+            [oldJob.job.id]: FIVE_BACK,
+          },
+        })}
+      />,
+    );
+    await pressTab(renderer, 'completed');
+    const ids = cardOrder(renderer).map((t) => t.replace('jobs-card-', ''));
+    expect(ids).toEqual([todayJob.job.id, yesterdayJob.job.id]); // newest day first
+    expect(ids).not.toContain(oldJob.job.id);
+  });
+
+
+});

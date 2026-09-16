@@ -310,6 +310,11 @@ export function tabSections(
   now: Date,
 ): TabSection {
   const todayKey = istDateKey(now);
+  // Completed work is only worth a day's look-back (Yashas, 2026-09-16):
+  // the Completed tab holds **yesterday and today**, not the server's
+  // whole work window. Older completions drop out entirely — the office
+  // owns that history.
+  const yesterdayKey = istDateKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
   const today: JobView[] = [];
   const upcoming: JobView[] = [];
   const completed: JobView[] = [];
@@ -317,7 +322,11 @@ export function tabSections(
     const bucket = bucketOf(view, todayKey);
     if (bucket === 'today') today.push(view);
     else if (bucket === 'upcoming') upcoming.push(view);
-    else if (bucket === 'completed') completed.push(view);
+    else if (bucket === 'completed') {
+      const at = completedAtOf(view, completedAtById);
+      const atKey = at === null ? null : istDateKey(at);
+      if (atKey === todayKey || atKey === yesterdayKey) completed.push(view);
+    }
   }
   return {
     today: sortForToday(today, now),
