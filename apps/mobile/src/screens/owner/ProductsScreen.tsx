@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, EmptyState, useDensity } from '../../components/ui';
+import { Banner, Button, DeskListShell, EmptyState, Panel, useDensity } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { DeskTable } from './deskTable';
 import type { SortState } from './deskTable';
@@ -36,7 +36,7 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
   const rows = props.rows;
 
   return (
-    <View style={styles.root} testID={props.testID ?? 'owner-products'}>
+    <DeskListShell title="Products" subtitle={desk ? `${rows.length} in the catalogue` : undefined} testID={props.testID ?? 'owner-products'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-products-error" />
       ) : null}
@@ -44,7 +44,8 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
       {!props.loading && props.error === null && rows.length === 0 ? (
         <EmptyState message="No products in the catalogue yet." testID="owner-products-empty" />
       ) : desk ? (
-        <DeskTable
+        <Panel padded={false} grow>
+          <DeskTable
           data={rows}
           rowKey={(r) => r.id}
           sort={sort}
@@ -127,6 +128,7 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
             },
           ]}
         />
+        </Panel>
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
           {rows.map((row) => (
@@ -162,7 +164,7 @@ export function OwnerProductsScreen(props: OwnerProductsScreenProps): React.Reac
           ))}
         </ScrollView>
       )}
-    </View>
+    </DeskListShell>
   );
 }
 

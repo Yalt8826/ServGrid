@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, EmptyState, useDensity } from '../../components/ui';
+import { Banner, Button, DeskListShell, EmptyState, Panel, useDensity } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView } from '../rep/money';
 import { DeskTable } from './deskTable';
@@ -81,7 +81,7 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
   };
 
   return (
-    <View style={styles.root} testID={props.testID ?? 'owner-companies'}>
+    <DeskListShell title="Companies" subtitle={desk ? `${rows.length} accounts` : undefined} testID={props.testID ?? 'owner-companies'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-companies-error" />
       ) : null}
@@ -94,45 +94,47 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
             <Text style={styles.totalsLabel}>Outstanding dues</Text>
             <Text style={styles.totalsValue}>{`₹${formatMoneyEnIN(String(totalDues))}`}</Text>
           </View>
-          <DeskTable
-            data={rows}
-            rowKey={(r) => r.companyId}
-            sort={sort}
-            onSort={setSort}
-            scrollTestID="owner-companies-table"
-            onRowPress={(r) => props.onOpenCompany(r.companyId)}
-            columns={[
-              {
-                key: 'name',
-                label: 'Company',
-                width: null,
-                render: (r) => (
-                  <Text style={styles.cell} testID={`company-name-${r.companyId}`}>
-                    {r.name}
-                  </Text>
-                ),
-                sortValue: (r) => r.name,
-              },
-              {
-                key: 'balance',
-                label: 'Balance',
-                width: 110,
-                align: 'right',
-                render: (r) => {
-                  const view = r.balance === null ? null : creditView(r.balance);
-                  if (view === null) return null;
-                  return (
-                    <Text style={[styles.monoCell, { color: view.color }]} testID={`company-balance-${r.companyId}`}>
-                      {view.text}
+          <Panel padded={false} grow>
+            <DeskTable
+              data={rows}
+              rowKey={(r) => r.companyId}
+              sort={sort}
+              onSort={setSort}
+              scrollTestID="owner-companies-table"
+              onRowPress={(r) => props.onOpenCompany(r.companyId)}
+              columns={[
+                {
+                  key: 'name',
+                  label: 'Company',
+                  width: null,
+                  render: (r) => (
+                    <Text style={styles.cell} testID={`company-name-${r.companyId}`}>
+                      {r.name}
                     </Text>
-                  );
+                  ),
+                  sortValue: (r) => r.name,
                 },
-                sortValue: (r) => (r.balance === null ? Number.NEGATIVE_INFINITY : Number(r.balance)),
-              },
-              repColumn,
-              reassignColumn,
-            ]}
-          />
+                {
+                  key: 'balance',
+                  label: 'Balance',
+                  width: 110,
+                  align: 'right',
+                  render: (r) => {
+                    const view = r.balance === null ? null : creditView(r.balance);
+                    if (view === null) return null;
+                    return (
+                      <Text style={[styles.monoCell, { color: view.color }]} testID={`company-balance-${r.companyId}`}>
+                        {view.text}
+                      </Text>
+                    );
+                  },
+                  sortValue: (r) => (r.balance === null ? Number.NEGATIVE_INFINITY : Number(r.balance)),
+                },
+                repColumn,
+                reassignColumn,
+              ]}
+            />
+          </Panel>
         </>
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
@@ -184,7 +186,7 @@ export function OwnerCompaniesScreen(props: OwnerCompaniesScreenProps): React.Re
         onDismiss={() => setReassignTarget(null)}
         testID="owner-reassign-sheet"
       />
-    </View>
+    </DeskListShell>
   );
 }
 

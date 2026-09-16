@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, EmptyState, useDensity } from '../../components/ui';
+import { Banner, Button, DeskListShell, EmptyState, Panel, useDensity } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { DeskTable } from './deskTable';
 import type { SortState } from './deskTable';
@@ -32,7 +32,7 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
   const rows = props.rows;
 
   return (
-    <View style={styles.root} testID={props.testID ?? 'owner-services'}>
+    <DeskListShell title="Services" subtitle={desk ? `${rows.length} job types` : undefined} testID={props.testID ?? 'owner-services'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="owner-services-error" />
       ) : null}
@@ -40,7 +40,8 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
       {!props.loading && props.error === null && rows.length === 0 ? (
         <EmptyState message="No services in the catalogue yet." testID="owner-services-empty" />
       ) : desk ? (
-        <DeskTable
+        <Panel padded={false} grow>
+          <DeskTable
           data={rows}
           rowKey={(r) => r.id}
           sort={sort}
@@ -108,6 +109,7 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
             },
           ]}
         />
+        </Panel>
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
           {rows.map((row) => (
@@ -138,7 +140,7 @@ export function OwnerServicesScreen(props: OwnerServicesScreenProps): React.Reac
           ))}
         </ScrollView>
       )}
-    </View>
+    </DeskListShell>
   );
 }
 

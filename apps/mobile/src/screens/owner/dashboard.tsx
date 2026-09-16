@@ -39,8 +39,8 @@ import { useEffect, useRef } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, EmptyState, Skeleton, useDensity } from '../../components/ui';
+import { DESK, DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
+import { Banner, EmptyState, PageHeader, Panel, Skeleton, pageContentStyle, useDensity } from '../../components/ui';
 import { useSkeleton } from '../../components/ui/Skeleton';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
@@ -163,7 +163,7 @@ function AttentionSection({
   showSkeleton: boolean;
 }): React.ReactNode {
   return (
-    <View style={styles.section} testID="owner-attention">
+    <Panel testID="owner-attention">
       <Text style={styles.sectionLabel} testID="owner-attention-heading">
         NEEDS ATTENTION
       </Text>
@@ -191,8 +191,22 @@ function AttentionSection({
           <AttentionRows rows={deps.attention} onOpen={deps.onOpenRow} testIDPrefix="owner-attention-row" />
         )
       ) : null}
-    </View>
+    </Panel>
   );
+}
+
+/**
+ * "Monday, 16 September" — the console answers for a day, and saying
+ * which one is the difference between a figure and a figure you trust.
+ * IST, like every business date in the product.
+ */
+function dashboardSubtitle(now: Date): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(now);
 }
 
 export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode {
@@ -211,25 +225,27 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
     deps.jobsPerDay === null || deps.revenuePerWeek === null ? null : (
       <View
         testID="owner-charts"
-        style={desk ? { flexDirection: 'row', gap: SPACE[6] } : { gap: SPACE[5] }}
+        style={desk ? { flexDirection: 'row', gap: DESK.page.gap } : { gap: SPACE[5] }}
       >
         <View style={desk ? { flex: 1 } : null} testID="owner-chart-jobs-block">
-          <Text style={styles.chartLabel}>JOBS PER DAY — 30 DAYS</Text>
-          <JobsPerDayBarChart
-            points={deps.jobsPerDay}
-            height={chartHeight}
-            nowYear={nowYear}
-            testID="owner-chart-jobs"
-          />
+          <Panel title="Jobs per day — 30 days">
+            <JobsPerDayBarChart
+              points={deps.jobsPerDay}
+              height={chartHeight}
+              nowYear={nowYear}
+              testID="owner-chart-jobs"
+            />
+          </Panel>
         </View>
         <View style={desk ? { flex: 1 } : null} testID="owner-chart-revenue-block">
-          <Text style={styles.chartLabel}>REVENUE PER WEEK — 12 WEEKS</Text>
-          <RevenuePerWeekLineChart
-            points={deps.revenuePerWeek}
-            height={chartHeight}
-            nowYear={nowYear}
-            testID="owner-chart-revenue"
-          />
+          <Panel title="Revenue per week — 12 weeks">
+            <RevenuePerWeekLineChart
+              points={deps.revenuePerWeek}
+              height={chartHeight}
+              nowYear={nowYear}
+              testID="owner-chart-revenue"
+            />
+          </Panel>
         </View>
       </View>
     );
@@ -237,16 +253,12 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
   return (
     <ScrollView
       testID="owner-dashboard"
-      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
-      contentContainerStyle={{
-        padding: desk ? SPACE[6] : SPACE[4],
-        paddingBottom: SPACE[8],
-        gap: SPACE[5],
-      }}
+      // On the desk the page ground is the shell's (NavShell paints it);
+      // on a phone this screen still owns its background.
+      style={{ flex: 1, backgroundColor: desk ? 'transparent' : SEMANTIC.bg.app }}
+      contentContainerStyle={pageContentStyle(desk)}
     >
-      <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary }} testID="owner-title">
-        Dashboard
-      </Text>
+      <PageHeader title="Dashboard" subtitle={dashboardSubtitle(deps.now)} testID="owner" />
 
       {deps.offline ? (
         <Banner tone="danger" message={OFFLINE_BANNER_MESSAGE} testID="owner-offline-banner" />
@@ -266,11 +278,22 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
       ) : deps.figures !== null ? (
         <View
           testID="owner-figures"
-          style={desk ? { flexDirection: 'row', gap: SPACE[6] } : { gap: SPACE[3] }}
+          style={desk ? { flexDirection: 'row', gap: DESK.page.gap } : { gap: SPACE[3] }}
         >
-          {deps.figures.map((figure) => (
-            <Figure key={figure.key} figure={figure} desk={desk} offline={deps.offline} />
-          ))}
+          {deps.figures.map((figure) =>
+            desk ? (
+              // Each figure on its own card: fourwhite  cards on the page's
+              // slate ground is the row that used to be four bare numbers
+              // floating in white space.
+              <View key={figure.key} style={{ flex: 1 }}>
+                <Panel>
+                  <Figure figure={figure} desk={desk} offline={deps.offline} />
+                </Panel>
+              </View>
+            ) : (
+              <Figure key={figure.key} figure={figure} desk={desk} offline={deps.offline} />
+            ),
+          )}
         </View>
       ) : null}
 

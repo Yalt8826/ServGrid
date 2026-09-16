@@ -61,6 +61,11 @@ const NAV_SHELL_SOURCE = readFileSync(join(fileURLToPath(new URL('./', import.me
  * of the AMC screen). The probe renders nothing, so these are all the
  * texts there are. */
 const OWNER_RAIL_TEXTS = [
+  // The rail's head (OW.2, 2026-09-16): the product's name and who is
+  // signed in. A console that opened on a bare list of links gave the eye
+  // nowhere to land, and the rail read as content rather than as chrome.
+  'ServGrid',
+  'Owner',
   'Dashboard',
   'Operations', 'Jobs', 'Dispatch', 'Customers', 'AMC',
   'Sales', 'Sales', 'Payments', 'Companies',
