@@ -28,6 +28,7 @@ import type {
   TrackingHealth,
 } from '@servgrid/shared';
 import { api } from '../../lib/api';
+import { itemsOf } from '../../lib/listShape';
 import { uuid } from '../../lib/uuid';
 import { sumMoney } from '../rep/money';
 import type { BlockingRow, EmployeeListRow, OwnerCompanyRow, OwnerPaymentRow, OwnerSaleRow, SecondOwner } from './model';
@@ -58,9 +59,19 @@ interface ListEnvelope<T> {
   items: T[];
 }
 
+/**
+ * A list read that accepts BOTH shapes the API answers with (OW.1,
+ * 2026-09-16). `/v1/companies` and `/v1/contracts` return an envelope
+ * `{ items, nextCursor }`; `/v1/employees`, `/v1/products` and
+ * `/v1/services` return a bare array. Both are live contracts — the
+ * dispatch form has always read the catalogue as arrays — and a reader
+ * that knows only one of them is the bug: `envelope.items` came back
+ * undefined and the `.map` below threw, which is why the owner's
+ * Companies, Employees, Products and Services screens all showed an
+ * error instead of their rows.
+ */
 async function listOf<T>(path: string): Promise<T[]> {
-  const envelope = await apiGet<ListEnvelope<T>>(path);
-  return envelope.items;
+  return itemsOf(await apiGet<ListEnvelope<T> | T[]>(path));
 }
 
 /** The error a refused write leaves on the sheet, verbatim. */
