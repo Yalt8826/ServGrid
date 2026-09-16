@@ -32,8 +32,8 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedStyle } from 'react-native-reanimated';
 
 import type { TrackingHealth } from '@servgrid/shared';
-import { DURATION, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
-import { Button } from '../../components/ui';
+import { DURATION, FRAME, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { Button, SectionHeader } from '../../components/ui';
 import { TrackingHealthChip, type LadderTarget } from '../../components/domain/TrackingHealthChip';
 import { textStyle } from '../../fonts/textStyle';
 import { useToggleProgress } from '../../components/ui/motion';
@@ -149,94 +149,140 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
 
   const name = health?.employeeName ?? deps.username;
 
+  // The navy frame (2026-09-16): his name and role on the frame ground,
+  // the same header every technician screen opens with. The route paints
+  // the same slate behind the status bar.
   return (
-    <ScrollView contentContainerStyle={styles.content} testID="profile-screen">
-      <Text style={styles.heading} testID="profile-name">
-        {name}
-      </Text>
-      <Text style={styles.caption} testID="profile-role">
-        {`${deps.role} · ${deps.username}`}
-      </Text>
-
-      {/* Prominent, always visible (§T7). Never animated. */}
-      <View style={styles.chipBlock} testID="profile-health-chip">
-        {health !== null ? (
-          <TrackingHealthChip health={health} onFix={deps.openLadder} testID="tracking-chip" />
-        ) : healthUnavailable ? (
-          <Text style={styles.unavailable} testID="profile-health-unavailable">
-            Tracking status is unavailable right now.
-          </Text>
-        ) : null}
+    <ScrollView contentContainerStyle={{ paddingBottom: SPACE[8] }} testID="profile-screen">
+      <View style={styles.frame}>
+        <Text style={styles.heading} testID="profile-name">
+          {name}
+        </Text>
+        <Text style={styles.caption} testID="profile-role">
+          {`${deps.role} · ${deps.username}`}
+        </Text>
       </View>
 
-      <Text style={styles.sectionLabel}>Tracking permissions</Text>
-      {(rows ?? []).map((row) => (
-        <View key={row.step} style={styles.ladderRow} testID={`profile-ladder-row-${row.step}`}>
-          <RowCheck done={row.done} />
-          <Text style={styles.ladderTitle}>{row.title}</Text>
-          <Text
-            style={[styles.ladderState, { color: row.done ? SEMANTIC.text.secondary : SEMANTIC.feedback.warning }]}
-          >
-            {row.stateText}
-          </Text>
-          {!row.done ? (
-            <Button
-              label="Fix"
-              variant="secondary"
-              onPress={() => deps.openLadder(row.step)}
-              testID={`profile-ladder-fix-${row.step}`}
-            />
+      <View style={styles.body}>
+        {/* Prominent, always visible (§T7). Never animated. */}
+        <View style={styles.chipBlock} testID="profile-health-chip">
+          {health !== null ? (
+            <TrackingHealthChip health={health} onFix={deps.openLadder} testID="tracking-chip" />
+          ) : healthUnavailable ? (
+            <Text style={styles.unavailable} testID="profile-health-unavailable">
+              Tracking status is unavailable right now.
+            </Text>
           ) : null}
         </View>
-      ))}
 
-      <Text style={styles.sectionLabel}>This phone</Text>
-      <View style={styles.infoRow} testID="profile-app-version">
-        <Text style={styles.infoLabel}>App version</Text>
-        <Text style={styles.infoValue}>{deps.appVersion}</Text>
-      </View>
-      <View style={styles.infoRow} testID="profile-device-model">
-        <Text style={styles.infoLabel}>Device model</Text>
-        <Text style={styles.infoValue}>{deps.deviceModel}</Text>
-      </View>
+        {/* The four checks, in a panel: the one place tracking can be
+            judged and fixed, now that the dashboard no longer nags (§T7).
+            The rows keep their resolving beat — a granted permission still
+            plays the 140ms check — and nothing here animates at rest. */}
+        <View style={styles.section}>
+          <SectionHeader label="Tracking permissions" icon="shield" />
+          <View style={styles.panel}>
+            {(rows ?? []).map((row, index) => (
+              <View key={row.step} style={{ alignSelf: 'stretch' }}>
+                {index > 0 ? <View style={styles.hairline} /> : null}
+                <View style={styles.ladderRow} testID={`profile-ladder-row-${row.step}`}>
+                  <RowCheck done={row.done} />
+                  <Text style={styles.ladderTitle}>{row.title}</Text>
+                  <Text
+                    style={[styles.ladderState, { color: row.done ? SEMANTIC.text.secondary : SEMANTIC.feedback.warning }]}
+                  >
+                    {row.stateText}
+                  </Text>
+                  {!row.done ? (
+                    <Button
+                      label="Fix"
+                      icon="wrench"
+                      variant="secondary"
+                      onPress={() => deps.openLadder(row.step)}
+                      testID={`profile-ladder-fix-${row.step}`}
+                    />
+                  ) : null}
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
 
-      <View style={styles.actions}>
-        <Button label="Change password" variant="secondary" onPress={deps.changePassword} fullwidth testID="profile-change-password" />
+        <View style={styles.section}>
+          <SectionHeader label="This phone" icon="phone" />
+          <View style={styles.panel}>
+            <View style={styles.infoRow} testID="profile-app-version">
+              <Text style={styles.infoLabel}>App version</Text>
+              <Text style={styles.infoValue}>{deps.appVersion}</Text>
+            </View>
+            <View style={styles.hairline} />
+            <View style={styles.infoRow} testID="profile-device-model">
+              <Text style={styles.infoLabel}>Device model</Text>
+              <Text style={styles.infoValue}>{deps.deviceModel}</Text>
+            </View>
+          </View>
+        </View>
 
-        <Button label="Log out" variant="danger" onPress={deps.logout} fullwidth testID="profile-logout" />
+        <View style={styles.actions}>
+          <Button label="Change password" icon="key" variant="secondary" onPress={deps.changePassword} fullwidth testID="profile-change-password" />
+
+          <Button label="Log out" icon="logout" variant="danger" onPress={deps.logout} fullwidth testID="profile-logout" />
+        </View>
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: SPACE[4],
-    paddingBottom: SPACE[8],
+  /** The navy frame: full-bleed header; the route paints the same slate
+   * behind the status bar (2026-09-16). */
+  frame: {
+    alignSelf: 'stretch',
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[5],
+  },
+  body: {
+    alignSelf: 'stretch',
+    flexGrow: 1,
+    backgroundColor: SEMANTIC.bg.app,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[5],
+    gap: SPACE[5],
+  },
+  section: {
+    alignSelf: 'stretch',
+    gap: SPACE[2],
+  },
+  panel: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.none,
+    backgroundColor: SEMANTIC.bg.raised,
+    paddingHorizontal: SPACE[3],
+  },
+  hairline: {
+    height: 1,
+    backgroundColor: SEMANTIC.line.default,
   },
   heading: {
     ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
+    color: FRAME.text,
     marginBottom: SPACE[1],
   },
   caption: {
     ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
-    marginBottom: SPACE[4],
+    color: FRAME.textMuted,
   },
   chipBlock: {
     alignSelf: 'stretch',
-    marginBottom: SPACE[5],
     minHeight: TAP.min,
   },
   unavailable: {
     ...textStyle('caption'),
     color: SEMANTIC.text.secondary,
-  },
-  sectionLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
-    marginBottom: SPACE[2],
   },
   ladderRow: {
     alignSelf: 'stretch',
@@ -244,8 +290,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: TAP.min,
     paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
     gap: SPACE[3],
   },
   check: {
@@ -273,6 +317,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 44,
+    paddingVertical: SPACE[2],
   },
   infoLabel: {
     ...textStyle('body'),
@@ -286,7 +331,6 @@ const styles = StyleSheet.create({
   actions: {
     alignSelf: 'stretch',
     gap: SPACE[3],
-    marginTop: SPACE[5],
   },
   checkSlot: {
     width: 28,

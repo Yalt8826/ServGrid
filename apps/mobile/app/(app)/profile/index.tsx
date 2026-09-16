@@ -41,7 +41,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppState, Text, View, StyleSheet } from 'react-native';
 
 import type { TrackingHealth } from '@servgrid/shared';
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { api } from '../../../src/lib/api';
 import { loadMyDevice } from '../../../src/lib/myDevice';
 import { matchAutostartVendor } from '../../../src/location/autostart';
@@ -107,9 +107,12 @@ function TechnicianProfileRoute(): React.ReactNode {
   if (actor === null) return null;
 
   return (
+    // The frame's ground, top edge only — the dashboard's treatment: the
+    // screen's navy header runs to the status bar, and the bottom inset
+    // belongs to the shell that draws the tab bar (2026-09-16).
     <SafeAreaView
-      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
-      edges={['top', 'left', 'right', 'bottom']}
+      style={{ flex: 1, backgroundColor: FRAME.bg }}
+      edges={['top', 'left', 'right']}
     >
       <ProfileScreen
         username={actor.username}
