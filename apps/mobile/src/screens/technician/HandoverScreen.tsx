@@ -229,7 +229,11 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
   // job detail wear, so the app's money screen opens like its work
   // screens. The route paints `FRAME.bg` behind the status bar.
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: SPACE[8] }} testID="handover-screen">
+    <ScrollView
+      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
+      contentContainerStyle={{ paddingBottom: SPACE[8] }}
+      testID="handover-screen"
+    >
       <View style={styles.frame}>
         <Text style={[styles.heading, { color: FRAME.text }]} testID="handover-title">
           Cash handover
