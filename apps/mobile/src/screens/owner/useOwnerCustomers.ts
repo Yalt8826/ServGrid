@@ -91,7 +91,7 @@ function listErrorMessage(error: unknown, fallback: string): string {
 }
 
 /** /customers — the owner's table. */
-export function useOwnerCustomers(): {
+export function useOwnerCustomers(query = ''): {
   offline: boolean;
   loading: boolean;
   error: string | null;
@@ -103,9 +103,14 @@ export function useOwnerCustomers(): {
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
+  // The search is the SERVER's (`?q=` over name and phone, §6.4), not a
+  // filter over the page already fetched: the table caps at PAGE_LIMIT
+  // rows, and a client-side filter would quietly search only those.
+  const trimmed = query.trim();
+  const search = trimmed === '' ? '' : `&q=${encodeURIComponent(trimmed)}`;
   const customers = useQuery({
-    queryKey: ['owner', 'customers', tick],
-    queryFn: () => fetchJson<CustomerListEnvelope>(`/v1/customers?limit=${PAGE_LIMIT}`),
+    queryKey: ['owner', 'customers', tick, trimmed],
+    queryFn: () => fetchJson<CustomerListEnvelope>(`/v1/customers?limit=${PAGE_LIMIT}${search}`),
   });
   const companies = useQuery({
     queryKey: ['owner', 'companies'],

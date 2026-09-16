@@ -347,20 +347,57 @@ describe('search q over name and phone, and the GIN index', () => {
     expect(names).toContain('Bright Power Solutions');
     expect(names).not.toContain('Anand Electricals');
 
-    // The boundary, pinned on purpose: a phone PARTIAL does not match. The
-    // alternative (a LIKE prefix) cannot use customers_phone_idx on an
-    // en_US.utf8 database, and one unindexable arm drags the whole search
-    // back to a sequential scan — see the EXPLAIN assertion below. Prefix
-    // phone search arrives with a text_pattern_ops index, or not at all.
+    // A phone PARTIAL matches since OW.6 — the search box the owner asked
+    // for answers while the number is still being typed. It arrived with
+    // its index (customers_phone_prefix_idx, text_pattern_ops, migration
+    // 020), which is the condition the earlier design set: an arm that
+    // cannot use an index would drag the whole OR to a sequential scan,
+    // and the EXPLAIN assertion below still refuses one.
     const partial = await app.inject({
       method: 'GET',
       url: '/v1/customers?q=779800',
       headers: bearer(DISPATCHER),
     });
     expect(partial.statusCode, partial.body).toBe(200);
-    expect(partial.json<{ items: Array<{ name: string }> }>().items.map((c) => c.name)).not.toContain(
+    expect(partial.json<{ items: Array<{ name: string }> }>().items.map((c) => c.name)).toContain(
       'Bright Power Solutions',
     );
+  });
+
+  it('a name PARTIAL matches too — the box answers while the word is half typed (OW.6)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/customers?q=anan',
+      headers: bearer(DISPATCHER),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json<{ items: Array<{ name: string }> }>().items.map((c) => c.name)).toContain(
+      'Anand Electricals',
+    );
+  });
+
+  it('two half-typed words narrow together, they do not widen', async () => {
+    const both = await app.inject({
+      method: 'GET',
+      url: '/v1/customers?q=brig%20pow',
+      headers: bearer(DISPATCHER),
+    });
+    expect(both.statusCode, both.body).toBe(200);
+    const names = both.json<{ items: Array<{ name: string }> }>().items.map((c) => c.name);
+    expect(names).toContain('Bright Power Solutions');
+    expect(names).not.toContain('Anand Electricals');
+  });
+
+  it('a query of punctuation alone matches nothing, rather than everything', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/customers?q=%26%26%26',
+      headers: bearer(DISPATCHER),
+    });
+    // The operators to_tsquery would choke on never reach it: the query is
+    // built from letters and digits, and an empty one matches no row.
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
   });
 
   it('q hits a full phone number', async () => {

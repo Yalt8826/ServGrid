@@ -158,13 +158,19 @@ export function PerformancePanels(): React.ReactNode {
   }
 
   return (
-    <View style={{ gap: desk ? DESK.page.gap : SPACE[4] }} testID="owner-performance">
+    // The section outranks what the page paints after it, and the toolbar
+    // outranks the panels under it (OW.6). Both are needed: a z-index only
+    // competes inside its own stacking context, so raising the open field
+    // alone left its menu behind the charts below — the same bug the Jobs
+    // filter bar had, one level up.
+    <View style={{ gap: desk ? DESK.page.gap : SPACE[4], zIndex: 20 }} testID="owner-performance">
       <View
         style={{
           flexDirection: desk ? 'row' : 'column',
           alignItems: desk ? 'flex-end' : 'stretch',
           justifyContent: 'space-between',
           gap: SPACE[3],
+          zIndex: 30,
         }}
       >
         <View style={{ gap: 2 }}>

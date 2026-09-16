@@ -33,6 +33,13 @@ export interface OwnerCustomersDeps extends OwnerCustomerDetailDeps {
   onOpenCustomer(customerId: string): void;
   selectedCustomerId: string | null;
   onSelectCustomer(customerId: string | null): void;
+  /**
+   * What an empty list means here (OW.6). "No customers yet" is a lie
+   * when a search is narrowing them, and the difference between "you have
+   * none" and "none match" is the difference between a dead end and a
+   * typo.
+   */
+  emptyMessage?: string;
 }
 
 function phoneCard(row: OwnerCustomerRow, onOpen: (id: string) => void): React.ReactElement {
@@ -167,7 +174,7 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
           ))}
         </View>
       ) : rows.length === 0 ? (
-        <EmptyState message="No customers yet." testID="owner-customers-empty" />
+        <EmptyState message={deps.emptyMessage ?? 'No customers yet.'} testID="owner-customers-empty" />
       ) : desk ? (
         <View style={styles.deskBody}>
           <View style={styles.tableWrap}>

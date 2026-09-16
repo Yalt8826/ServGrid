@@ -1,0 +1,18 @@
+-- Migration 020 — the customer search box types ahead (OW.6, 2026-09-16).
+--
+-- `?q=` matched whole words and an EXACT phone: "Nagesh" found the site,
+-- "Nag" found nothing, and a half-typed number found nothing at all.
+-- That was a deliberate trade — customers/repo.ts says so — because the
+-- name arm is GIN-served and the phone arm rode `customers_phone_idx`,
+-- while a prefix `LIKE 'q%'` cannot use a plain btree under en_US.utf8,
+-- and one unindexed arm drags the whole OR to a sequential scan.
+--
+-- The owner asked for a search box on his Customers page, and a box that
+-- answers nothing until the word is finished is not one. The comment
+-- named the price: "if prefix search is wanted later, it arrives WITH
+-- its index." This is that index.
+--
+-- The name arm needs no new index: a GIN over the tsvector already
+-- serves `to_tsquery('simple', 'nag:*')` — prefix matching is what the
+-- `:*` lexeme is for.
+CREATE INDEX customers_phone_prefix_idx ON customers (phone text_pattern_ops);
