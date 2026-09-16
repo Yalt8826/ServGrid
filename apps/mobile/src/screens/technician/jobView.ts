@@ -230,6 +230,72 @@ export function laterTodayOf(views: readonly JobView[], now: Date): JobView[] {
   return sortForToday(today, now).slice(1);
 }
 
+/** TODAY — every open job of today, in today's order (§T2: overdue
+ * first, then the clock). `bucketOf` already carries yesterday's
+ * unfinished work into today, so this is the same list the Jobs screen's
+ * Today tab holds. */
+export function todayJobsOf(views: readonly JobView[], now: Date): JobView[] {
+  const todayKey = istDateKey(now);
+  return sortForToday(
+    views.filter((v) => bucketOf(v, todayKey) === 'today'),
+    now,
+  );
+}
+
+/** LATER — tomorrow and beyond, earliest first. The day is on each row
+ * (`dayLabelOf`), because a time alone is not a date. */
+export function laterJobsOf(views: readonly JobView[], now: Date): JobView[] {
+  const todayKey = istDateKey(now);
+  return sortForUpcoming(views.filter((v) => bucketOf(v, todayKey) === 'upcoming'));
+}
+
+/**
+ * THE job he is on (2026-09-16) — the one the dashboard raises above the
+ * lists, and the reason no other job may be started while it stands.
+ *
+ * He works one job at a time (Yashas): a technician travelling to one
+ * site cannot also be starting another. `in_progress` wins over
+ * `en_route` — on site is further along than on the way — and the
+ * earliest scheduled wins inside each status, so the answer never depends
+ * on array order. The server's work read is deliberately not asked for a
+ * single active job: the rule is the technician's, and it has to hold
+ * whatever the read returns.
+ */
+export function activeJobOf(views: readonly JobView[], now: Date): JobView | null {
+  const onSite = views.filter((v) => v.job.status === 'in_progress');
+  if (onSite.length > 0) return sortForToday(onSite, now)[0] ?? null;
+  const travelling = views.filter((v) => v.job.status === 'en_route');
+  return sortForToday(travelling, now)[0] ?? null;
+}
+
+/** The sentence that explains a blocked start: whose job is in the way. */
+export function busyWithSentence(active: JobView): string {
+  return `Finish ${active.job.jobNumber} first.`;
+}
+
+/**
+ * The row's day, when it is not today: `Tomorrow`, or `Tue 17 Sep`.
+ *
+ * The compact card's meta row carries a time, and on a future job a time
+ * on its own is not an answer to "when" — `09:00` beside a job that is
+ * nine days away reads as today. Today returns null: the section heading
+ * already says so, and repeating it on every row is noise.
+ */
+export function dayLabelOf(scheduledFor: string | null, now: Date): string | null {
+  if (scheduledFor === null) return null;
+  const day = istDateKey(scheduledFor);
+  const today = istDateKey(now);
+  if (day === today) return null;
+  const tomorrow = istDateKey(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  if (day === tomorrow) return 'Tomorrow';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(scheduledFor));
+}
+
 // ── tab list assembly ────────────────────────────────────────────────────────
 
 export interface TabSection {

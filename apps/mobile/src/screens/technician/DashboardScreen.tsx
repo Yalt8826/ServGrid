@@ -4,27 +4,42 @@
  * first thing in the morning, in a van.
  *
  * Anatomy, exactly: the **navy frame** (greeting · the date · **three
- * figures only** — today's open, done today, overdue — `display` 32
- * Condensed, tabular; not six, not a chart) · the `TrackingHealthChip`,
- * always visible · NEXT — the single next job as a full `JobCard` with
- * *Navigate* (secondary) and *Start job* / *Arrive* (primary, the
- * screen's ONE accent) · LATER TODAY as compact rows.
+ * figures only** — today's open, done today, overdue, `display` 32
+ * Condensed, tabular; not six, not a chart) · **the active job**, when he
+ * is on one · **TODAY** · **LATER** (tomorrow and beyond).
  *
- * **The frame** (mobile UI overhaul, 2026-09-16) is the header block: it
- * is where the three figures live, and it is the only place in the app
- * that paints `FRAME.bg`. `FRAME`'s note in the shared tokens carries the
- * rules it obeys — structure, never data that only exists up there; the
- * accent as text and the active bar, never as a fill; inks measured on
- * slate.900. The figures themselves are colour-coded by what they mean
- * (`today` white, `done` green, `overdue` red) and **the red appears only
- * when there is something overdue**: a permanent red zero teaches the eye
- * to ignore red, which is the one ink this screen cannot afford to waste.
+ * **One job at a time (Yashas, 2026-09-16).** A technician travels to one
+ * site, so the screen carries exactly one job he can act on: the job he
+ * has already started (`activeJobOf` — on site, else travelling) is
+ * raised into `ActiveJobPanel` with *Call*, *Navigate* and the next
+ * status write, and the lists below it are for looking, not for
+ * starting. When no job is active the same slot is filled by today's
+ * first job as a full card with *Navigate* and *Start job*, so the screen
+ * always has one actionable job and never two. That is also why no button
+ * here is ever disabled for being "second": the second job simply has no
+ * start button on the dashboard. The rule is taught where he could
+ * otherwise break it — the job detail's thumb bar, which shows the reason
+ * (`busyWithSentence`).
+ *
+ * **The sections are the day, not the clock (Yashas).** `TODAY` is every
+ * open job of today in today's order — `bucketOf` carries yesterday's
+ * unfinished work into today, so the overdue jobs he still owes are at
+ * the top where they belong — and `LATER` is tomorrow onwards, each row
+ * carrying its day. Together they replace the old NEXT / LATER TODAY
+ * pair, which split one day in two and left tomorrow nowhere to be seen.
+ *
+ * **The tracking strip is gone from this screen (Yashas, 2026-09-16:
+ * "remove the background permission fix error").** It nagged a red
+ * "Background permission missing — fix" over work he could not do
+ * anything about at that moment; the same four checks, with their fixes,
+ * remain one tap away on Profile → Tracking permissions. The dashboard is
+ * the day's work, and §T1's rule about what does not belong on it now
+ * includes the health strip.
  *
  * **The server's work read is the source** (PLAN-FRONTEND.md §4,
  * online-only): jobs arrive as props from the route's in-memory query,
- * and this screen renders only once they have. A missing health answer
- * raises **no banner** — the chip degrades — and a lost connection is
- * the no-connection gate's to show, never this screen's. Pull to refresh
+ * and this screen renders only once they have. A lost connection is the
+ * no-connection gate's to show, never this screen's. Pull to refresh
  * reads the server again.
  *
  * Not on this screen, deliberately: revenue, charts, team activity,
@@ -34,28 +49,29 @@
  *
  * Motion (§T1): the figures count up from zero on **first focus only**,
  * 380ms `enter`, tabular so nothing reflows; on subsequent focus they
- * are already correct. The NEXT card does not animate in. The count-up
- * is the one piece of motion here that is not load-bearing — if it is
- * ever janky, delete it (the screens do not depend on it).
+ * are already correct. The cards do not animate in. The count-up is the
+ * one piece of motion here that is not load-bearing — if it is ever
+ * janky, delete it (the screens do not depend on it).
  */
 import { useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { runOnJS, useAnimatedReaction, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import type { TrackingHealth } from '@servgrid/shared';
 import { DURATION, EASING, FRAME, SEMANTIC, SPACE } from '@servgrid/shared';
-import { TrackingHealthChip, type LadderTarget } from '../../components/domain/TrackingHealthChip';
+import { ActiveJobPanel } from '../../components/domain/ActiveJobPanel';
 import { JobCard } from '../../components/domain/JobCard';
 import { Button, EmptyState, SectionHeader } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
 import {
+  activeJobOf,
   dashboardFigures,
+  dayLabelOf,
   istDayLabel,
   istGreeting,
-  laterTodayOf,
-  nextJobOf,
+  laterJobsOf,
   primaryActionOf,
+  todayJobsOf,
   type JobView,
 } from './jobView';
 
@@ -68,17 +84,17 @@ export interface DashboardDeps {
   jobs: JobView[];
   /** Job id → when the server closed a completed job. */
   completedAtById: Record<string, string>;
-  /** Last known tracking health; null degrades to "never reported". */
-  health: TrackingHealth | null;
-  /** Red and amber only — into the permission ladder (§T7). */
-  onHealthFix?: (target: LadderTarget) => void;
   /** A read of the server is running (pull to refresh). */
   refreshing: boolean;
   /** Pull to refresh reads the server again. */
   onRefresh: () => void;
   onStartJob: (view: JobView) => void;
   onNavigate: (view: JobView) => void;
+  /** Dials the job's contact (`tel:`) — no number, no call. */
+  onCall: (view: JobView) => void;
   onOpenJob: (view: JobView) => void;
+  /** The active job's own way to finish: the complete sheet. */
+  onCompleteJob: (view: JobView) => void;
   /** Injectable clock — IST "today" is computed from it. */
   now: Date;
   /**
@@ -184,27 +200,27 @@ export function DashboardScreen(deps: DashboardDeps): React.ReactNode {
   const animate = deps.animateFigures ?? true;
 
   const figures = dashboardFigures(deps.jobs, deps.completedAtById, deps.now);
-  const next = nextJobOf(deps.jobs, deps.now);
-  const later = laterTodayOf(deps.jobs, deps.now);
-  const primary = next === null ? null : primaryActionOf(next.job.status);
-  const empty = next === null && later.length === 0;
+  const active = activeJobOf(deps.jobs, deps.now);
+  // TODAY is every today job, and the active one is not repeated in it:
+  // the panel above is where he acts, the list below is where he looks.
+  const today = todayJobsOf(deps.jobs, deps.now).filter((v) => v.job.id !== active?.job.id);
+  const later = laterJobsOf(deps.jobs, deps.now);
 
-  // The chip's health: when nothing is known (cold start, offline, or
-  // the endpoint has never answered), the chip honestly reports tracking
-  // as never reported — it never hides, and it never raises a banner.
-  const health: TrackingHealth =
-    deps.health ??
-    ({
-      employeeId: '',
-      employeeName: deps.name,
-      role: 'technician',
-      deviceId: null,
-      locationPermission: null,
-      notificationsEnabled: null,
-      lastPingAt: null,
-      minutesSince: null,
-      health: 'never_reported',
-    } satisfies TrackingHealth);
+  // The screen's one actionable job: the job he is on, else today's first.
+  const focus = active ?? today[0] ?? null;
+  const focusIsActive = active !== null && focus !== null && focus.job.id === active.job.id;
+  const advance = focus === null ? null : primaryActionOf(focus.job.status);
+  const focusPrimary =
+    focus === null
+      ? null
+      : advance !== null
+        ? { label: advance.label, onPress: () => deps.onStartJob(focus) }
+        : focus.job.status === 'in_progress'
+          ? { label: 'Complete job', onPress: () => deps.onCompleteJob(focus) }
+          : null;
+  // When the panel is the active job, the list below starts after it.
+  const restToday = focusIsActive ? today : today.slice(1);
+  const empty = focus === null && today.length === 0 && later.length === 0;
 
   return (
     <ScrollView
@@ -265,47 +281,73 @@ export function DashboardScreen(deps: DashboardDeps): React.ReactNode {
       </View>
 
       <View style={styles.body}>
-        <TrackingHealthChip health={health} onFix={deps.onHealthFix} testID="dashboard-health" />
-
-        {next === null ? null : (
-          <View style={styles.section}>
-            <SectionHeader label="Next" icon="jobs" testID="dashboard-next-label" />
-            {/* The NEXT card does not animate in (§T1). */}
-            <JobCard
-              view={next}
-              testID="dashboard-next-card"
-              onPress={() => deps.onOpenJob(next)}
-              actions={
-                <View style={styles.actionsRow}>
+        {/* The one job he can act on. The panel when he has already
+            started it; today's first job as a docket when he has not —
+            the same slot either way, so the screen never offers two
+            starts and never offers none while there is work. */}
+        {focus === null ? null : focusIsActive ? (
+          <ActiveJobPanel
+            view={focus}
+            dayLabel={dayLabelOf(focus.job.scheduledFor, deps.now)}
+            testID="dashboard-active-card"
+            onPress={() => deps.onOpenJob(focus)}
+            onCall={() => deps.onCall(focus)}
+            onNavigate={() => deps.onNavigate(focus)}
+            primary={focusPrimary}
+          />
+        ) : (
+          <JobCard
+            view={focus}
+            dayLabel={dayLabelOf(focus.job.scheduledFor, deps.now)}
+            testID="dashboard-next-card"
+            onPress={() => deps.onOpenJob(focus)}
+            actions={
+              <View style={styles.actionsRow}>
+                <Button
+                  label="Navigate"
+                  icon="navigate"
+                  variant="secondary"
+                  onPress={() => deps.onNavigate(focus)}
+                  testID="dashboard-navigate"
+                />
+                {focusPrimary === null ? null : (
                   <Button
-                    label="Navigate"
-                    icon="navigate"
-                    variant="secondary"
-                    onPress={() => deps.onNavigate(next)}
-                    testID="dashboard-navigate"
+                    label={focusPrimary.label}
+                    icon="forward"
+                    onPress={focusPrimary.onPress}
+                    testID="dashboard-primary-action"
                   />
-                  {primary !== null ? (
-                    <Button
-                      label={primary.label}
-                      icon="forward"
-                      onPress={() => deps.onStartJob(next)}
-                      testID="dashboard-primary-action"
-                    />
-                  ) : null}
-                </View>
-              }
-            />
+                )}
+              </View>
+            }
+          />
+        )}
+
+        {restToday.length === 0 ? null : (
+          <View style={styles.section}>
+            <SectionHeader label="Today" icon="clock" count={restToday.length} testID="dashboard-today-label" />
+            {restToday.map((view) => (
+              <JobCard
+                key={view.job.id}
+                view={view}
+                compact
+                dayLabel={dayLabelOf(view.job.scheduledFor, deps.now)}
+                testID={`dashboard-today-${view.job.id}`}
+                onPress={() => deps.onOpenJob(view)}
+              />
+            ))}
           </View>
         )}
 
         {later.length === 0 ? null : (
           <View style={styles.section}>
-            <SectionHeader label="Later today" icon="clock" count={later.length} testID="dashboard-later-label" />
+            <SectionHeader label="Later" icon="calendar" count={later.length} testID="dashboard-later-label" />
             {later.map((view) => (
               <JobCard
                 key={view.job.id}
                 view={view}
                 compact
+                dayLabel={dayLabelOf(view.job.scheduledFor, deps.now)}
                 testID={`dashboard-later-${view.job.id}`}
                 onPress={() => deps.onOpenJob(view)}
               />

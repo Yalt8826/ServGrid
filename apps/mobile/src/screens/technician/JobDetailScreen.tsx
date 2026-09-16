@@ -67,6 +67,20 @@ export interface JobDetailDeps {
   onNavigate: (view: JobView) => void;
   /** The advance: *Start job* / *Arrive*, written to the server. */
   onStartJob: (view: JobView) => void;
+  /**
+   * Why this job cannot be **started** right now, or null when it can
+   * (Yashas, 2026-09-16: he is on one job at a time). `busyWithSentence`
+   * names the job in the way.
+   *
+   * It blocks the *start* only — `assigned → en_route`. Arriving at or
+   * completing a job he has already begun is not starting a new one, and
+   * blocking it would strand him on stale data (a job left `en_route`
+   * from an earlier day could never be arrived at while another job stood
+   * in progress). The advance button carries this as its `disabledReason`
+   * when it applies: the explanation is the point, since a control that
+   * silently does nothing teaches nothing.
+   */
+  startBlockedReason?: string | null;
   /** Opens the complete sheet (T4). */
   onComplete: (view: JobView) => void;
   /** Opens the cancel sheet (T5). */
@@ -84,6 +98,9 @@ export interface JobDetailDeps {
 
 export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
   const { view } = deps;
+  // The one-job-at-a-time block, and only for the start: `advance.to ===
+  // 'en_route'` is *Start job*. Arriving or completing is never blocked.
+  const startBlocked = deps.startBlockedReason ?? null;
   const { job } = view;
   const reducedMotion = useReducedMotion();
 
@@ -305,7 +322,13 @@ export function JobDetailScreen(deps: JobDetailDeps): React.ReactNode {
             <Button label="Cancel" variant="danger" onPress={() => deps.onCancel(view)} testID="detail-cancel" />
             <View style={{ flex: 1 }} />
             {advance !== null ? (
-              <Button label={advance.label} onPress={() => deps.onStartJob(view)} testID="detail-primary" />
+              <Button
+                label={advance.label}
+                onPress={() => deps.onStartJob(view)}
+                disabled={startBlocked !== null && advance.to === 'en_route'}
+                disabledReason={startBlocked !== null && advance.to === 'en_route' ? startBlocked : undefined}
+                testID="detail-primary"
+              />
             ) : job.status === 'in_progress' ? (
               <Button label="Complete job" onPress={() => deps.onComplete(view)} testID="detail-primary" />
             ) : null}

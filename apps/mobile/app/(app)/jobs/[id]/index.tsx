@@ -19,6 +19,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { JobDetailScreen } from '../../../../src/screens/technician/JobDetailScreen';
+import { activeJobOf, busyWithSentence } from '../../../../src/screens/technician/jobView';
 import { useJobTimeline, useTechJobsFlag, useTechnicianWork } from '../../../../src/screens/technician/useTechnicianWork';
 import { OwnerJobDetailBody } from '../../../../src/screens/owner/JobDetailBody';
 import { useOwnerAmendFlag, useOwnerJobCard, useOwnerJobDetail } from '../../../../src/screens/owner/useOwnerJobs';
@@ -67,6 +68,12 @@ export default function Screen() {
   }
 
   const view = jobId === undefined || deps === null ? null : (deps.views.find((v) => v.job.id === jobId) ?? null);
+  // One job at a time (2026-09-16): while another job is active, this
+  // one's *Start job* / *Arrive* is disabled and names the job in the
+  // way. Completion is never blocked — it is how the next job unblocks.
+  const active = deps === null ? null : activeJobOf(deps.views, new Date());
+  const startBlockedReason =
+    active === null || view === null || active.job.id === view.job.id ? null : busyWithSentence(active);
 
   if (actor === null || actor.role !== 'technician' || !flag.flagOn || deps === null || view === null) {
     return (
@@ -88,6 +95,7 @@ export default function Screen() {
         }}
         onNavigate={deps.navigate}
         onStartJob={deps.startJob}
+        startBlockedReason={startBlockedReason}
         onComplete={(v) => router.push(`/jobs/${v.job.id}/complete`)}
         onCancel={(v) => router.push(`/jobs/${v.job.id}/cancel`)}
         onRefresh={deps.refresh}

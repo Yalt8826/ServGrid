@@ -337,3 +337,71 @@ describe('JobDetailScreen (§T3)', () => {
     expect(allText(findByTestID(tree, 'detail-contract') ?? null).join(' ')).toBe('AMC · until 14 Sep 2027');
   });
 });
+
+/**
+ * One job at a time, where he could otherwise break it (2026-09-16): the
+ * thumb bar is the only place a second job could be advanced into
+ * `en_route`/`in_progress` from the detail screen. With another job
+ * active the advance is disabled and carries the sentence naming it —
+ * and *Complete job* on the job he IS on is never blocked, because
+ * finishing it is how the next job unblocks.
+ */
+describe('JobDetailScreen — one job at a time', () => {
+  it('disables the advance and shows the reason while another job is active', async () => {
+    const deps = baseDeps({
+      view: viewOf({ status: 'assigned' }),
+      startBlockedReason: 'Finish JC-2627-00033 first.',
+    });
+    const tree = toJson(await create(<JobDetailScreen {...deps} />));
+
+    const primary = findByTestID(tree, 'detail-primary')!;
+    expect(primary).toBeDefined();
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(true);
+    // The visible why, not just a dead control.
+    expect(allText(primary).join(' ')).toContain('Finish JC-2627-00033 first.');
+  });
+
+  it('leaves the advance live when no other job is active', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps({ view: viewOf({ status: 'assigned' }) })} />));
+    const primary = findByTestID(tree, 'detail-primary')!;
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    expect(allText(primary).join(' ')).toBe('Start job');
+  });
+
+  it('never blocks completing the job he is on', async () => {
+    const wanted = vi.fn();
+    const tree = toJson(
+      await create(
+        <JobDetailScreen
+          {...baseDeps({ view: viewOf({ status: 'in_progress' }), onComplete: wanted, startBlockedReason: 'Finish JC-2627-00033 first.' })}
+        />,
+      ),
+    );
+    const primary = findByTestID(tree, 'detail-primary')!;
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    expect(allText(primary).join(' ')).toBe('Complete job');
+  });
+
+  it('never blocks arriving at a job he already started — that is not a new start', async () => {
+    // The stale-data case: a job left `en_route` from an earlier day must
+    // still be arriv-able while another job stands in progress, or the
+    // rule strands him on data it was never meant to trap.
+    const tree = toJson(
+      await create(
+        <JobDetailScreen
+          {...baseDeps({
+            view: viewOf({ status: 'en_route' }),
+            startBlockedReason: 'Finish JC-2627-00033 first.',
+          })}
+        />,
+      ),
+    );
+    const primary = findByTestID(tree, 'detail-primary')!;
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    expect(allText(primary).join(' ')).toBe('Arrive');
+  });
+});

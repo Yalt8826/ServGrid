@@ -38,9 +38,20 @@ import { Icon, type IconName } from '../components/ui/icons';
 import { coveringGroupIndex, groupMapFor, type NavGroupKey } from './navmap';
 
 const UNDERLINE_HEIGHT = 2;
-/** Tab bar height: the 52pt field target plus the glyph's line and the
- * label's — the glyph is extra content, not extra tap area. */
-const BAR_HEIGHT = TAP.min + 18;
+/**
+ * Tab bar height: the 52pt field target, and nothing more.
+ *
+ * It used to be `TAP.min + 18` — an extra label line's worth of height
+ * left over from when a tab was a word and nothing else. The row of tabs
+ * is 52 tall and sat at the top of a 70-tall bar, so 18pt of bare bar
+ * hung below the labels. While the bar was white that was invisible: the
+ * system's gesture strip below it is the same near-white, so the two
+ * bands read as one. On the navy frame it became a band of navy sticking
+ * out under the labels (Yashas, 2026-09-16) — the bar now hugs its
+ * content, and the glyph+label pair (38pt) centres inside the 52pt
+ * target it always had.
+ */
+const BAR_HEIGHT = TAP.min;
 
 /**
  * A tab's glyph, by the group's own key — the key names the job the tab

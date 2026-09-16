@@ -24,7 +24,7 @@
  * Nothing here spins while flags load: the answer arrives when the
  * session does, and the placeholder is the honest dark.
  */
-import { Text, View, StyleSheet } from 'react-native';
+import { Text, View, StyleSheet, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -199,18 +199,25 @@ export default function Screen() {
     // and runs to the screen's top edge, so the strip behind the status
     // bar has to be the same navy — otherwise the header has a light lid
     // on it (mobile UI overhaul, 2026-09-16).
-    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right', 'bottom']}>
+    //
+    // Top edge only. The bottom inset belongs to the shell, which pads
+    // itself for the gesture bar and draws the tab bar there; a `bottom`
+    // edge here padded the content a second time and painted that padding
+    // navy, which is the band of navy that appeared above the tab bar.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <DashboardScreen
         name={actor.username}
         jobs={deps.views}
         completedAtById={deps.completedAtById}
-        health={deps.health}
-        onHealthFix={() => router.push('/ladder')}
         refreshing={deps.refreshing}
         onRefresh={deps.refresh}
         onStartJob={deps.startJob}
         onNavigate={deps.navigate}
+        onCall={(view) => {
+          if (view.job.contactPhone !== null) void Linking.openURL(`tel:${view.job.contactPhone}`);
+        }}
         onOpenJob={(view) => router.push(`/jobs/${view.job.id}`)}
+        onCompleteJob={(view) => router.push(`/jobs/${view.job.id}/complete`)}
         now={new Date()}
       />
     </SafeAreaView>

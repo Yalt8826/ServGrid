@@ -68,6 +68,14 @@ export interface JobCardProps {
   view: JobView;
   /** Compact rows under LATER TODAY (§T1); the full card everywhere else. */
   compact?: boolean;
+  /**
+   * The row's day, when it is not today (`dayLabelOf`) — `Tomorrow`, or
+   * `Tue 17 Sep`. The meta row carries a clock time, and a time alone is
+   * not a date: `09:00` beside a job nine days out reads as this morning.
+   * Today passes nothing; the section heading already says which day it
+   * is.
+   */
+  dayLabel?: string | null;
   onPress?: () => void;
   /** Inline actions for the NEXT card — *Navigate* + the primary. */
   actions?: React.ReactNode;
@@ -83,7 +91,7 @@ const ENTER_EASING = easing(EASING.enter);
  * never an inline arrow; a scroll never re-renders unchanged rows). */
 export const MemoisedJobCard = memo(JobCard);
 
-export function JobCard({ view, compact = false, onPress, actions, arrivedFromSync = false, testID }: JobCardProps): React.ReactNode {
+export function JobCard({ view, compact = false, dayLabel = null, onPress, actions, arrivedFromSync = false, testID }: JobCardProps): React.ReactNode {
   const { job } = view;
   const pill = statusPillOf(job.status);
   const rail = railColorOf(job.status);
@@ -209,6 +217,14 @@ export function JobCard({ view, compact = false, onPress, actions, arrivedFromSy
           }}
         >
           <Icon name="clock" size={ICON.sm} color={SEMANTIC.text.placeholder} />
+          {dayLabel === null ? null : (
+            <Text
+              style={{ ...textStyle('label'), color: SEMANTIC.text.secondary }}
+              testID={testID ? `${testID}-day` : undefined}
+            >
+              {dayLabel}
+            </Text>
+          )}
           <Text
             style={{ ...textStyle('mono'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] }}
             testID={testID ? `${testID}-time` : undefined}

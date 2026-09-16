@@ -1,18 +1,22 @@
 /**
  * T1 Dashboard tests (UI/plan-2/04-TECHNICIAN.md §T1) — the four the
- * spec names:
+ * spec names, as amended on 2026-09-16:
  *
  * - **Three figures, tabular, on the first paint** — the data comes
  *   through `buildJobViews` from a work read exactly as
  *   `GET /v1/technician/work` answers it (online-only since 2026-09-15),
  *   and "done today" is dated by the server's `closedAt`.
- * - **A missing health answer renders no banner** — the chip degrades;
- *   a lost connection is the no-connection gate's to show, not this
- *   screen's.
+ * - **One job at a time** — the job he is on (on site, else travelling)
+ *   is the only job the screen offers a start for; the sections below it
+ *   are for looking.
  * - **Count-up runs once; a second focus renders final values
  *   immediately.**
  * - **No element renders a currency symbol** — no earnings figure, no
  *   amount anywhere in the rendered tree.
+ *
+ * The tracking strip's own test is gone with the strip (Yashas,
+ * 2026-09-16); the four checks now live on Profile → Tracking
+ * permissions.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
@@ -123,13 +127,13 @@ function baseDeps(overrides: Partial<Parameters<typeof DashboardScreen>[0]> = {}
     name: 'Ravi',
     jobs: [],
     completedAtById: {},
-    health: null,
-    onHealthFix: vi.fn(),
     refreshing: false,
     onRefresh: vi.fn(),
     onStartJob: vi.fn(),
     onNavigate: vi.fn(),
+    onCall: vi.fn(),
     onOpenJob: vi.fn(),
+    onCompleteJob: vi.fn(),
     now: NOW,
     ...overrides,
   };
@@ -175,35 +179,70 @@ describe('DashboardScreen (§T1)', () => {
       expect(style.fontVariant).toEqual(['tabular-nums']);
       expect(style.fontSize).toBe(32);
     }
-    // NEXT is the overdue morning job (overdue first), with Navigate
-    // (secondary) and Start job (primary) inline; LATER TODAY holds the
-    // rest of today in ascending order.
-    const nextCard = findByTestID(toJson(renderer), 'dashboard-next-card');
-    expect(nextCard).toBeDefined();
-    const primaryNode = findByTestID(toJson(renderer), 'dashboard-primary-action');
-    expect(primaryNode).toBeDefined();
-    expect(allText(primaryNode!).join(' ')).toBe('Start job');
-    expect(findByTestID(toJson(renderer), 'dashboard-navigate')).toBeDefined();
+    // The fixture has one `en_route` job, so that is the job he is on:
+    // the ACTIVE panel carries it, with Call, Navigate and the next
+    // status write — and no other job on the screen offers a start.
+    const activeCard = findByTestID(toJson(renderer), 'dashboard-active-card');
+    expect(activeCard).toBeDefined();
+    expect(findByTestID(toJson(renderer), 'dashboard-active-card-call')).toBeDefined();
+    expect(findByTestID(toJson(renderer), 'dashboard-active-card-navigate')).toBeDefined();
+    const activePrimary = findByTestID(toJson(renderer), 'dashboard-active-card-primary');
+    expect(allText(activePrimary!).join(' ')).toBe('Arrive');
+    // The panel is where he acts; the panel is also the ONLY start on the
+    // screen — no second job is offered one.
+    expect(findByTestID(toJson(renderer), 'dashboard-next-card')).toBeUndefined();
+    expect(findByTestID(toJson(renderer), 'dashboard-primary-action')).toBeUndefined();
+
+    // TODAY is the rest of today in today's order — the overdue 08:00
+    // before the 14:30 — and the active job is not repeated in it.
+    const todayRows = findAll(
+      toJson(renderer),
+      (n) => typeof n.props.testID === 'string' && /^dashboard-today-[0-9a-f-]+$/.test(n.props.testID),
+    );
+    expect(todayRows).toHaveLength(2);
+    expect(allText(todayRows[0]!).join(' ')).toContain('08:00');
+
+    // LATER is tomorrow onwards — one row, carrying its day.
     const laterRows = findAll(
       toJson(renderer),
       (n) => typeof n.props.testID === 'string' && /^dashboard-later-[0-9a-f-]+$/.test(n.props.testID),
     );
-    expect(laterRows).toHaveLength(2);
+    expect(laterRows).toHaveLength(1);
+    expect(allText(findByTestID(toJson(renderer), `${String(laterRows[0]!.props.testID)}-day`)!).join(' ')).toBe('Tomorrow');
   });
 
-  it('a missing health answer renders no banner', async () => {
-    // health = null: the fetch never answered. The screen degrades the
-    // chip, never raises chrome.
-    const renderer = await create(<DashboardScreen {...baseDeps({ health: null })} />);
+  it('offers today’s first job when nothing is active — and exactly one start', async () => {
+    // No `en_route`, no `in_progress`: the same slot is filled by today's
+    // first job as a docket, with Navigate and the primary inline.
+    const assigned = viewOf({ id: '01890a5e-1000-7000-8000-00000000000d', status: 'assigned', scheduledFor: MORNING });
+    const renderer = await create(<DashboardScreen {...baseDeps({ jobs: [assigned] })} />);
+    const tree = toJson(renderer);
+    expect(findByTestID(tree, 'dashboard-next-card')).toBeDefined();
+    expect(allText(findByTestID(tree, 'dashboard-primary-action')!).join(' ')).toBe('Start job');
+    expect(findByTestID(tree, 'dashboard-navigate')).toBeDefined();
+    expect(findByTestID(tree, 'dashboard-active-card')).toBeUndefined();
+    // The focus card is not repeated below itself.
+    expect(
+      findAll(tree, (n) => n.props.testID === `dashboard-today-${assigned.job.id}`),
+    ).toHaveLength(0);
+  });
+
+  it('carries no tracking strip and no banner (the chip left on 2026-09-16)', async () => {
+    // Yashas: "remove the background permission fix error". The four
+    // tracking checks live on Profile → Tracking permissions; this screen
+    // is the day's work. A lost connection is still the no-connection
+    // gate's to show, never this screen's — hence no banner either.
+    const renderer = await create(<DashboardScreen {...baseDeps()} />);
     const tree = toJson(renderer);
     const texts = allText(tree).join(' ').toLowerCase();
     expect(texts).not.toContain('offline');
     expect(texts).not.toContain('no connection');
-    // And no banner component anywhere in the tree.
+    expect(texts).not.toContain('permission');
+    expect(findByTestID(tree, 'dashboard-health')).toBeUndefined();
     const banners = findAll(tree, (n) => typeof n.props.testID === 'string' && n.props.testID.includes('banner'));
     expect(banners).toHaveLength(0);
-    // The chip still renders — always visible (§T1).
-    expect(findByTestID(tree, 'dashboard-health')).toBeDefined();
+    // With no jobs at all: the honest empty, and still nothing else.
+    expect(findByTestID(tree, 'dashboard-empty')).toBeDefined();
   });
 
   it('counts up once; a second focus renders final values immediately', async () => {
@@ -316,9 +355,11 @@ describe('DashboardScreen — the navy frame', () => {
 
   it('labels each section with its own marker, count included', async () => {
     const tree = toJson(await create(<DashboardScreen {...baseDeps({ jobs: workFixture().views })} />));
-    expect(allText(findByTestID(tree, 'dashboard-next-label')!).join(' ')).toBe('NEXT');
-    // LATER TODAY carries the count of the rows beneath it: two.
-    expect(allText(findByTestID(tree, 'dashboard-later-label')!).join(' ')).toContain('LATER TODAY');
-    expect(allText(findByTestID(tree, 'dashboard-later-label')!).join(' ')).toContain('2');
+    // TODAY carries the count of the rows under it (two: the overdue and
+    // the afternoon job — the active `en_route` job is not in the list).
+    expect(allText(findByTestID(tree, 'dashboard-today-label')!).join(' ')).toContain('TODAY');
+    expect(allText(findByTestID(tree, 'dashboard-today-label')!).join(' ')).toContain('2');
+    expect(allText(findByTestID(tree, 'dashboard-later-label')!).join(' ')).toContain('LATER');
+    expect(allText(findByTestID(tree, 'dashboard-later-label')!).join(' ')).toContain('1');
   });
 });
