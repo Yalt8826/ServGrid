@@ -172,7 +172,11 @@ export function Panel({ title, actions, children, padded = true, grow = false, t
         borderColor: DESK.card.border,
         borderRadius: DESK.card.radius,
         padding: padded ? DESK.card.pad : 0,
-        overflow: 'hidden',
+        // Clip ONLY when the card wraps something that must not spill past
+        // its rounded corners — a table. A padded card holds forms, and a
+        // form holds dropdowns: clipping there would cut the menu off at
+        // the card's edge (OW.5).
+        ...(padded ? {} : { overflow: 'hidden' as const }),
         ...(grow ? { flex: 1 } : {}),
         ...webShadow(DESK.card.webShadow),
       }}

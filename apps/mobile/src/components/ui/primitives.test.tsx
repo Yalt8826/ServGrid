@@ -134,6 +134,19 @@ describe('Select — the menu opens, filters, chooses and closes', () => {
     expect(findByTestID(toJson(r), 'who-no-match')).toBeDefined();
   });
 
+  it('outranks whatever is painted after it while open (OW.5)', async () => {
+    // The menu used to open BEHIND the table it filters: a z-index only
+    // competes inside its own stacking context, and the table is the
+    // later sibling. The field itself has to rise while it is open.
+    const r = await mount(<Select label="Role" value={null} options={opts} onSelect={() => {}} testID="sel" />);
+    const styleOf = (node: Node | undefined): Record<string, unknown> =>
+      Object.assign({}, ...(Array.isArray(node?.props.style) ? node!.props.style : [node?.props.style]).filter(Boolean));
+
+    expect(styleOf(findByTestID(toJson(r), 'sel')).zIndex).toBeUndefined();
+    await press(findByTestID(toJson(r), 'sel-trigger'));
+    expect(styleOf(findByTestID(toJson(r), 'sel')).zIndex).toBe(50);
+  });
+
   it('dismissing without choosing changes nothing', async () => {
     const chosen: string[] = [];
     const r = await mount(

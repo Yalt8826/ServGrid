@@ -238,7 +238,17 @@ export function Select({
   ) : null;
 
   return (
-    <View testID={testID} style={{ alignSelf: 'stretch' }} {...keyHandlers}>
+    <View
+      testID={testID}
+      // OW.5: while the menu is open this field outranks whatever is
+      // painted after it. A CSS z-index only competes inside its own
+      // stacking context, so the popover's own zIndex was never enough —
+      // the table is a later sibling, and it won. Raising the FIELD (and,
+      // in the filter bar, the row it sits in) is what puts the menu in
+      // front of the rows it filters.
+      style={{ alignSelf: 'stretch', ...(open ? { zIndex: 50 } : {}) }}
+      {...keyHandlers}
+    >
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 }}>{label}</Text>
 
       <View style={{ position: 'relative' }}>

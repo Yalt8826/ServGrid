@@ -790,6 +790,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     flexWrap: 'wrap',
     gap: SPACE[3],
+    // The bar outranks the table below it: an open dropdown has to paint
+    // over the rows it filters, and the table is the later sibling (OW.5).
+    zIndex: 30,
   },
   deskField: {
     minWidth: 200,

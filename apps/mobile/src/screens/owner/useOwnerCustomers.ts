@@ -43,6 +43,7 @@ import type { CustomerHistoryJob, CustomerStackUnit } from '../dispatcher/custom
 import { customerFormOf, customerPatchBody, emptyCustomerForm, type CustomerFormFields } from '../dispatcher/customerForm';
 import type { CustomerFormCompanyDeps } from '../dispatcher/customer';
 import { isOpenStatus, lastJobLabelOf, shortCustomerJobNumber, type OwnerCustomerRow } from './customersModel';
+import { itemsOf } from '../../lib/listShape';
 
 const PAGE_LIMIT = 200;
 /** Concurrent stack reads for the units column — well inside the 300/min actor budget. */
@@ -108,7 +109,10 @@ export function useOwnerCustomers(): {
   });
   const companies = useQuery({
     queryKey: ['owner', 'companies'],
-    queryFn: () => fetchJson<Company[]>('/v1/companies'),
+    // `/v1/companies` answers a cursor envelope, not a bare array (the
+    // same mismatch OW.1 fixed on the owner's other lists): read as an
+    // array it threw inside the mapper and took the whole screen down.
+    queryFn: async () => itemsOf(await fetchJson<{ items: Company[] } | Company[]>('/v1/companies')),
   });
   const jobs = useQuery({
     queryKey: ['owner', 'customer-jobs'],
@@ -246,7 +250,10 @@ export function useOwnerCustomerDetail(customerId: string | null): {
 
   const companyNameQuery = useQuery({
     queryKey: ['owner', 'company-name', detail.data?.companyId],
-    queryFn: () => fetchJson<Company[]>(`/v1/companies`),
+    // `/v1/companies` answers a cursor envelope, not a bare array (the
+    // same mismatch OW.1 fixed on the owner's other lists): read as an
+    // array it threw inside the mapper and took the whole screen down.
+    queryFn: async () => itemsOf(await fetchJson<{ items: Company[] } | Company[]>('/v1/companies')),
     enabled: detail.data?.companyId != null,
   });
 
@@ -389,7 +396,10 @@ export function useOwnerCustomerForm(customerId?: string): {
   });
   const companies = useQuery({
     queryKey: ['owner', 'companies'],
-    queryFn: () => fetchJson<Company[]>('/v1/companies'),
+    // `/v1/companies` answers a cursor envelope, not a bare array (the
+    // same mismatch OW.1 fixed on the owner's other lists): read as an
+    // array it threw inside the mapper and took the whole screen down.
+    queryFn: async () => itemsOf(await fetchJson<{ items: Company[] } | Company[]>('/v1/companies')),
   });
 
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
