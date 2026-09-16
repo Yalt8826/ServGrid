@@ -25,10 +25,10 @@ import { act } from 'react';
 // `haptics.ts` under test, and the one with the `__fired` surface.
 import * as Haptics from '../../test-stubs/expo-haptics';
 
-import { alpha, SEMANTIC, STATUS, TINT } from '@servgrid/shared';
+import { alpha, COLORS, FRAME, SEMANTIC, STATUS, TINT } from '@servgrid/shared';
 import { allText, create, findAll, findByTestID, toJson, type Node } from '../../components/ui/testing';
 import { JobDetailScreen, type JobDetailDeps } from './JobDetailScreen';
-import { statusPillOf, type JobView } from './jobView';
+import { railColorOf, statusPillOf, type JobView } from './jobView';
 import type { JobStatus } from '@servgrid/shared';
 import type { JobTimelineEntry } from './jobDetail';
 
@@ -413,6 +413,57 @@ describe('JobDetailScreen (§T3)', () => {
     expect(when).not.toContain('Today');
     expect(when).toMatch(/Sat 5 Sep/);
     expect(when).toContain('21:30');
+  });
+
+  /**
+   * The navy bar and the section tones (2026-09-16, Yashas: "add a navy
+   * colored bar at the top", status "aligned in the center", "add colours
+   * to the different sections").
+   */
+  it('paints the app bar on the frame ground, with the status legible on it', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps()} />));
+    const header = findByTestID(tree, 'detail-header')!;
+    expect(flatStyle(header).backgroundColor).toBe(FRAME.bg);
+
+    // The pill's ground is the frame's light ink, not a tint of its own
+    // status: a tint is derived from the status and would be a muddy wash
+    // over slate.900. The word keeps slate.900 either way — a tint is a
+    // ground, never an ink.
+    const status = findByTestID(tree, 'detail-status')!;
+    expect(flatStyle(status).backgroundColor).toBe(FRAME.text);
+    const word = findByTestID(tree, 'detail-status-word')!;
+    expect(flatStyle(word).color).toBe(SEMANTIC.text.primary);
+
+    // Centred on the bar, and only the pill can say so — `alignSelf`
+    // beats the parent's `alignItems`.
+    expect(flatStyle(status).alignSelf).toBe('center');
+    // The rail keeps the real status, on the bar as on the docket.
+    expect(flatStyle(findByTestID(tree, 'detail-rail')!).backgroundColor).toBe(STATUS.unassigned);
+  });
+
+  it('tones a section by what it is for: the actions wear the accent, the history the status', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps({ view: viewOf({ status: 'in_progress' }) })} />));
+
+    // CONTACT holds the actions — accent-washed, so the panel he acts in
+    // is not the same white as the panels he reads.
+    expect(flatStyle(findByTestID(tree, 'detail-panel-contact')!).backgroundColor).toBe(
+      alpha(COLORS.accent, TINT.wash),
+    );
+
+    // TIMELINE is this job's history — its marker derives from the job's
+    // own status colour.
+    const timeline = findByTestID(tree, 'detail-panel-timeline')!;
+    const chip = findAll(
+      timeline,
+      (n) => flatStyle(n).backgroundColor === alpha(railColorOf('in_progress'), TINT.chip),
+    );
+    expect(chip.length).toBeGreaterThan(0);
+
+    // And a structural section stays on the frame ink.
+    const description = findByTestID(tree, 'detail-panel-description')!;
+    expect(
+      findAll(description, (n) => flatStyle(n).backgroundColor === alpha(COLORS.accent, TINT.chip)),
+    ).toHaveLength(0);
   });
 
   it('names the AMC and its end date', async () => {

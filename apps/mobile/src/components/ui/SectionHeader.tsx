@@ -25,7 +25,7 @@
  */
 import { Text, View } from 'react-native';
 
-import { alpha, SEMANTIC, SLATE, SPACE, TINT } from '@servgrid/shared';
+import { alpha, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { Icon, type IconName } from './icons';
 
@@ -33,6 +33,14 @@ export interface SectionHeaderProps {
   label: string;
   /** The glyph that names the section's object. Omitted for a bare rule. */
   icon?: IconName;
+  /**
+   * The ink the glyph chip derives from (2026-09-16) — slate.900 by
+   * default, so a section marker is structural unless a screen has a
+   * reason. The job detail passes the accent for the section that holds
+   * the actions and the job's own status colour for its history: the chip
+   * is the one piece of a section that can carry a tone without shouting.
+   */
+  tint?: string;
   /** A count for the list below — omit unless the number earns its place. */
   count?: number;
   /** Trailing control (a filter, a "See all"); sits where the rule ends. */
@@ -40,7 +48,7 @@ export interface SectionHeaderProps {
   testID?: string;
 }
 
-export function SectionHeader({ label, icon, count, action, testID }: SectionHeaderProps): React.ReactNode {
+export function SectionHeader({ label, icon, tint = SEMANTIC.text.primary, count, action, testID }: SectionHeaderProps): React.ReactNode {
   return (
     <View
       testID={testID}
@@ -54,10 +62,10 @@ export function SectionHeader({ label, icon, count, action, testID }: SectionHea
             borderRadius: 4,
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: alpha(SLATE[900], TINT.band),
+            backgroundColor: alpha(tint, TINT.chip),
           }}
         >
-          <Icon name={icon} size={14} color={SEMANTIC.text.secondary} />
+          <Icon name={icon} size={14} color={SEMANTIC.text.primary} />
         </View>
       )}
       <Text style={{ ...textStyle('label'), color: SEMANTIC.text.primary, letterSpacing: 0.8 }}>
