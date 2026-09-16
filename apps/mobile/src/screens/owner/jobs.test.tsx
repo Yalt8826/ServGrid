@@ -29,7 +29,7 @@ import { act } from 'react';
 import type { JobCardDispatcher, JobCardOwner } from '@servgrid/shared';
 import { DensityProvider } from '../../components/ui/DensityProvider';
 import { densityForRole } from '../../navigation/navmap';
-import { allText, create, findAll, findByTestID, firstDescendantOfType, toJson } from '../../components/ui/testing';
+import { allText, create, findAll, findByTestID, firstDescendantOfType, toJson, type Node } from '../../components/ui/testing';
 import { OwnerJobsScreen, type OwnerJobsDeps } from './JobsScreen';
 import { AmendSheet, type AmendRefusal } from './AmendSheet';
 import { carriesAmount, diffMoney, type JobRow } from './jobsModel';
@@ -312,4 +312,57 @@ describe('Card-vs-row at all four widths (Done-when)', () => {
       }
     });
   }
+});
+
+/**
+ * The console's filters (OW.3, 2026-09-16). They were chips that opened a
+ * bottom sheet — a phone idiom that, on the owner's desk, read as
+ * unfinished and did nothing a pointer expects. On the desk they are
+ * dropdowns now, and the point of the test is that choosing one actually
+ * changes the filter: "the filters don't work at all" was the complaint.
+ */
+describe('OwnerJobsScreen — the desk filter bar is dropdowns that work', () => {
+  const TECHS = [
+    { employeeId: 't-ravi', name: 'Ravi Kumar', openTotal: 2 },
+    { employeeId: 't-anitha', name: 'Anitha', openTotal: 1 },
+  ];
+
+  async function press(node: Node | undefined): Promise<void> {
+    expect(node).toBeDefined();
+    await act(async () => {
+      (node!.props as { onPress: () => void }).onPress();
+    });
+  }
+
+  it('renders a dropdown for the day, the technician and the status — no chips', async () => {
+    const r = await mount(<OwnerJobsScreen {...baseDeps([rowOf(OWNER_CARD, 'Ravi Kumar')])} technicians={TECHS} />);
+    const tree = toJson(r);
+    for (const key of ['date', 'tech', 'status']) {
+      expect(findByTestID(tree, `job-logs-filter-${key}-trigger`)).toBeDefined();
+    }
+    expect(findByTestID(tree, 'job-logs-chip-date')).toBeUndefined();
+  });
+
+  it('choosing a technician reports the filter, with the name the chip used to show', async () => {
+    const changes: unknown[] = [];
+    const r = await mount(
+      <OwnerJobsScreen {...baseDeps([rowOf(OWNER_CARD, 'Ravi Kumar')])} technicians={TECHS} onFiltersChange={(next) => changes.push(next)} />,
+    );
+    await press(findByTestID(toJson(r), 'job-logs-filter-tech-trigger'));
+    await press(findByTestID(toJson(r), 'job-logs-filter-tech-option-t-anitha'));
+    expect(changes).toEqual([
+      { date: 'all', tech: { kind: 'tech', technicianId: 't-anitha', name: 'Anitha' }, status: 'any' },
+    ]);
+  });
+
+  it('choosing a status reports it too', async () => {
+    const changes: { status?: string }[] = [];
+    const r = await mount(
+      <OwnerJobsScreen {...baseDeps([rowOf(OWNER_CARD, 'Ravi Kumar')])} technicians={TECHS} onFiltersChange={(next) => changes.push(next)} />,
+    );
+    await press(findByTestID(toJson(r), 'job-logs-filter-status-trigger'));
+    const option = findByTestID(toJson(r), 'job-logs-filter-status-option-completed');
+    await press(option);
+    expect(changes[0]?.status).toBe('completed');
+  });
 });

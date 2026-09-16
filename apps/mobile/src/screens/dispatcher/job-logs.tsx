@@ -49,7 +49,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-na
 
 import { DENSITY, JOB_STATUSES, SEMANTIC, SPACE, SPRING, STATUS, TAP, type JobStatus } from '@servgrid/shared';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
-import { Banner, Button, EmptyState, Sheet, Skeleton, TextField } from '../../components/ui';
+import { Banner, Button, EmptyState, Select, Sheet, Skeleton, TextField, useDensity } from '../../components/ui';
 import { haptic } from '../../components/ui/haptics';
 import { useSkeleton } from '../../components/ui/Skeleton';
 import { useToggleProgress } from '../../components/ui/motion';
@@ -383,6 +383,7 @@ export function FilterBar({
   onClear: () => void;
 }): React.ReactNode {
   const [open, setOpen] = useState<ChipKey | null>(null);
+  const desk = useDensity() === 'desk';
 
   const nameOf = useCallback(
     (technicianId: string): string | null => technicians.find((t) => t.employeeId === technicianId)?.name ?? null,
@@ -424,6 +425,59 @@ export function FilterBar({
     if (open === 'tech') return filters.tech.kind === 'tech' && filters.tech.technicianId === option.value;
     return false;
   };
+
+  // The DESK filter bar (OW.1/OW.3, 2026-09-16): real dropdowns, because
+  // a console filter is a pointer control — a chip that opens a bottom
+  // sheet is a phone idiom, and on the owner's desk it read as unfinished
+  // and behaved like nothing at all. The phone keeps its chips below.
+  if (desk) {
+    const techValue = filters.tech.kind === 'anyone' ? 'anyone' : filters.tech.technicianId;
+    return (
+      <View style={styles.deskBar} testID="job-logs-filter-bar">
+        <View style={styles.deskField}>
+          <Select
+            label="Day"
+            value={filters.date}
+            options={JOB_LOGS_DATE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+            onSelect={(value) => onChange({ ...filters, date: value as JobLogsDateFilter })}
+            disabled={offline}
+            testID="job-logs-filter-date"
+          />
+        </View>
+        <View style={styles.deskField}>
+          <Select
+            label="Technician"
+            value={techValue}
+            options={techOptions.map((o) => ({ value: String(o.value), label: o.label }))}
+            onSelect={(value) =>
+              onChange({
+                ...filters,
+                tech:
+                  value === 'anyone'
+                    ? { kind: 'anyone' }
+                    : { kind: 'tech', technicianId: value, name: nameOf(value) ?? '' },
+              })
+            }
+            disabled={offline}
+            testID="job-logs-filter-tech"
+          />
+        </View>
+        <View style={styles.deskField}>
+          <Select
+            label="Status"
+            value={filters.status}
+            options={JOB_LOGS_STATUS_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+            onSelect={(value) => onChange({ ...filters, status: value as JobLogsStatusFilter })}
+            disabled={offline}
+            testID="job-logs-filter-status"
+          />
+        </View>
+        {jobLogsFiltersAreDefault(filters) ? null : (
+          <Button label="Clear" variant="secondary" onPress={onClear} testID="job-logs-filter-clear" />
+        )}
+      </View>
+    );
+  }
 
   return (
     <View>
@@ -729,6 +783,18 @@ const styles = StyleSheet.create({
   },
   searchIcon: { ...textStyle('h1'), color: SEMANTIC.text.primary },
   selectionCount: { ...textStyle('h2'), color: SEMANTIC.text.primary, flex: 1 },
+  // The desk bar: three dropdowns on one line, wrapping on a narrow
+  // window, each wide enough to read a technician's full name.
+  deskBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    flexWrap: 'wrap',
+    gap: SPACE[3],
+  },
+  deskField: {
+    minWidth: 200,
+    flexGrow: 0,
+  },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',

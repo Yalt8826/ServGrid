@@ -151,7 +151,11 @@ export const ROUTE_GUARDS: Record<string, RouteGuard> = {
   '/contracts/new': { kind: 'matrix', resource: 'contract', action: 'create', landing: ['all'] },
 
   '/products': { kind: 'ownerOnly' },
+  // OW.3: the catalogue's create doors. Owner-only like the lists they
+  // hang off — the server's own door says the same (§6.4).
+  '/products/new': { kind: 'ownerOnly' },
   '/services': { kind: 'ownerOnly' },
+  '/services/new': { kind: 'ownerOnly' },
 
   '/employees': { kind: 'matrix', resource: 'employee', action: 'read', landing: ['all'] },
   '/employees/new': { kind: 'matrix', resource: 'employee', action: 'create', landing: ['all'] },
@@ -255,7 +259,9 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/contracts': 'AMC',
   '/contracts/new': 'New AMC',
   '/products': 'Products',
+  '/products/new': 'New product',
   '/services': 'Services',
+  '/services/new': 'New service',
   '/employees': 'Employees',
   '/employees/new': 'New employee',
   '/location': 'Location',

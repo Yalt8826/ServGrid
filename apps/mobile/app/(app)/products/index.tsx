@@ -6,6 +6,7 @@
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
 import { OwnerProductsScreen } from '../../../src/screens/owner/ProductsScreen';
@@ -17,12 +18,14 @@ const styles = StyleSheet.create({
 });
 
 function OwnerProductsRoute(): React.ReactNode {
+  const router = useRouter();
   const products = useOwnerProducts();
   const { busyId, deactivate } = useDeactivateCatalogItem('products', products.reload);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
       <OwnerProductsScreen
+        onNew={() => router.push('/products/new')}
         rows={products.rows}
         error={products.error}
         loading={products.loading}

@@ -786,3 +786,35 @@ export function useOwnerPerformance(range: PerformanceRange): {
 
   return { data, error, loading, reload };
 }
+
+/**
+ * Adding to the catalogue (OW.3, 2026-09-16). `POST /v1/products` and
+ * `POST /v1/services` are owner-only at their own door (§6.4) and had no
+ * screen until now.
+ */
+export function useCreateCatalogItem(kind: 'products' | 'services'): {
+  busy: boolean;
+  error: string | null;
+  create: (payload: Record<string, unknown>) => Promise<void>;
+} {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const create = useCallback(
+    async (payload: Record<string, unknown>) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await apiSend('POST', `/v1/${kind}`, payload);
+        setBusy(false);
+      } catch (e) {
+        setBusy(false);
+        setError(
+          messageOf(e, kind === 'products' ? 'The product could not be added.' : 'The service could not be added.'),
+        );
+        throw e;
+      }
+    },
+    [kind],
+  );
+  return { busy, error, create };
+}
