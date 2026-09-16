@@ -26,7 +26,7 @@ import { act } from 'react';
 import { View } from 'react-native';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
 import {
@@ -119,15 +119,20 @@ describe('DispatcherDashboardScreen (§D1)', () => {
     expect(findByTestID(toJson(renderer), 'dispatch-figure-overdue-value')).toBeDefined();
 
     // Largest figure on the screen: `displayLg` 44 against the others'
-    // 32 — bigger is the hierarchy here, not a colour alone.
+    // 32 — bigger is the hierarchy here, not a colour alone. The figures
+    // sit on the navy frame (2026-09-16), so the inks are the measured
+    // dark-ground set: overdue in FRAME.danger, the rest in frame white.
     const overdue = styleOf(renderer, 'dispatch-figure-overdue-value');
     expect(overdue.fontSize).toBe(44);
-    expect(overdue.color).toBe(SEMANTIC.feedback.danger);
-    for (const key of ['unassigned', 'today', 'done'] as const) {
+    expect(overdue.color).toBe(FRAME.danger);
+    for (const key of ['unassigned', 'today'] as const) {
       const style = styleOf(renderer, `dispatch-figure-${key}-value`);
       expect(style.fontSize).toBe(32); // strictly smaller than overdue's
-      expect(style.color).toBe(SEMANTIC.text.primary);
+      expect(style.color).toBe(FRAME.text);
     }
+    // done carries its own ink when non-zero — the technician dashboard's
+    // rule: the status colour appears only when there is something to see.
+    expect(styleOf(renderer, 'dispatch-figure-done-value').color).toBe(FRAME.success);
   });
 
   it('renders a zero overdue as 0, not an absent element', async () => {
@@ -142,8 +147,8 @@ describe('DispatcherDashboardScreen (§D1)', () => {
     // The element exists and says so: absence of a problem is information.
     expect(findByTestID(toJson(renderer), 'dispatch-figure-overdue')).toBeDefined();
     expect(textOf(renderer, 'dispatch-figure-overdue-value')).toBe('0');
-    // Nothing overdue is not danger: the figure reads secondary.
-    expect(styleOf(renderer, 'dispatch-figure-overdue-value').color).toBe(SEMANTIC.text.secondary);
+    // Nothing overdue is not danger: on the frame it reads plain white.
+    expect(styleOf(renderer, 'dispatch-figure-overdue-value').color).toBe(FRAME.text);
   });
 
   it('offline renders the danger banner and dims the figures — the opposite of the technician', async () => {

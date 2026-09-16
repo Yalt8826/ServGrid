@@ -34,9 +34,9 @@ import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
+import { DURATION, EASING, FRAME, SEMANTIC, SPACE } from '@servgrid/shared';
 import { TechnicianLoadRow, type TechnicianHealthState } from '../../components/domain/TechnicianLoadRow';
-import { Banner, Button, EmptyState } from '../../components/ui';
+import { Banner, Button, EmptyState, SectionHeader } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
 
@@ -117,13 +117,19 @@ export interface DispatcherDashboardDeps {
  */
 function Figure({ figure, offline, testID }: { figure: DispatcherFigure; offline: boolean; testID: string }): React.ReactNode {
   const isOverdue = figure.key === 'overdue';
+  // Inks for the navy frame (2026-09-16), same rules as the technician's
+  // figures: the danger ink only when there IS something overdue, and the
+  // measured dark-ground inks from `FRAME` — never the STATUS set, which
+  // fails on slate.900.
   const colour = offline
-    ? SEMANTIC.text.disabled
+    ? FRAME.textMuted
     : figure.value === 0
-      ? SEMANTIC.text.secondary
+      ? FRAME.text
       : isOverdue
-        ? SEMANTIC.feedback.danger
-        : SEMANTIC.text.primary;
+        ? FRAME.danger
+        : figure.key === 'done'
+          ? FRAME.success
+          : FRAME.text;
 
   const enter = easing(EASING.enter);
   const opacity = useSharedValue(1);
@@ -150,7 +156,7 @@ function Figure({ figure, offline, testID }: { figure: DispatcherFigure; offline
       >
         {figure.value}
       </Text>
-      <Text style={styles.figureLabel}>{figure.label}</Text>
+      <Text style={[styles.figureLabel, { color: FRAME.textMuted }]}>{figure.label}</Text>
     </Animated.View>
   );
 }
@@ -195,48 +201,44 @@ export function DispatcherDashboardScreen(deps: DispatcherDashboardDeps): React.
     !deps.sectionsError && deps.sections !== null && liveSections.length === 0;
 
   return (
+    // The navy frame (2026-09-16): title, date and the four figures on
+    // the frame ground — the dispatcher's mirror of the technician's
+    // header. The ScrollView carries the app ground itself, so short
+    // content ends white, not navy.
     <ScrollView
       testID="dispatch-dashboard"
       style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
-      contentContainerStyle={{ padding: SPACE[4], paddingBottom: SPACE[8], gap: SPACE[4] }}
+      contentContainerStyle={{ paddingBottom: SPACE[8] }}
     >
-      <View style={styles.headerRow}>
-        <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary, flex: 1 }} testID="dispatch-title">
-          Dispatch
-        </Text>
-        <Text style={[textStyle('caption'), styles.dateLabel]} testID="dispatch-date">
-          {deps.todayLabel}
-        </Text>
+      <View style={styles.frame}>
+        <View style={styles.headerRow}>
+          <Text style={{ ...textStyle('h1'), color: FRAME.text, flex: 1 }} testID="dispatch-title">
+            Dispatch
+          </Text>
+          <Text style={[textStyle('caption'), styles.dateLabel]} testID="dispatch-date">
+            {deps.todayLabel}
+          </Text>
+        </View>
+
+        <View style={styles.figuresRow} testID="dispatch-figures">
+          {(deps.figures ?? []).map((figure) => (
+            <Figure key={figure.key} figure={figure} offline={deps.offline} testID={`dispatch-figure-${figure.key}`} />
+          ))}
+        </View>
+
+        <Button label="+ Dispatch a job" onPress={deps.onDispatch} fullwidth testID="dispatch-new-job" />
+        {deps.onOpenJobLogs === undefined ? null : (
+          <Button label="Job Logs" icon="list" variant="secondary" onPress={deps.onOpenJobLogs} fullwidth testID="dispatch-job-logs" />
+        )}
       </View>
 
+      <View style={styles.body}>
       {deps.offline ? (
         <Banner tone="danger" message={OFFLINE_BANNER_MESSAGE} testID="dispatch-offline-banner" />
       ) : null}
 
-      {deps.figuresError !== null ? (
-        <EmptyState
-          message={deps.figuresError}
-          actionLabel="Retry"
-          onAction={() => deps.onRetry('figures')}
-          testID="dispatch-figures-error"
-        />
-      ) : deps.figures !== null ? (
-        <View style={styles.figuresRow} testID="dispatch-figures">
-          {deps.figures.map((figure) => (
-            <Figure key={figure.key} figure={figure} offline={deps.offline} testID={`dispatch-figure-${figure.key}`} />
-          ))}
-        </View>
-      ) : null}
-
-      <Button label="+ Dispatch a job" onPress={deps.onDispatch} testID="dispatch-new-job" />
-      {deps.onOpenJobLogs === undefined ? null : (
-        <Button label="Job Logs" variant="ghost" onPress={deps.onOpenJobLogs} testID="dispatch-job-logs" />
-      )}
-
       <View style={styles.section}>
-        <Text style={styles.sectionLabel} testID="dispatch-load-heading">
-          TECHNICIAN LOAD
-        </Text>
+        <SectionHeader label="Technician load" icon="people" />
         {deps.loadError !== null ? (
           <EmptyState
             message={deps.loadError}
@@ -247,24 +249,26 @@ export function DispatcherDashboardScreen(deps: DispatcherDashboardDeps): React.
         ) : deps.load === null ? null : deps.load.length === 0 ? (
           <EmptyState message="No technicians on the roster." testID="dispatch-load-empty" />
         ) : (
-          deps.load.map((row, index) => (
-            <TechnicianLoadRow
-              key={row.employeeId}
-              name={row.name}
-              load={row.load}
-              maxLoad={busiest}
-              health={row.health}
-              index={index}
-              testID={`dispatch-load-${row.employeeId}`}
-            />
-          ))
+          <View style={styles.panel}>
+            {deps.load.map((row, index) => (
+              <View key={row.employeeId} style={{ alignSelf: 'stretch' }}>
+                {index > 0 ? <View style={styles.hairline} /> : null}
+                <TechnicianLoadRow
+                  name={row.name}
+                  load={row.load}
+                  maxLoad={busiest}
+                  health={row.health}
+                  index={index}
+                  testID={`dispatch-load-${row.employeeId}`}
+                />
+              </View>
+            ))}
+          </View>
         )}
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionLabel} testID="dispatch-attention-heading">
-          NEEDS ATTENTION
-        </Text>
+        <SectionHeader label="Needs attention" icon="alert" />
         {deps.sectionsError !== null ? (
           <EmptyState
             message={deps.sectionsError}
@@ -292,11 +296,40 @@ export function DispatcherDashboardScreen(deps: DispatcherDashboardDeps): React.
           ))
         )}
       </View>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  frame: {
+    alignSelf: 'stretch',
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[5],
+    gap: SPACE[4],
+  },
+  body: {
+    alignSelf: 'stretch',
+    flexGrow: 1,
+    backgroundColor: SEMANTIC.bg.app,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[5],
+    gap: SPACE[5],
+  },
+  panel: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: 0,
+    backgroundColor: SEMANTIC.bg.raised,
+    paddingHorizontal: SPACE[3],
+  },
+  hairline: {
+    height: 1,
+    backgroundColor: SEMANTIC.line.default,
+  },
   headerRow: {
     alignSelf: 'stretch',
     flexDirection: 'row',
