@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { contrastRatio, round2 } from './contrast.ts';
-import { COLORS, SEMANTIC, SLATE, STATUS } from './tokens.ts';
+import { COLORS, FRAME, SEMANTIC, SLATE, STATUS } from './tokens.ts';
 
 const fmt = (fg: string, bg: string, measured: number, floor: string): string =>
   `computed ${round2(contrastRatio(fg, bg))}:1 (measured ${measured}:1) ${floor}`;
@@ -144,5 +144,51 @@ describe('contrast — StatusPill ink table (03-COMPONENTS.md)', () => {
     const msg = fmt(SLATE[900], SEMANTIC.bg.app, 16.16, 'body floor 7:1');
     assert.match(msg, /16\.16:1/);
     assert.match(msg, /7:1/);
+  });
+});
+
+/**
+ * The navy frame's inks (mobile UI overhaul, 2026-09-16). `FRAME`'s
+ * `success` / `warning` / `danger` are *dark-ground* inks, not the
+ * `STATUS` values: the status set is tuned for a 4px rail or a tinted
+ * chip on white, and two of the five fail as a label on slate.900. These
+ * assertions are what stops a later "just reuse STATUS here" edit.
+ */
+describe('contrast — the frame inks on slate.900', () => {
+  it('the frame ground takes body ink at the 7:1 floor', () => {
+    const r = contrastRatio(FRAME.text, FRAME.bg);
+    assert.ok(r >= 7, `frame text ${round2(r)}:1 — below the 7:1 body floor`);
+  });
+
+  it('the muted frame ink clears the 4.5:1 label floor', () => {
+    const r = contrastRatio(FRAME.textMuted, FRAME.bg);
+    assert.ok(r >= 4.5, `frame muted ${round2(r)}:1 — below the 4.5:1 label floor`);
+  });
+
+  it('all three dark-ground status inks clear 4.5:1 on the frame', () => {
+    for (const [name, ink] of Object.entries({ success: FRAME.success, warning: FRAME.warning, danger: FRAME.danger })) {
+      const r = contrastRatio(ink, FRAME.bg);
+      assert.ok(r >= 4.5, `frame.${name} ${round2(r)}:1 on slate.900 — below the 4.5:1 floor`);
+    }
+  });
+
+  it('the STATUS inks are NOT copied onto the frame — three of the five fail there', () => {
+    // The reason FRAME carries its own three: this is the trap a later
+    // edit falls into, and it is invisible on a bright screen indoors.
+    // `completed` (3.78), `cancelled` (2.52) and `unassigned` (3.00) all
+    // miss the 4.5:1 a label needs on slate.900.
+    assert.ok(contrastRatio(STATUS.completed, FRAME.bg) < 4.5);
+    assert.ok(contrastRatio(STATUS.cancelled, FRAME.bg) < 4.5);
+    assert.ok(contrastRatio(STATUS.unassigned, FRAME.bg) < 4.5);
+    // And the two that DO clear it are why the frame's own three are
+    // lightened versions rather than replacements for the whole set.
+    assert.ok(contrastRatio(STATUS.en_route, FRAME.bg) >= 4.5);
+    assert.ok(contrastRatio(STATUS.in_progress, FRAME.bg) >= 4.5);
+  });
+
+  it('the accent reads as frame text at 9.79:1 — why it can label the active tab', () => {
+    const r = contrastRatio(FRAME.accent, FRAME.bg);
+    assert.ok(r >= 7, `accent on frame ${round2(r)}:1 — below the 7:1 body floor`);
+    assert.equal(round2(r), 9.79);
   });
 });

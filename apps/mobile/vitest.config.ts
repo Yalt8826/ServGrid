@@ -71,6 +71,15 @@ export default defineConfig({
         replacement: here('./src/test-stubs/expo-haptics.ts'),
       },
       {
+        // The icon set (mobile UI overhaul): a real glyph is drawn by
+        // expo-font's native loader, so the stub renders the Text host
+        // with the glyph name as a prop and NO text — see
+        // src/test-stubs/vector-icons.ts for why the empty child is
+        // deliberate (the suite asserts exact text in places).
+        find: /^@expo\/vector-icons$/,
+        replacement: here('./src/test-stubs/vector-icons.ts'),
+      },
+      {
         // T1.17: FlashList is the jobs list on the handset; under vitest
         // its rows render through the string-typed host seam like every
         // other list, with the real row components and their logic.

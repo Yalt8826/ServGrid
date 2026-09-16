@@ -25,10 +25,10 @@ import { act } from 'react';
 // `haptics.ts` under test, and the one with the `__fired` surface.
 import * as Haptics from '../../test-stubs/expo-haptics';
 
-import { SEMANTIC, STATUS } from '@servgrid/shared';
+import { alpha, COLORS, FRAME, SEMANTIC, STATUS, TINT } from '@servgrid/shared';
 import { allText, create, findAll, findByTestID, toJson, type Node } from '../../components/ui/testing';
 import { JobDetailScreen, type JobDetailDeps } from './JobDetailScreen';
-import { statusPillOf, type JobView } from './jobView';
+import { railColorOf, statusPillOf, type JobView } from './jobView';
 import type { JobStatus } from '@servgrid/shared';
 import type { JobTimelineEntry } from './jobDetail';
 
@@ -94,6 +94,15 @@ function baseDeps(overrides: Partial<JobDetailDeps> = {}): JobDetailDeps {
     now: NOW,
     ...overrides,
   };
+}
+
+/** Merged style of a node, tolerating absence — for `findAll` predicates. */
+function flatStyle(node: Node): Record<string, unknown> {
+  const raw = node.props.style;
+  const parts = (Array.isArray(raw) ? raw : [raw]).filter(
+    (part): part is Record<string, unknown> => part !== null && typeof part === 'object',
+  );
+  return Object.assign({}, ...parts);
 }
 
 /** Merged style of a node — the tree's style props arrive as arrays. */
@@ -323,6 +332,140 @@ describe('JobDetailScreen (§T3)', () => {
     expect(warranty).toBe('In warranty · to 14 Mar 2027');
   });
 
+  /**
+   * The screen became a stack of panels on 2026-09-16 (mobile UI
+   * overhaul): six grey words floating on white, with nothing to tell a
+   * section from the gap beside it. These hold the parts that carry
+   * meaning rather than pixel positions.
+   */
+  it('puts each section behind the shared marker — a glyph and a rule, not a grey word', async () => {
+    const tree = toJson(
+      await create(
+        <JobDetailScreen
+          {...baseDeps({
+            view: viewOf({ description: 'Unit beeping continuously since morning.' }),
+            events: [entryOf('en_route', '2026-09-11T09:10:00+05:30')],
+          })}
+        />,
+      ),
+    );
+    for (const panel of ['detail-panel-unit', 'detail-panel-contact', 'detail-panel-description', 'detail-panel-timeline']) {
+      const node = findByTestID(tree, panel);
+      expect(node, `${panel} missing`).toBeDefined();
+      // A glyph chip and the panel's own hairline rule live inside it.
+      expect(findAll(node!, (n) => typeof n.props['data-icon'] === 'string').length).toBeGreaterThan(0);
+      expect(findAll(node!, (n) => flatStyle(n).height === 1).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('shows the number it will dial, in the contact panel', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps()} />));
+    const phone = findByTestID(tree, 'detail-contact-phone');
+    expect(phone).toBeDefined();
+    expect(allText(phone!).join(' ')).toBe('+919812345678');
+  });
+
+  it('carries the warranty chip on the unit it belongs to, tinted by whether cover is live', async () => {
+    // The fixture's unit expires 2027-03-14 against a 2026-09-11 clock.
+    const live = toJson(await create(<JobDetailScreen {...baseDeps()} />));
+    const warranty = findByTestID(live, 'detail-warranty')!;
+    expect(flatStyle(warranty).backgroundColor).toBe(alpha(SEMANTIC.feedback.success, TINT.chip));
+    expect(findAll(findByTestID(live, 'detail-panel-unit')!, (n) => n.props.testID === 'detail-warranty')).toHaveLength(1);
+
+    // An expired warranty reads as chargeable: the danger tint, and the
+    // copy that stops claiming cover.
+    const expired = vi.fn();
+    const tree = toJson(
+      await create(
+        <JobDetailScreen
+          {...baseDeps({
+            view: viewOf({}, {
+              unit: { name: 'UPS 850VA', brand: 'Luminous', serialNumber: 'LM8842219', warrantyExpiresOn: '2026-01-01' },
+            }),
+          })}
+        />,
+      ),
+    );
+    const chip = findByTestID(tree, 'detail-warranty')!;
+    expect(flatStyle(chip).backgroundColor).toBe(alpha(SEMANTIC.feedback.danger, TINT.chip));
+    expect(allText(chip).join(' ')).toBe('Warranty to 1 Jan 2026');
+    void expired;
+  });
+
+  it('marks an urgent job — the office set it and he could not see it before', async () => {
+    const ordinary = toJson(await create(<JobDetailScreen {...baseDeps()} />));
+    expect(findByTestID(ordinary, 'detail-urgent')).toBeUndefined();
+
+    const urgent = toJson(
+      await create(<JobDetailScreen {...baseDeps({ view: viewOf({ priority: 'urgent' }) })} />),
+    );
+    expect(allText(findByTestID(urgent, 'detail-urgent')!).join(' ')).toBe('Urgent');
+  });
+
+  it('dates the job honestly — a carried-over job is not "today"', async () => {
+    // The old line hardcoded "today" whatever the slot said.
+    const carried = toJson(
+      await create(
+        <JobDetailScreen {...baseDeps({ view: viewOf({ scheduledFor: '2026-09-05T21:30:00+05:30' }) })} />,
+      ),
+    );
+    const when = allText(findByTestID(carried, 'detail-when')!).join(' ');
+    expect(when).not.toContain('Today');
+    expect(when).toMatch(/Sat 5 Sep/);
+    expect(when).toContain('21:30');
+  });
+
+  /**
+   * The navy bar and the section tones (2026-09-16, Yashas: "add a navy
+   * colored bar at the top", status "aligned in the center", "add colours
+   * to the different sections").
+   */
+  it('paints the app bar on the frame ground, with the status legible on it', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps()} />));
+    const header = findByTestID(tree, 'detail-header')!;
+    expect(flatStyle(header).backgroundColor).toBe(FRAME.bg);
+
+    // The pill's ground is the frame's light ink, not a tint of its own
+    // status: a tint is derived from the status and would be a muddy wash
+    // over slate.900. The word keeps slate.900 either way — a tint is a
+    // ground, never an ink.
+    const status = findByTestID(tree, 'detail-status')!;
+    expect(flatStyle(status).backgroundColor).toBe(FRAME.text);
+    const word = findByTestID(tree, 'detail-status-word')!;
+    expect(flatStyle(word).color).toBe(SEMANTIC.text.primary);
+
+    // Centred on the bar, and only the pill can say so — `alignSelf`
+    // beats the parent's `alignItems`.
+    expect(flatStyle(status).alignSelf).toBe('center');
+    // The rail keeps the real status, on the bar as on the docket.
+    expect(flatStyle(findByTestID(tree, 'detail-rail')!).backgroundColor).toBe(STATUS.unassigned);
+  });
+
+  it('tones a section by what it is for: the actions wear the accent, the history the status', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps({ view: viewOf({ status: 'in_progress' }) })} />));
+
+    // CONTACT holds the actions — accent-washed, so the panel he acts in
+    // is not the same white as the panels he reads.
+    expect(flatStyle(findByTestID(tree, 'detail-panel-contact')!).backgroundColor).toBe(
+      alpha(COLORS.accent, TINT.wash),
+    );
+
+    // TIMELINE is this job's history — its marker derives from the job's
+    // own status colour.
+    const timeline = findByTestID(tree, 'detail-panel-timeline')!;
+    const chip = findAll(
+      timeline,
+      (n) => flatStyle(n).backgroundColor === alpha(railColorOf('in_progress'), TINT.chip),
+    );
+    expect(chip.length).toBeGreaterThan(0);
+
+    // And a structural section stays on the frame ink.
+    const description = findByTestID(tree, 'detail-panel-description')!;
+    expect(
+      findAll(description, (n) => flatStyle(n).backgroundColor === alpha(COLORS.accent, TINT.chip)),
+    ).toHaveLength(0);
+  });
+
   it('names the AMC and its end date', async () => {
     const renderer = await create(
       <JobDetailScreen
@@ -335,5 +478,73 @@ describe('JobDetailScreen (§T3)', () => {
     );
     const tree = toJson(renderer);
     expect(allText(findByTestID(tree, 'detail-contract') ?? null).join(' ')).toBe('AMC · until 14 Sep 2027');
+  });
+});
+
+/**
+ * One job at a time, where he could otherwise break it (2026-09-16): the
+ * thumb bar is the only place a second job could be advanced into
+ * `en_route`/`in_progress` from the detail screen. With another job
+ * active the advance is disabled and carries the sentence naming it —
+ * and *Complete job* on the job he IS on is never blocked, because
+ * finishing it is how the next job unblocks.
+ */
+describe('JobDetailScreen — one job at a time', () => {
+  it('disables the advance and shows the reason while another job is active', async () => {
+    const deps = baseDeps({
+      view: viewOf({ status: 'assigned' }),
+      startBlockedReason: 'Finish JC-2627-00033 first.',
+    });
+    const tree = toJson(await create(<JobDetailScreen {...deps} />));
+
+    const primary = findByTestID(tree, 'detail-primary')!;
+    expect(primary).toBeDefined();
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(true);
+    // The visible why, not just a dead control.
+    expect(allText(primary).join(' ')).toContain('Finish JC-2627-00033 first.');
+  });
+
+  it('leaves the advance live when no other job is active', async () => {
+    const tree = toJson(await create(<JobDetailScreen {...baseDeps({ view: viewOf({ status: 'assigned' }) })} />));
+    const primary = findByTestID(tree, 'detail-primary')!;
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    expect(allText(primary).join(' ')).toBe('Start job');
+  });
+
+  it('never blocks completing the job he is on', async () => {
+    const wanted = vi.fn();
+    const tree = toJson(
+      await create(
+        <JobDetailScreen
+          {...baseDeps({ view: viewOf({ status: 'in_progress' }), onComplete: wanted, startBlockedReason: 'Finish JC-2627-00033 first.' })}
+        />,
+      ),
+    );
+    const primary = findByTestID(tree, 'detail-primary')!;
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    expect(allText(primary).join(' ')).toBe('Complete job');
+  });
+
+  it('never blocks arriving at a job he already started — that is not a new start', async () => {
+    // The stale-data case: a job left `en_route` from an earlier day must
+    // still be arriv-able while another job stands in progress, or the
+    // rule strands him on data it was never meant to trap.
+    const tree = toJson(
+      await create(
+        <JobDetailScreen
+          {...baseDeps({
+            view: viewOf({ status: 'en_route' }),
+            startBlockedReason: 'Finish JC-2627-00033 first.',
+          })}
+        />,
+      ),
+    );
+    const primary = findByTestID(tree, 'detail-primary')!;
+    const pressable = findAll(primary, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect((pressable.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    expect(allText(primary).join(' ')).toBe('Arrive');
   });
 });

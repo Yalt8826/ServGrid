@@ -54,7 +54,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import { EASING, SEMANTIC, SPRING, STATUS, type JobStatus } from '@servgrid/shared';
+import { EASING, SEMANTIC, SPACE, SPRING, STATUS, type JobStatus } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { haptic } from '../ui/haptics';
 import { easing } from '../ui/motion';
@@ -123,7 +123,7 @@ export function StatusStepper({ status, history, onAnimateStart, testID }: Statu
   }, [model, reducedMotion, onAnimateStart, fill, pop, nextLabel]);
 
   return (
-    <View testID={testID} style={{ alignSelf: 'stretch' }}>
+    <View testID={testID} style={{ alignSelf: 'stretch', marginVertical: SPACE[2] }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
         {model.nodes.map((node, index) => (
           <Fragment key={node.key}>
@@ -150,9 +150,24 @@ export function StatusStepper({ status, history, onAnimateStart, testID }: Statu
 
 // ── pieces ───────────────────────────────────────────────────────────────────
 
+/**
+ * The node columns share the row evenly (2026-09-16). A fixed 76pt column
+ * held five nodes 380pt wide — wider than the 379pt a 411pt phone leaves
+ * inside its gutters, so the segments between them collapsed to nothing
+ * and the last label sat against the edge. Flexible columns with a fixed
+ * segment put every node on the same rhythm and keep both gutters.
+ */
 const NODE_COLUMN_WIDTH = 76;
-const NODE_SIZE = 12;
-const NODE_RING = 20;
+const SEGMENT_WIDTH = 18;
+/**
+ * The node square and the ring that marks the current one (2026-09-16:
+ * 14 and 22, up from 12 and 20). On the handset the twelve-pixel square
+ * read as a speck beside its own label — the status of the job he is
+ * standing in front of is not a detail, and the stepper is the screen's
+ * hero.
+ */
+const NODE_SIZE = 14;
+const NODE_RING = 22;
 
 /** One node plus its word. Every colour renders DIRECTLY beside its word
  * (§1.6): the node square sits above the label, always. */
@@ -201,7 +216,9 @@ function NodeColumn({
       testID={testID}
       accessibilityLabel={node.current ? `${node.label}, current` : node.label}
       style={{
-        width: NODE_COLUMN_WIDTH,
+        flexGrow: 1,
+        flexBasis: 0,
+        minWidth: 0,
         alignItems: 'center',
         // Dimmed-but-present: the skipped step keeps its shape and its
         // word, at under half strength.
@@ -257,9 +274,10 @@ function Segment({
     <View
       testID={testID}
       style={{
-        flex: 1,
-        height: 4,
-        marginTop: 8, // centres the 4pt bar on the 20pt node ring
+        width: SEGMENT_WIDTH,
+        height: 3,
+        borderRadius: 1.5,
+        marginTop: 9.5, // centres the 3pt bar on the 22pt node ring
         backgroundColor: SEMANTIC.line.default,
         overflow: 'hidden',
       }}

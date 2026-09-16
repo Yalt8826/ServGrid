@@ -14,6 +14,8 @@ export { Banner, type BannerProps, type BannerTone } from './Banner';
 export { Skeleton, type SkeletonProps } from './Skeleton';
 export { Chip, type ChipProps } from './Chip';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
+export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
+export { Icon, type IconName, type IconProps } from './icons';
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog';
 export {
   DeskListShell,

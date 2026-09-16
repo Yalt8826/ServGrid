@@ -6,6 +6,23 @@
  * time (`mono`) · status pill (word + colour, never colour alone). 88
  * tall minimum, 1px border, no shadow, radius 0 — the docket.
  *
+ * **The card is zoned now (2026-09-16).** It was one undivided white
+ * rectangle: the customer, the work, the time and the status all floated
+ * in the same field, so a list of twelve read as twelve paragraphs and
+ * finding the status of one meant reading all of it. Three changes, none
+ * of them decoration:
+ *
+ * - a **hairline** under the identity block, splitting "which job" from
+ *   "when and where it stands" — the two questions a technician asks a
+ *   list in that order;
+ * - the **job number** in a tinted chip, so the identifier is findable
+ *   when someone reads it out over the phone;
+ * - the **status as a tinted chip** on the right of the meta row, where
+ *   the eye lands after the time.
+ *
+ * The rail keeps its job: it is still the card's real status and the only
+ * status ink that survives a glance down a scrolling list.
+ *
  * Two states this file owns the correctness of:
  *
  * - **Sending** (`pending`): a status write is on its way to the server —
@@ -28,12 +45,15 @@ import { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { DURATION, EASING, RADII, SEMANTIC, SPACE, STALE } from '@servgrid/shared';
+import { alpha, DURATION, EASING, ICON, RADII, SEMANTIC, SLATE, SPACE, STALE, TINT } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
+import { Icon } from '../ui/icons';
 import { easing } from '../ui/motion';
+import { StatusPill } from './StatusPill';
 import { istTimeLabel, railColorOf, statusPillOf, type JobView } from '../../screens/technician/jobView';
 
 export const RAIL_WIDTH = 4;
+const HAIRLINE = 1;
 
 /** The contract chip from the job card's contract context (§T2 chip is
  * `[AMC]`): the word AMC alone on the card — the detail screen carries
@@ -48,6 +68,14 @@ export interface JobCardProps {
   view: JobView;
   /** Compact rows under LATER TODAY (§T1); the full card everywhere else. */
   compact?: boolean;
+  /**
+   * The row's day, when it is not today (`dayLabelOf`) — `Tomorrow`, or
+   * `Tue 17 Sep`. The meta row carries a clock time, and a time alone is
+   * not a date: `09:00` beside a job nine days out reads as this morning.
+   * Today passes nothing; the section heading already says which day it
+   * is.
+   */
+  dayLabel?: string | null;
   onPress?: () => void;
   /** Inline actions for the NEXT card — *Navigate* + the primary. */
   actions?: React.ReactNode;
@@ -63,7 +91,7 @@ const ENTER_EASING = easing(EASING.enter);
  * never an inline arrow; a scroll never re-renders unchanged rows). */
 export const MemoisedJobCard = memo(JobCard);
 
-export function JobCard({ view, compact = false, onPress, actions, arrivedFromSync = false, testID }: JobCardProps): React.ReactNode {
+export function JobCard({ view, compact = false, dayLabel = null, onPress, actions, arrivedFromSync = false, testID }: JobCardProps): React.ReactNode {
   const { job } = view;
   const pill = statusPillOf(job.status);
   const rail = railColorOf(job.status);
@@ -92,12 +120,21 @@ export function JobCard({ view, compact = false, onPress, actions, arrivedFromSy
         Sending…
       </Text>
     ) : (
-      <Text
-        style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary, textAlign: 'right' }}
-        testID={testID ? `${testID}-number` : undefined}
+      <View
+        style={{
+          borderRadius: RADII.control,
+          backgroundColor: alpha(SLATE[900], TINT.band),
+          paddingHorizontal: 6,
+          paddingVertical: 2,
+        }}
       >
-        {job.jobNumber}
-      </Text>
+        <Text
+          style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary, textAlign: 'right' }}
+          testID={testID ? `${testID}-number` : undefined}
+        >
+          {job.jobNumber}
+        </Text>
+      </View>
     );
 
   return (
@@ -143,41 +180,58 @@ export function JobCard({ view, compact = false, onPress, actions, arrivedFromSy
         style={({ pressed }) => ({
           flex: 1,
           minHeight: compact ? 56 : 88,
-          padding: SPACE[3],
           backgroundColor: pressed ? SEMANTIC.bg.pressed : 'transparent',
         })}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SPACE[2] }}>
-          <Text style={{ ...textStyle('h2'), color: SEMANTIC.text.primary, flex: 1 }} numberOfLines={1}>
-            {view.area === '' ? view.customerName : `${view.customerName} · ${view.area}`}
-          </Text>
-          {numberText}
+        {/* Zone 1 — which job. */}
+        <View style={{ padding: SPACE[3] }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SPACE[2] }}>
+            <Text style={{ ...textStyle('h2'), color: SEMANTIC.text.primary, flex: 1 }} numberOfLines={1}>
+              {view.area === '' ? view.customerName : `${view.customerName} · ${view.area}`}
+            </Text>
+            {numberText}
+          </View>
+          {!compact ? (
+            <Text
+              style={{ ...textStyle('body'), color: SEMANTIC.text.secondary, marginTop: SPACE[1] }}
+              numberOfLines={2}
+              testID={testID ? `${testID}-title` : undefined}
+            >
+              {job.title}
+            </Text>
+          ) : null}
         </View>
-        {!compact ? (
-          <Text
-            style={{ ...textStyle('body'), color: SEMANTIC.text.primary, marginTop: SPACE[1] }}
-            numberOfLines={2}
-            testID={testID ? `${testID}-title` : undefined}
-          >
-            {job.title}
-          </Text>
-        ) : null}
+
+        {/* The seam between "which job" and "when and where it stands". */}
+        {compact ? null : <View style={{ height: HAIRLINE, backgroundColor: SEMANTIC.line.default }} />}
+
+        {/* Zone 2 — when, and where it stands. */}
         <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
             flexWrap: 'wrap',
             gap: SPACE[2],
-            marginTop: compact ? SPACE[1] : SPACE[2],
+            paddingHorizontal: SPACE[3],
+            paddingVertical: SPACE[2],
           }}
         >
+          <Icon name="clock" size={ICON.sm} color={SEMANTIC.text.placeholder} />
+          {dayLabel === null ? null : (
+            <Text
+              style={{ ...textStyle('label'), color: SEMANTIC.text.secondary }}
+              testID={testID ? `${testID}-day` : undefined}
+            >
+              {dayLabel}
+            </Text>
+          )}
           <Text
             style={{ ...textStyle('mono'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] }}
             testID={testID ? `${testID}-time` : undefined}
           >
             {job.scheduledFor === null ? 'No time' : istTimeLabel(job.scheduledFor)}
           </Text>
-          {!compact && contract !== null ? (
+          {contract !== null ? (
             <Text
               style={{
                 ...textStyle('label'),
@@ -192,31 +246,33 @@ export function JobCard({ view, compact = false, onPress, actions, arrivedFromSy
               {contract}
             </Text>
           ) : null}
+          <View style={{ flex: 1 }} />
+          <StatusPill status={job.status} testID={testID ? `${testID}-status` : undefined} />
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: compact ? 0 : SPACE[2] }}>
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: pill.color,
-              marginRight: 6,
-            }}
-          />
-          <Text style={{ ...textStyle('label'), color: SEMANTIC.text.primary }} testID={testID ? `${testID}-status` : undefined}>
-            {pill.label}
-          </Text>
-        </View>
+
         {rejected ? (
           <Text
-            style={{ ...textStyle('caption'), color: SEMANTIC.feedback.danger, marginTop: SPACE[2] }}
+            style={{
+              ...textStyle('caption'),
+              color: SEMANTIC.feedback.danger,
+              paddingHorizontal: SPACE[3],
+              paddingBottom: SPACE[2],
+            }}
             numberOfLines={2}
             testID={testID ? `${testID}-rejected` : undefined}
           >
             {view.rejectedMessage}
           </Text>
         ) : null}
-        {actions ?? null}
+
+        {actions === undefined ? null : (
+          <>
+            {/* The action footer, sealed off so the buttons read as the
+                card's verbs rather than as more card content. */}
+            <View style={{ height: HAIRLINE, backgroundColor: SEMANTIC.line.default }} />
+            <View style={{ padding: SPACE[3] }}>{actions}</View>
+          </>
+        )}
       </Pressable>
     </Animated.View>
   );

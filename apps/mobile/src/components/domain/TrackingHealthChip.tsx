@@ -31,8 +31,9 @@
 import { Pressable, Text, View } from 'react-native';
 
 import type { TrackingHealth } from '@servgrid/shared';
-import { SEMANTIC } from '@servgrid/shared';
+import { alpha, ICON, RADII, SEMANTIC, TINT } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
+import { Icon, type IconName } from '../ui/icons';
 
 /** Where a tap on the chip lands in the permission ladder. `1`–`4` are
  * the ladder's steps; `'notifications'` is the ask that follows them. */
@@ -106,6 +107,17 @@ const TONE_COLOR = {
   bad: SEMANTIC.feedback.danger,
 } as const;
 
+/**
+ * The tone's own glyph, so the chip is legible before the sentence is
+ * read: a tick means there is nothing to do, a triangle means there is.
+ * The copy still says which — the glyph is never the whole message.
+ */
+const TONE_ICON: Record<ChipTone, IconName> = {
+  good: 'checkFilled',
+  warn: 'warning',
+  bad: 'warning',
+};
+
 export interface TrackingHealthChipProps {
   /** The row `GET /v1/location/health/me` returned — real view data. */
   health: TrackingHealth;
@@ -117,23 +129,19 @@ export interface TrackingHealthChipProps {
 export function TrackingHealthChip({ health, onFix, testID }: TrackingHealthChipProps): React.ReactNode {
   const view = chipViewOf(health);
   const tappable = view.fixTo !== null && onFix !== undefined;
+  const tone = TONE_COLOR[view.tone];
 
   const body = (
     <>
-      <View
-        style={{
-          width: 10,
-          height: 10,
-          borderRadius: 5,
-          backgroundColor: TONE_COLOR[view.tone],
-          marginRight: 10,
-        }}
-      />
+      <Icon name={TONE_ICON[view.tone]} size={ICON.md} color={tone} />
       <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 }} testID={testID ? `${testID}-text` : undefined}>
         {view.text}
       </Text>
       {tappable ? (
-        <Text style={{ ...textStyle('label'), color: TONE_COLOR[view.tone] }}>Fix</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+          <Text style={{ ...textStyle('label'), color: SEMANTIC.text.primary, fontWeight: '600' }}>Fix</Text>
+          <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
+        </View>
       ) : null}
     </>
   );
@@ -145,13 +153,17 @@ export function TrackingHealthChip({ health, onFix, testID }: TrackingHealthChip
         alignSelf: 'stretch',
         flexDirection: 'row',
         alignItems: 'center',
+        gap: 10,
         minHeight: 52,
         paddingVertical: 10,
         paddingHorizontal: 14,
-        borderRadius: 4,
+        borderRadius: RADII.control,
         borderWidth: 1,
-        borderColor: SEMANTIC.line.default,
-        backgroundColor: SEMANTIC.bg.raised,
+        // The tone as a tinted ground, one step firmer than the chip's own
+        // (this strip is a whole row, not a label). The tint is a ground
+        // only: the sentence stays slate.900 — see StatusPill's note.
+        borderColor: alpha(tone, TINT.chipLine),
+        backgroundColor: alpha(tone, TINT.wash + TINT.band),
       }}
     >
       {tappable ? (
@@ -161,7 +173,7 @@ export function TrackingHealthChip({ health, onFix, testID }: TrackingHealthChip
           onPress={() => {
             if (view.fixTo !== null) onFix?.(view.fixTo);
           }}
-          style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
         >
           {body}
         </Pressable>
