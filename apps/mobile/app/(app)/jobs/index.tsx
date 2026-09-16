@@ -15,7 +15,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { JobsScreen } from '../../../src/screens/technician/JobsScreen';
 import { useTechJobsFlag, useTechnicianWork } from '../../../src/screens/technician/useTechnicianWork';
 import { OwnerJobsScreen } from '../../../src/screens/owner/JobsScreen';
@@ -86,7 +86,10 @@ export default function Screen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame's ground, top edge only — the dashboard's treatment: the
+    // screen's navy header runs to the status bar, and the bottom inset
+    // belongs to the shell that draws the tab bar (2026-09-16).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <JobsScreen
         jobs={deps.views}
         completedAtById={deps.completedAtById}

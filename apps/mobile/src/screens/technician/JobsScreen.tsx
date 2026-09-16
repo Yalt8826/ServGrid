@@ -35,7 +35,7 @@ import { Text, View, useWindowDimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { FlashList } from '@shopify/flash-list';
 
-import { DURATION, EASING, COLORS, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { COLORS, DURATION, EASING, FRAME, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { JobCard } from '../../components/domain/JobCard';
 import { EmptyState, TextField } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
@@ -158,8 +158,20 @@ export function JobsScreen(deps: JobsDeps): React.ReactNode {
 
   return (
     <View testID="jobs-screen" style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}>
-      <View style={{ paddingHorizontal: SPACE[4], paddingTop: SPACE[4] }}>
-        <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary }}>Jobs</Text>
+      {/* The navy frame (2026-09-16): the title and the day's three tabs
+          live on the frame ground, the same navy the tab bar wears — so
+          the screen opens framed like the dashboard and closes framed
+          like the tab bar. The active tab is white with the accent
+          underline; the resting track is the frame's hairline. */}
+      <View
+        style={{
+          alignSelf: 'stretch',
+          backgroundColor: FRAME.bg,
+          paddingHorizontal: SPACE[4],
+          paddingTop: SPACE[4],
+        }}
+      >
+        <Text style={{ ...textStyle('h1'), color: FRAME.text }}>Jobs</Text>
         {/* The accent underline slides between tabs, `base` 220ms (§6). */}
         <View accessibilityRole="tablist">
           <View style={{ flexDirection: 'row' }}>
@@ -174,7 +186,7 @@ export function JobsScreen(deps: JobsDeps): React.ReactNode {
                   onPress={() => setActive(tab.key)}
                   style={{
                     ...textStyle('label'),
-                    color: selected ? SEMANTIC.text.primary : SEMANTIC.text.secondary,
+                    color: selected ? FRAME.text : FRAME.textMuted,
                     width: tabWidth,
                     minHeight: TAP.min,
                     textAlign: 'center',
@@ -187,7 +199,7 @@ export function JobsScreen(deps: JobsDeps): React.ReactNode {
               );
             })}
           </View>
-          <View style={{ height: 2, backgroundColor: SEMANTIC.line.default, alignSelf: 'stretch' }}>
+          <View style={{ height: 2, backgroundColor: FRAME.divider, alignSelf: 'stretch' }}>
             <Animated.View
               testID="jobs-underline"
               style={[underlineStyle, { width: tabWidth, height: 2, backgroundColor: COLORS.accent }]}
@@ -237,6 +249,7 @@ function JobsEmpty({ tab, onCheckUpcoming }: { tab: JobsTab; onCheckUpcoming: ()
     return (
       <EmptyState
         message="Nothing scheduled today."
+        icon="calendar"
         actionLabel="Check upcoming"
         onAction={onCheckUpcoming}
         testID="jobs-empty-today"
@@ -244,7 +257,7 @@ function JobsEmpty({ tab, onCheckUpcoming }: { tab: JobsTab; onCheckUpcoming: ()
     );
   }
   if (tab === 'upcoming') {
-    return <EmptyState message="Nothing scheduled yet." testID="jobs-empty-upcoming" />;
+    return <EmptyState message="Nothing scheduled yet." icon="calendar" testID="jobs-empty-upcoming" />;
   }
   return <EmptyState message="Nothing completed yet today." testID="jobs-empty-completed" />;
 }
