@@ -3,12 +3,22 @@
  * "What am I doing now, and is anything wrong?" in under three seconds,
  * first thing in the morning, in a van.
  *
- * Anatomy, exactly: greeting · **three figures only**
- * (today's open, done today, overdue — `display` 32 Condensed, tabular;
- * not six, not a chart) · the `TrackingHealthChip`, always visible ·
- * NEXT — the single next job as a full `JobCard` with *Navigate*
- * (secondary) and *Start job* / *Arrive* (primary, the screen's ONE
- * accent) · LATER TODAY as compact rows.
+ * Anatomy, exactly: the **navy frame** (greeting · the date · **three
+ * figures only** — today's open, done today, overdue — `display` 32
+ * Condensed, tabular; not six, not a chart) · the `TrackingHealthChip`,
+ * always visible · NEXT — the single next job as a full `JobCard` with
+ * *Navigate* (secondary) and *Start job* / *Arrive* (primary, the
+ * screen's ONE accent) · LATER TODAY as compact rows.
+ *
+ * **The frame** (mobile UI overhaul, 2026-09-16) is the header block: it
+ * is where the three figures live, and it is the only place in the app
+ * that paints `FRAME.bg`. `FRAME`'s note in the shared tokens carries the
+ * rules it obeys — structure, never data that only exists up there; the
+ * accent as text and the active bar, never as a fill; inks measured on
+ * slate.900. The figures themselves are colour-coded by what they mean
+ * (`today` white, `done` green, `overdue` red) and **the red appears only
+ * when there is something overdue**: a permanent red zero teaches the eye
+ * to ignore red, which is the one ink this screen cannot afford to waste.
  *
  * **The server's work read is the source** (PLAN-FRONTEND.md §4,
  * online-only): jobs arrive as props from the route's in-memory query,
@@ -28,19 +38,20 @@
  * is the one piece of motion here that is not load-bearing — if it is
  * ever janky, delete it (the screens do not depend on it).
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { useDerivedValue, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
+import { runOnJS, useAnimatedReaction, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import type { TrackingHealth } from '@servgrid/shared';
-import { DURATION, EASING, SEMANTIC, SPACE } from '@servgrid/shared';
+import { DURATION, EASING, FRAME, SEMANTIC, SPACE } from '@servgrid/shared';
 import { TrackingHealthChip, type LadderTarget } from '../../components/domain/TrackingHealthChip';
 import { JobCard } from '../../components/domain/JobCard';
-import { Button, EmptyState } from '../../components/ui';
+import { Button, EmptyState, SectionHeader } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
 import {
   dashboardFigures,
+  istDayLabel,
   istGreeting,
   laterTodayOf,
   nextJobOf,
@@ -89,52 +100,84 @@ export interface DashboardDeps {
  * figure is already correct. Reduced motion skips straight to the value —
  * movement removed, feedback kept (02-MOTION.md §10).
  *
- * The rendered child is the SharedValue itself, which Reanimated drives
- * as live text. The vitest seam's `useDerivedValue` returns a plain,
- * already-final `{ value }` box instead — such boxes are unwrapped once
- * here, so tests read the resolved figure; the prototype getter is what
- * tells a real SharedValue from the stub's literal.
+ * **The number crosses to React as an integer (2026-09-16).** It used to
+ * render the `SharedValue` itself as the Text's child — Reanimated's
+ * "animated text", documented as the way to drive a number. On this build
+ * that rendered the value the derived value was *created* with and never
+ * re-read it: the figures sat on `0` while their colours — computed from
+ * the same three numbers — were right, which is how the bug was found. A
+ * count that shows a wrong number is worse than no count at all, so the
+ * worklet now keeps the tween and pushes each rounded integer across with
+ * `runOnJS`, and the Text stays an ordinary one. The easing, the duration
+ * and the once-only rule are unchanged; only the hand-off moved.
+ *
+ * `animating ? tweened : value` is deliberate rather than a state reset:
+ * a figure that is not animating renders the **prop**, so a refetch or a
+ * second focus can never show a stale number through a state update that
+ * has not landed yet.
  */
 function CountUpFigure({
   value,
+  color,
   animate,
   onCountUpStart,
   testID,
 }: {
   value: number;
+  /** The figure's ink on the navy frame — see `figureColourOf`. */
+  color: string;
   animate: boolean;
   onCountUpStart?: () => void;
   testID: string;
 }): React.ReactNode {
   const reducedMotion = useReducedMotion();
-  const progress = useSharedValue(animate && !reducedMotion ? 0 : 1);
+  const animating = animate && !reducedMotion;
+  const progress = useSharedValue(animating ? 0 : 1);
   const drive = useRef(false);
+  const [tweened, setTweened] = useState(0);
 
   useEffect(() => {
-    if (!animate || reducedMotion || drive.current) return;
+    if (!animating || drive.current) return;
     drive.current = true;
     onCountUpStart?.();
     progress.value = withTiming(1, { duration: DURATION.considered + 80, easing: ENTER_EASING });
-  }, [animate, onCountUpStart, progress, reducedMotion]);
+  }, [animating, onCountUpStart, progress]);
 
-  const shown = useDerivedValue(() => String(Math.round(value * progress.value)));
-  const live =
-    typeof shown === 'object' &&
-    shown !== null &&
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(shown), 'value')?.get !== undefined;
+  // The one integer the Text renders while the tween runs. Skipping equal
+  // values keeps it to the ~24 frames the ramp actually changes on.
+  useAnimatedReaction(
+    () => Math.round(value * progress.value),
+    (rounded, previous) => {
+      if (rounded !== previous) runOnJS(setTweened)(rounded);
+    },
+  );
 
   return (
-    <Animated.Text
+    <Text
       testID={testID}
       style={{
         ...textStyle('display'),
-        color: SEMANTIC.text.primary,
+        color,
         fontVariant: ['tabular-nums'],
       }}
     >
-      {live ? (shown as unknown as string) : shown.value}
-    </Animated.Text>
+      {String(animating ? tweened : value)}
+    </Text>
   );
+}
+
+/**
+ * A figure's ink on the frame. Colour here is **redundant with the
+ * label**, never the message: `done` and `overdue` only take their
+ * status ink when they are non-zero, because a permanently red zero is
+ * how a colour stops being read (the same reasoning as `STATUS`, and the
+ * measured inks are in `FRAME`'s note).
+ */
+function figureColourOf(kind: 'open' | 'done' | 'overdue', value: number): string {
+  if (value === 0) return FRAME.text;
+  if (kind === 'done') return FRAME.success;
+  if (kind === 'overdue') return FRAME.danger;
+  return FRAME.text;
 }
 
 export function DashboardScreen(deps: DashboardDeps): React.ReactNode {
@@ -167,108 +210,166 @@ export function DashboardScreen(deps: DashboardDeps): React.ReactNode {
     <ScrollView
       testID="dashboard-screen"
       style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
-      contentContainerStyle={{ padding: SPACE[4], paddingBottom: SPACE[8], gap: SPACE[4] }}
+      // No horizontal padding on the container: the frame is full-bleed,
+      // and the body carries the gutter itself.
+      contentContainerStyle={{ paddingBottom: SPACE[8] }}
       // Pull to refresh reads the server again; the platform control is
       // the indicator while it runs.
       refreshControl={<RefreshControl refreshing={deps.refreshing} onRefresh={deps.onRefresh} />}
     >
-      <View style={styles.headerRow}>
-        <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary, flex: 1 }} testID="dashboard-greeting">
+      {/* The frame: who he is, what day it is, and the three figures. It
+          runs to the screen's edges — the route paints the same slate
+          behind the status bar, so the header has no top edge. */}
+      <View testID="dashboard-frame" style={styles.frame}>
+        <Text style={{ ...textStyle('h1'), color: FRAME.text }} testID="dashboard-greeting">
           {`${istGreeting(deps.now)}, ${deps.name}`}
         </Text>
-      </View>
+        <Text style={{ ...textStyle('caption'), color: FRAME.textMuted, marginTop: 2 }} testID="dashboard-date">
+          {istDayLabel(deps.now)}
+        </Text>
 
-      <View style={styles.figuresRow}>
-        <View style={styles.figure}>
-          <CountUpFigure value={figures.open} animate={animate} onCountUpStart={deps.onCountUpStart} testID="dashboard-figure-open" />
-          <Text style={styles.figureLabel}>today</Text>
-        </View>
-        <View style={styles.figure}>
-          <CountUpFigure value={figures.doneToday} animate={animate} onCountUpStart={deps.onCountUpStart} testID="dashboard-figure-done" />
-          <Text style={styles.figureLabel}>done</Text>
-        </View>
-        <View style={styles.figure}>
-          <CountUpFigure value={figures.overdue} animate={animate} onCountUpStart={deps.onCountUpStart} testID="dashboard-figure-overdue" />
-          <Text style={styles.figureLabel}>overdue</Text>
-        </View>
-      </View>
-
-      <TrackingHealthChip health={health} onFix={deps.onHealthFix} testID="dashboard-health" />
-
-      {next === null ? null : (
-        <View style={{ alignSelf: 'stretch', gap: SPACE[2] }}>
-          <Text style={styles.sectionLabel} testID="dashboard-next-label">
-            NEXT
-          </Text>
-          {/* The NEXT card does not animate in (§T1). */}
-          <JobCard
-            view={next}
-            testID="dashboard-next-card"
-            onPress={() => deps.onOpenJob(next)}
-            actions={
-              <View style={styles.actionsRow}>
-                <Button label="Navigate" variant="secondary" onPress={() => deps.onNavigate(next)} testID="dashboard-navigate" />
-                {primary !== null ? (
-                  <Button label={primary.label} onPress={() => deps.onStartJob(next)} testID="dashboard-primary-action" />
-                ) : null}
-              </View>
-            }
-          />
-        </View>
-      )}
-
-      {later.length === 0 ? null : (
-        <View style={{ alignSelf: 'stretch', gap: SPACE[2] }}>
-          <Text style={styles.sectionLabel} testID="dashboard-later-label">
-            LATER TODAY
-          </Text>
-          {later.map((view) => (
-            <JobCard
-              key={view.job.id}
-              view={view}
-              compact
-              testID={`dashboard-later-${view.job.id}`}
-              onPress={() => deps.onOpenJob(view)}
+        <View style={styles.figuresRow}>
+          <View style={styles.figure}>
+            <CountUpFigure
+              value={figures.open}
+              color={figureColourOf('open', figures.open)}
+              animate={animate}
+              onCountUpStart={deps.onCountUpStart}
+              testID="dashboard-figure-open"
             />
-          ))}
+            <Text style={styles.figureLabel}>today</Text>
+          </View>
+          <View style={styles.figureDivider} />
+          <View style={styles.figure}>
+            <CountUpFigure
+              value={figures.doneToday}
+              color={figureColourOf('done', figures.doneToday)}
+              animate={animate}
+              onCountUpStart={deps.onCountUpStart}
+              testID="dashboard-figure-done"
+            />
+            <Text style={styles.figureLabel}>done</Text>
+          </View>
+          <View style={styles.figureDivider} />
+          <View style={styles.figure}>
+            <CountUpFigure
+              value={figures.overdue}
+              color={figureColourOf('overdue', figures.overdue)}
+              animate={animate}
+              onCountUpStart={deps.onCountUpStart}
+              testID="dashboard-figure-overdue"
+            />
+            <Text style={styles.figureLabel}>overdue</Text>
+          </View>
         </View>
-      )}
+      </View>
 
-      {empty ? <EmptyState message="No jobs assigned today." actionLabel="Refresh" onAction={deps.onRefresh} testID="dashboard-empty" /> : null}
+      <View style={styles.body}>
+        <TrackingHealthChip health={health} onFix={deps.onHealthFix} testID="dashboard-health" />
+
+        {next === null ? null : (
+          <View style={styles.section}>
+            <SectionHeader label="Next" icon="jobs" testID="dashboard-next-label" />
+            {/* The NEXT card does not animate in (§T1). */}
+            <JobCard
+              view={next}
+              testID="dashboard-next-card"
+              onPress={() => deps.onOpenJob(next)}
+              actions={
+                <View style={styles.actionsRow}>
+                  <Button
+                    label="Navigate"
+                    icon="navigate"
+                    variant="secondary"
+                    onPress={() => deps.onNavigate(next)}
+                    testID="dashboard-navigate"
+                  />
+                  {primary !== null ? (
+                    <Button
+                      label={primary.label}
+                      icon="forward"
+                      onPress={() => deps.onStartJob(next)}
+                      testID="dashboard-primary-action"
+                    />
+                  ) : null}
+                </View>
+              }
+            />
+          </View>
+        )}
+
+        {later.length === 0 ? null : (
+          <View style={styles.section}>
+            <SectionHeader label="Later today" icon="clock" count={later.length} testID="dashboard-later-label" />
+            {later.map((view) => (
+              <JobCard
+                key={view.job.id}
+                view={view}
+                compact
+                testID={`dashboard-later-${view.job.id}`}
+                onPress={() => deps.onOpenJob(view)}
+              />
+            ))}
+          </View>
+        )}
+
+        {empty ? (
+          <EmptyState
+            message="No jobs assigned today."
+            icon="jobs"
+            actionLabel="Refresh"
+            onAction={deps.onRefresh}
+            testID="dashboard-empty"
+          />
+        ) : null}
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerRow: {
+  frame: {
     alignSelf: 'stretch',
-    flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[5],
+  },
+  body: {
+    alignSelf: 'stretch',
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[5],
+    gap: SPACE[5],
+  },
+  section: {
+    alignSelf: 'stretch',
     gap: SPACE[2],
   },
   figuresRow: {
     alignSelf: 'stretch',
     flexDirection: 'row',
-    gap: SPACE[6],
+    alignItems: 'center',
+    marginTop: SPACE[4],
   },
   figure: {
+    flex: 1,
     alignItems: 'flex-start',
-    minWidth: 64,
+  },
+  figureDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: FRAME.divider,
+    marginHorizontal: SPACE[3],
   },
   figureLabel: {
     ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
-  },
-  sectionLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
+    color: FRAME.textMuted,
   },
   actionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: SPACE[3],
-    marginTop: SPACE[3],
   },
 });
 

@@ -20,8 +20,8 @@ import { act } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
 import type { TechnicianWork } from '@servgrid/shared';
-import { SEMANTIC, STATUS } from '@servgrid/shared';
-import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
+import { FRAME, SEMANTIC, STATUS } from '@servgrid/shared';
+import { allText, create, findAll, findByTestID, toJson, type Node } from '../../components/ui/testing';
 import { buildJobViews, type TechnicianWorkViews } from './workData';
 import { DashboardScreen } from './DashboardScreen';
 import type { JobView } from './jobView';
@@ -265,5 +265,60 @@ describe('DashboardScreen (§T1)', () => {
     const inset = findByTestID(tree, 'dashboard-next-card-inset');
     expect(inset).toBeDefined();
     expect((inset!.props.style as { borderLeftColor: string }).borderLeftColor).toBe(SEMANTIC.feedback.danger);
+  });
+});
+
+/**
+ * The navy frame (mobile UI overhaul, 2026-09-16). Three things are held
+ * here: the header is painted on the frame ground and dated in the same
+ * timezone every figure on the screen is bucketed by, and the figure inks
+ * appear **only when the figure is non-zero** — a permanent red zero is
+ * how the one ink that has to survive a glance stops being read.
+ */
+describe('DashboardScreen — the navy frame', () => {
+  const flat = (node: Node): Record<string, unknown> =>
+    Object.assign({}, ...(Array.isArray(node.props.style) ? node.props.style : [node.props.style]));
+
+  it('paints the header on the frame ground and dates it in IST', async () => {
+    const tree = toJson(await create(<DashboardScreen {...baseDeps({ jobs: workFixture().views })} />));
+
+    expect(flat(findByTestID(tree, 'dashboard-frame')!).backgroundColor).toBe(FRAME.bg);
+    // NOW is Friday 11 September 2026, 10:00 IST — the date the figures
+    // are bucketed by, not the device's.
+    expect(allText(findByTestID(tree, 'dashboard-date')!).join(' ')).toBe('Friday 11 September');
+    // The greeting keeps its own node — it is what he reads first.
+    expect(allText(findByTestID(tree, 'dashboard-greeting')!).join(' ')).toBe('Good morning, Ravi');
+  });
+
+  it('inks done and overdue only when they are non-zero', async () => {
+    // The fixture: three open today (one of them overdue), one done.
+    const tree = toJson(await create(<DashboardScreen {...baseDeps({ jobs: workFixture().views })} />));
+    expect(flat(findByTestID(tree, 'dashboard-figure-open')!).color).toBe(FRAME.text);
+    expect(flat(findByTestID(tree, 'dashboard-figure-done')!).color).toBe(FRAME.success);
+    expect(flat(findByTestID(tree, 'dashboard-figure-overdue')!).color).toBe(FRAME.danger);
+
+    // A clear day: nothing done, nothing overdue — no coloured zeroes.
+    const clear = toJson(
+      await create(<DashboardScreen {...baseDeps({ jobs: [viewOf({ id: '01890a5e-1000-7000-8000-00000000000c', scheduledFor: AFTERNOON })] })} />),
+    );
+    expect(flat(findByTestID(clear, 'dashboard-figure-done')!).color).toBe(FRAME.text);
+    expect(flat(findByTestID(clear, 'dashboard-figure-overdue')!).color).toBe(FRAME.text);
+  });
+
+  it('separates the figure band with hairlines and keeps the tap targets intact', async () => {
+    const tree = toJson(await create(<DashboardScreen {...baseDeps({ jobs: workFixture().views })} />));
+    const dividers = findAll(
+      tree,
+      (n) => flat(n).width === 1 && flat(n).backgroundColor === FRAME.divider,
+    );
+    expect(dividers).toHaveLength(2);
+  });
+
+  it('labels each section with its own marker, count included', async () => {
+    const tree = toJson(await create(<DashboardScreen {...baseDeps({ jobs: workFixture().views })} />));
+    expect(allText(findByTestID(tree, 'dashboard-next-label')!).join(' ')).toBe('NEXT');
+    // LATER TODAY carries the count of the rows beneath it: two.
+    expect(allText(findByTestID(tree, 'dashboard-later-label')!).join(' ')).toContain('LATER TODAY');
+    expect(allText(findByTestID(tree, 'dashboard-later-label')!).join(' ')).toContain('2');
   });
 });

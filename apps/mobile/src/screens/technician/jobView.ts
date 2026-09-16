@@ -94,6 +94,25 @@ export function istGreeting(now: Date): string {
   return 'Good evening';
 }
 
+/**
+ * The dashboard header's date line — "Wednesday 16 September", IST.
+ *
+ * It exists so the header answers the question its own figures raise:
+ * *three of which day?* A technician opening the app at 06:40 and reading
+ * "26 overdue" has to know whether that count is today's or yesterday's,
+ * and every figure on the screen is bucketed by IST (`istDateKey` above).
+ * Same timezone as the rest of the screen, so the header cannot disagree
+ * with the list beneath it.
+ */
+export function istDayLabel(now: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(now);
+}
+
 // ── bucketing, sorting, figures ──────────────────────────────────────────────
 
 export type JobsTab = 'today' | 'upcoming' | 'completed';

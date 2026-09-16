@@ -13,10 +13,11 @@ import { Pressable, Text, View } from 'react-native';
 import { useState } from 'react';
 import Animated from 'react-native-reanimated';
 
-import { COLORS, RADII, SEMANTIC, TAP, type ComponentState } from '@servgrid/shared';
+import { COLORS, ICON, RADII, SEMANTIC, TAP, type ComponentState } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { useDensity } from './DensityProvider';
 import { haptic } from './haptics';
+import { Icon, type IconName } from './icons';
 import { usePressScale } from './motion';
 import { captionStyle } from './uiBase';
 
@@ -26,6 +27,14 @@ export interface ButtonProps {
   label: string;
   onPress?: () => void;
   variant?: ButtonVariant;
+  /**
+   * The glyph beside the label (2026-09-16). Always paired with the label,
+   * never instead of it — `Icon`'s note is the reason: this app is read
+   * one-handed outdoors, and a lone glyph is a shape, not an instruction.
+   * It takes the button's own label colour, so a danger button's icon is
+   * danger and a primary's is the accent's ink.
+   */
+  icon?: IconName;
   disabled?: boolean;
   /** Required whenever `disabled` — the visible why (caption). */
   disabledReason?: string;
@@ -38,6 +47,7 @@ export function Button({
   label,
   onPress,
   variant = 'primary',
+  icon,
   disabled = false,
   disabledReason,
   loading = false,
@@ -90,9 +100,11 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           flexDirection: 'row',
+          gap: 8,
           alignSelf: 'stretch',
         }}
       >
+        {icon === undefined ? null : <Icon name={icon} size={ICON.sm} color={colors.label} />}
         <Text
           style={{
             ...textStyle('label'),

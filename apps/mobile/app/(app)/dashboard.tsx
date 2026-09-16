@@ -28,7 +28,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { RepDashboardScreen } from '../../src/screens/rep/DashboardScreen';
 import { useRepDashboard } from '../../src/screens/rep/useRepData';
 import { DispatcherDashboardScreen } from '../../src/screens/dispatcher/dashboard';
@@ -195,7 +195,11 @@ export default function Screen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame's ground, not the app's: the technician's header is navy
+    // and runs to the screen's top edge, so the strip behind the status
+    // bar has to be the same navy — otherwise the header has a light lid
+    // on it (mobile UI overhaul, 2026-09-16).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right', 'bottom']}>
       <DashboardScreen
         name={actor.username}
         jobs={deps.views}

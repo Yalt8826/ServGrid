@@ -6,4 +6,5 @@
  * tokens from here.
  */
 export * from './tokens.ts';
+export { alpha } from './alpha.ts';
 export { contrastRatio, relativeLuminance, round2 } from './contrast.ts';

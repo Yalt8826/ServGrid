@@ -390,3 +390,78 @@ export const STALE = {
   insetWidth: 2,
   insetColor: SEMANTIC.line.stale,
 } as const;
+
+/**
+ * The navy frame (mobile UI overhaul, 2026-09-16).
+ *
+ * The technician app was one flat white page — every element the same
+ * value, so nothing told the eye what was structure, what was data and
+ * what could be tapped. The answer is the same one the owner's console
+ * reached with `DESK` (see its note above): **layers, not more colour.**
+ *
+ * The frame is the layer that says "this is the shell, not the work":
+ * the dashboard's header block and the phone's tab bar are both
+ * `FRAME.bg`, one continuous object with the product's own slate.900 —
+ * the exact ground the owner's rail already sits on, so the phone and the
+ * console are recognisably one product rather than two themes.
+ *
+ * Three rules keep it from becoming decoration:
+ *
+ * 1. **The frame never carries data that is also in the body.** It shows
+ *    the greeting and the three figures — the same figures the screen
+ *    reads again below — never a number that exists only up there.
+ * 2. **Accent stays the action colour.** On the frame the accent appears
+ *    as text and as the 2px active bar, never as a fill: the same line
+ *    `NavShell.web.test.tsx` holds the rail to. A yellow-filled tab is a
+ *    button that does not act.
+ * 3. **Inks on the frame are lightened, and measured.** `success`,
+ *    `warning` and `danger` here are the *dark-ground* inks, not the
+ *    `STATUS` values: `STATUS.completed` is 3.4:1 on slate.900 and
+ *    `STATUS.cancelled` 2.4:1 — both fail a label. The contrasts are
+ *    asserted in `contrast.test.ts`.
+ */
+export const FRAME = {
+  bg: SLATE[900],
+  /** A control resting on the frame — the one step up (`DESK.rail.hover`'s value, one vocabulary). */
+  bgSoft: SLATE[700],
+  /** Hairlines *on* the frame: between the figures, under the tab bar. */
+  divider: SLATE[700],
+  text: COLORS.surface,
+  textMuted: SLATE[300],
+  accent: COLORS.accent,
+  onAccent: SLATE[900],
+  /** Dark-ground status inks — 9.06:1, 10.47:1 and 8.11:1 on `bg` respectively. */
+  success: '#6FD3A8',
+  warning: '#F5C86B',
+  danger: '#FF9B91',
+} as const;
+
+/**
+ * Tint opacities for derived grounds (`alpha()`, `../theme/alpha.ts`).
+ * Named rather than inlined because they are a *system*, not a taste: a
+ * chip's ground and its hairline have to hold together across five status
+ * colours, and a one-off 0.2 next to a 0.14 is how a palette starts to
+ * look accidental.
+ */
+export const TINT = {
+  /** A status chip's ground — legible under slate.900 at every status. */
+  chip: 0.14,
+  /** The chip's hairline: the same ink, one step firmer. */
+  chipLine: 0.3,
+  /** A whole band (section header, quiet row) — present, never loud. */
+  band: 0.08,
+  /** A resting control's ground on white. */
+  wash: 0.05,
+} as const;
+
+/**
+ * Icon sizes. One icon set for the whole app (`components/ui/icons.tsx`);
+ * these are the four sizes it is allowed to render at, so a "small" icon
+ * on the dashboard and a "small" icon in a sheet cannot disagree.
+ */
+export const ICON = {
+  sm: 16,
+  md: 20,
+  lg: 24,
+  xl: 32,
+} as const;

@@ -14,8 +14,9 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { COLORS, SEMANTIC } from '@servgrid/shared';
-import { create, findAll, toJson, type Node } from '../ui/testing';
+import { alpha, COLORS, SEMANTIC, SLATE, STATUS, TINT } from '@servgrid/shared';
+import { View } from 'react-native';
+import { create, findAll, findByTestID, toJson, type Node } from '../ui/testing';
 import { contractChipLabel, JobCard } from './JobCard';
 import type { JobView } from '../../screens/technician/jobView';
 
@@ -92,5 +93,57 @@ describe('JobCard — the AMC chip renders muted, never accent (T2B.5)', () => {
       (n) => n.type === 'Text' && (n.children ?? []).filter((c): c is string => typeof c === 'string').join('') === 'AMC',
     );
     expect(chips).toHaveLength(0);
+  });
+});
+
+/**
+ * The card's zones (mobile UI overhaul, 2026-09-16). It was one undivided
+ * white block; these assertions hold the three things that make a list of
+ * twelve scannable — the hairline between "which job" and "when and where
+ * it stands", the job number in its own chip, and the status as a tinted
+ * chip rather than the same outline on every card.
+ */
+describe('JobCard — the zones', () => {
+  const flat = (node: Node): Record<string, unknown> =>
+    Object.assign({}, ...(Array.isArray(node.props.style) ? node.props.style : [node.props.style]));
+
+  const hairlineOf = (root: Node): Node[] =>
+    findAll(root, (n) => flat(n).height === 1 && flat(n).backgroundColor === SEMANTIC.line.default);
+
+  it('draws exactly one hairline between the identity block and the meta row', async () => {
+    const renderer = await create(<JobCard view={viewOf(null)} testID="card" />);
+    expect(hairlineOf(toJson(renderer))).toHaveLength(1);
+  });
+
+  it('draws no hairline on a compact row — the row is already two lines', async () => {
+    const renderer = await create(<JobCard view={viewOf(null)} compact testID="card" />);
+    expect(hairlineOf(toJson(renderer))).toHaveLength(0);
+  });
+
+  it('seals the action footer off with its own hairline', async () => {
+    const renderer = await create(
+      <JobCard view={viewOf(null)} testID="card" actions={<View testID="card-actions" />} />,
+    );
+    expect(hairlineOf(toJson(renderer))).toHaveLength(2);
+  });
+
+  it('tints the status chip from the status ink, keeping the word in slate.900', async () => {
+    const renderer = await create(<JobCard view={viewOf(null)} testID="card" />);
+    const chip = findByTestID(toJson(renderer), 'card-status')!;
+    // `in_progress` is the accent, so the tint is derived from it.
+    expect(flat(chip).backgroundColor).toBe(alpha(STATUS.in_progress, TINT.chip));
+    expect(flat(chip).borderColor).toBe(alpha(STATUS.in_progress, TINT.chipLine));
+    // The word keeps the body ink — a tint is a ground, never an ink.
+    const word = findByTestID(toJson(renderer), 'card-status-word')!;
+    expect(flat(word).color).toBe(SEMANTIC.text.primary);
+  });
+
+  it('gives the job number its own chip so the identifier is findable', async () => {
+    const renderer = await create(<JobCard view={viewOf(null)} testID="card" />);
+    const number = findByTestID(toJson(renderer), 'card-number')!;
+    expect((number.children ?? []).join('')).toBe('JC-2627-00042');
+    // Tinted from the frame ink, not a status — a number is not a state.
+    const chip = findAll(toJson(renderer), (n) => flat(n).backgroundColor === alpha(SLATE[900], TINT.band));
+    expect(chip).toHaveLength(1);
   });
 });
