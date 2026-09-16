@@ -142,6 +142,14 @@ export const jobCompleteSchema = z
   .object({
     completedAt: isoDateTime,
     workSummary: z.string().min(1),
+    /**
+     * The catalogue row the work was (2026-09-16). Optional because
+     * completions filed before migration 022 have none and the amend path
+     * never rewrites one; the sheet always sends it. The API validates it
+     * against `services` — an unknown id is a 422, not a dangling FK
+     * error at insert time.
+     */
+    serviceId: uuid.optional(),
     /** Absent/zero only; the DB constraint and service rule carry the discount rule. */
     cost: moneyString.optional(),
     discountAmount: moneyString.optional(),
@@ -404,6 +412,12 @@ export const JobCompletionDetailSchema = z
   .object({
     completedAt: isoDateTime,
     workSummary: z.string(),
+    /**
+     * The service performed, by name (2026-09-16). Null for every
+     * completion filed before the column existed — the read says "we do
+     * not know" rather than inventing a catalogue entry for old work.
+     */
+    serviceName: z.string().nullable(),
     cost: moneyString.nullable(),
     discountAmount: moneyString.nullable(),
     discountReason: z.string().nullable(),

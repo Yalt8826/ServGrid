@@ -61,6 +61,7 @@ import {
   type PartProduct,
 } from './completeSheet';
 import { createIntentWriter, WriteNotSaved, type IntentRequest } from '../../lib/intentWrite';
+import type { ServiceOption } from './CompleteSheet';
 import { statusPillOf, type JobView } from './jobView';
 import type { JobStatus } from '@servgrid/shared';
 
@@ -68,6 +69,9 @@ const NOW = new Date('2026-09-11T10:00:00+05:30'); // Friday, 10:00 IST
 const SCHEDULED = '2026-09-11T14:30:00+05:30';
 
 const BATTERY: PartProduct = { id: '01890a5e-p000-7000-8000-000000000001', name: 'Exide 150Ah battery', category: 'battery' };
+/** The catalogue the sheet's first question is answered from (2026-09-16). */
+const SERVICE_SWAP: ServiceOption = { id: '01890a5e-s000-7000-8000-000000000001', name: 'Battery water top-up', defaultCharge: '750.00' };
+const SERVICE_CHECK: ServiceOption = { id: '01890a5e-s000-7000-8000-000000000002', name: 'Quarterly service', defaultCharge: null };
 const ACCESSORY: PartProduct = { id: '01890a5e-p000-7000-8000-000000000002', name: 'Air filter', category: 'accessory' };
 
 let seq = 0;
@@ -112,6 +116,7 @@ function baseDeps(overrides: Partial<Deps> = {}): Deps {
   return {
     view: viewOf(),
     products: [BATTERY, ACCESSORY],
+    services: [SERVICE_SWAP, SERVICE_CHECK],
     role: 'technician',
     now: NOW,
     onSubmit: vi.fn(async (_payload: CompleteSheetPayload) => {}),
@@ -143,6 +148,16 @@ async function typeInto(tree: Node | string | null, testID: string, text: string
   await act(async () => {
     input.props.onChangeText?.(text);
   });
+}
+
+/**
+ * Answer the sheet's first question the way a technician does: open the
+ * service picker and choose a row (2026-09-16 — the free-text work field
+ * became this).
+ */
+async function chooseService(renderer: ReactTestRenderer, service: ServiceOption): Promise<void> {
+  await press(toJson(renderer), 'complete-service-trigger');
+  await press(toJson(renderer), `complete-service-option-${service.id}`);
 }
 
 async function press(tree: Node | string | null, testID: string): Promise<void> {
@@ -218,8 +233,8 @@ describe('CompleteSheet (§T4)', () => {
     let tree = toJson(renderer);
 
     // A charge first: the segments are how he says the money moved.
+    await chooseService(renderer, SERVICE_SWAP);
     await typeInto(tree, 'complete-amount', '500');
-    await typeInto(tree, 'complete-work-done', 'Replaced the battery bank.');
     tree = toJson(renderer);
     expect(findByTestID(tree, 'complete-paid-by')).toBeDefined();
     expect(findByTestID(tree, 'complete-segment-cash')).toBeDefined();
@@ -242,53 +257,12 @@ describe('CompleteSheet (§T4)', () => {
     expect(payload.discountAmount).toBeUndefined();
   });
 
-  it('2 · the discount disclosure opens amount and reason together; submit is blocked without a reason', async () => {
-    const deps = baseDeps();
-    const renderer = await create(<CompleteSheet {...deps} />);
-    let tree = toJson(renderer);
-
-    expect(findByTestID(tree, 'complete-discount')).toBeUndefined();
-    await press(tree, 'complete-discount-toggle');
-    tree = toJson(renderer);
-
-    // Together, never one-then-the-other — the database refuses the row
-    // without a reason, so the sheet asks for both at once (§T4).
-    expect(findByTestID(tree, 'complete-discount-amount')).toBeDefined();
-    expect(findByTestID(tree, 'complete-discount-reason')).toBeDefined();
-
-    await typeInto(tree, 'complete-work-done', 'Fixed the inverter.');
-    await typeInto(tree, 'complete-amount', '1200');
-    await typeInto(tree, 'complete-discount-amount', '200');
-    tree = toJson(renderer);
-
-    // Blocked, with the why visible under the button.
-    expect(allText(findByTestID(tree, 'complete-submit') ?? null).join(' ')).toContain('A discount needs a reason');
-    expect(isDisabled(tree)).toBe(true);
-    expect(() => trySubmit(tree)).toThrow('Submit is disabled');
-
-    await typeInto(tree, 'complete-discount-reason', 'Loyalty discount, office approved.');
-    tree = toJson(renderer);
-    expect(isDisabled(tree)).toBe(false);
-    await trySubmit(tree);
-
-    // The charge is on an in-warranty unit (the default fixture), so the
-    // sheet's one dialog intercepts even on a discounted figure — confirm
-    // and the discount files with it.
-    expect(findByTestID(toJson(renderer), 'complete-warranty')).toBeDefined();
-    await press(toJson(renderer), 'complete-warranty-confirm');
-
-    const payload = submittedPayload(deps);
-    expect(payload.cost).toBe('1200');
-    expect(payload.discountAmount).toBe('200');
-    expect(payload.discountReason).toBe('Loyalty discount, office approved.');
-  });
-
   it('3 · an in-warranty unit with a charge raises exactly one confirmation — a prompt, not a block', async () => {
     const deps = baseDeps();
     const renderer = await create(<CompleteSheet {...deps} />);
     const tree = toJson(renderer);
 
-    await typeInto(tree, 'complete-work-done', 'Replaced the PCB.');
+    await chooseService(renderer, SERVICE_SWAP);
     await typeInto(tree, 'complete-amount', '500');
     await trySubmit(toJson(renderer));
 
@@ -312,7 +286,7 @@ describe('CompleteSheet (§T4)', () => {
     const renderer = await create(<CompleteSheet {...deps} />);
     const tree = toJson(renderer);
 
-    await typeInto(tree, 'complete-work-done', 'Replaced the PCB.');
+    await chooseService(renderer, SERVICE_SWAP);
     await typeInto(tree, 'complete-amount', '500');
     await trySubmit(toJson(renderer));
 
@@ -401,7 +375,11 @@ describe('CompleteSheet (§T4)', () => {
     await act(async () => {
       serial?.props.onChangeText?.('EX2291184');
     });
-    await typeInto(tree, 'complete-work-done', 'Battery swap.');
+    await chooseService(renderer, SERVICE_SWAP);
+    // The catalogue charge would make this a charge on the in-warranty
+    // fixture, which raises the sheet's one dialog — not this test's
+    // subject (the parts arrays are), so the amount goes back to empty.
+    await typeInto(toJson(renderer), 'complete-amount', '');
     await trySubmit(toJson(renderer));
 
     const payload = submittedPayload(deps);
@@ -419,7 +397,10 @@ describe('CompleteSheet (§T4)', () => {
     await addCataloguePart(freshRenderer, BATTERY.id);
     const freshTree = toJson(freshRenderer);
     await press(freshTree, String(lineControlOf(freshTree, 'Exide 150Ah battery', '-equipment').props.testID));
-    await typeInto(freshTree, 'complete-work-done', 'Battery swap, own stock.');
+    await chooseService(freshRenderer, SERVICE_SWAP);
+    // Same reason as above: the catalogue charge would raise the warranty
+    // prompt on this fixture, and this test is about the parts arrays.
+    await typeInto(toJson(freshRenderer), 'complete-amount', '');
     await trySubmit(toJson(freshRenderer));
 
     const freshPayload = submittedPayload(fresh);
@@ -436,7 +417,11 @@ describe('CompleteSheet (§T4)', () => {
     const renderer = await create(<CompleteSheet {...deps} />);
     let tree = toJson(renderer);
 
-    await typeInto(tree, 'complete-work-done', 'Cleaned and tested.');
+    await chooseService(renderer, SERVICE_SWAP);
+    // Nothing charged: the fixture is an in-warranty unit, and a charge
+    // would raise the sheet's one dialog before this test's subject (the
+    // submit path) ever runs.
+    await typeInto(toJson(renderer), 'complete-amount', '');
     tree = toJson(renderer);
     expect(isDisabled(tree)).toBe(false);
 
@@ -458,7 +443,12 @@ describe('CompleteSheet (§T4)', () => {
     });
     const renderer = await create(<CompleteSheet {...deps} />);
 
-    await typeInto(toJson(renderer), 'complete-work-done', 'Battery swap.');
+    await chooseService(renderer, SERVICE_SWAP);
+    // Nothing charged (the in-warranty fixture would raise its prompt) —
+    // this test is about WHEN the haptic fires, not about a price.
+    await typeInto(toJson(renderer), 'complete-amount', '');
+    // The picker's own selection taps are loud and irrelevant here.
+    Haptics.__reset();
     await trySubmit(toJson(renderer));
 
     // The tap sent the work; the notification did NOT fire on intent.
@@ -481,7 +471,11 @@ describe('CompleteSheet (§T4)', () => {
       }),
     });
     const refusedRenderer = await create(<CompleteSheet {...refused} />);
-    await typeInto(toJson(refusedRenderer), 'complete-work-done', 'Battery swap.');
+    await chooseService(refusedRenderer, SERVICE_SWAP);
+    await typeInto(toJson(refusedRenderer), 'complete-amount', '');
+    // Reset AFTER the picker's own taps: what is asserted is that a
+    // refusal fires nothing at all.
+    Haptics.__reset();
     await trySubmit(toJson(refusedRenderer));
     await act(async () => {});
     expect(Haptics.__fired()).toEqual([]);
@@ -489,8 +483,11 @@ describe('CompleteSheet (§T4)', () => {
     const banner = findByTestID(toJson(refusedRenderer), 'complete-banner');
     expect(banner, 'the refusal is shown').toBeDefined();
     expect(allText(banner!).join(' ')).toContain('This job was cancelled by the office at 14:32.');
-    const input = firstDescendantOfType(findByTestID(toJson(refusedRenderer), 'complete-work-done')!, 'TextInput');
-    expect(input!.props.value).toBe('Battery swap.');
+    // Everything typed survives the refusal — including the service he
+    // chose, which is the sheet's first answer.
+    expect(allText(findByTestID(toJson(refusedRenderer), 'complete-service-trigger') ?? null).join(' ')).toContain(
+      SERVICE_SWAP.name,
+    );
   });
 
   it('9 · an ordinary job shows no AMC segments — the money half renders as before (§T4)', async () => {
@@ -504,8 +501,8 @@ describe('CompleteSheet (§T4)', () => {
     expect(findByTestID(tree, 'complete-amount')).toBeDefined();
 
     // The ordinary money half behaves exactly as T4 shipped it.
+    await chooseService(renderer, SERVICE_SWAP);
     await typeInto(tree, 'complete-amount', '500');
-    await typeInto(tree, 'complete-work-done', 'Replaced the PCB.');
     tree = toJson(renderer);
     expect(findByTestID(tree, 'complete-paid-by')).toBeDefined();
     await trySubmit(toJson(renderer));
@@ -584,7 +581,7 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     await act(async () => {
       serial?.props.onChangeText?.('EX2291184');
     });
-    await typeInto(toJson(renderer), 'complete-work-done', 'Quarterly service.');
+    await chooseService(renderer, SERVICE_SWAP);
     tree = toJson(renderer);
     await trySubmit(tree);
 
@@ -614,12 +611,14 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     expect(
       findAll(tree, (n) => n.type === 'View' && n.props.testID === 'complete-amc-free'),
     ).toHaveLength(0);
-    await typeInto(tree, 'complete-amount', '1500');
+    await chooseService(renderer, SERVICE_SWAP);
     tree = toJson(renderer);
     expect(findByTestID(tree, 'complete-paid-by')).toBeDefined();
 
-    await press(tree, 'complete-segment-upi');
-    await typeInto(tree, 'complete-work-done', 'Extra board work the customer paid for.');
+    // The catalogue's charge pre-fills the amount; this test is about what
+    // he types OVER it, which stays what is sent.
+    await typeInto(tree, 'complete-amount', '1500');
+    await press(toJson(renderer), 'complete-segment-upi');
     tree = toJson(renderer);
     await trySubmit(tree);
 
@@ -629,22 +628,21 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     expect(payload.discountAmount).toBeUndefined();
   });
 
-  it('5 · Charge → Free after typing: the Free payload is sent, and a reasonless discount left behind cannot block it', async () => {
+  it('5 · Charge → Free after typing: the Free payload is sent, and the amount he left behind cannot block it', async () => {
     const deps = amcDeps();
     const renderer = await create(<CompleteSheet {...deps} />);
     let tree = toJson(renderer);
 
-    // On the Charge side: type an amount and a discount with NO reason.
+    // On the Charge side: the service fills the amount, and he adds to it.
     await press(tree, 'complete-amc-charge');
+    await chooseService(renderer, SERVICE_SWAP);
     await typeInto(toJson(renderer), 'complete-amount', '1500');
-    await press(toJson(renderer), 'complete-discount-toggle');
-    await typeInto(toJson(renderer), 'complete-discount-amount', '200');
-    await typeInto(toJson(renderer), 'complete-work-done', 'Quarterly service, or extra work?');
     tree = toJson(renderer);
-    expect(isDisabled(tree)).toBe(true); // blocked ON THE CHARGE SIDE — the discount needs a reason
+    expect(isDisabled(tree)).toBe(false);
 
-    // Switch back to Free: the half-typed discount is not his answer any
-    // more — the money inputs are fed to the blocker as empty.
+    // Switch back to Free: what he typed on the Charge side is not his
+    // answer any more — the money inputs are fed to the blocker as empty
+    // (§T4), and Free sends no money at all.
     await press(tree, 'complete-amc-free');
     tree = toJson(renderer);
     expect(findByTestID(tree, 'complete-amount')).toBeUndefined();
@@ -656,7 +654,6 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     expect(payload.collectionMode).toBe('none');
     expect(payload.cost).toBeUndefined();
     expect(payload.discountAmount).toBeUndefined();
-    expect(allText(findByTestID(tree, 'complete-amc-choice') ?? null).join(' ')).toContain('Free under AMC');
   });
 
   it('6 · in warranty: Free raises no confirmation; Charge raises exactly the one', async () => {
@@ -664,9 +661,8 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     // is asked (the dialog is about charging covered work).
     const freeDeps = amcDeps();
     const freeRenderer = await create(<CompleteSheet {...freeDeps} />);
-    let tree = toJson(freeRenderer);
-    await typeInto(tree, 'complete-work-done', 'Quarterly service.');
-    tree = toJson(freeRenderer);
+    await chooseService(freeRenderer, SERVICE_SWAP);
+    const tree = toJson(freeRenderer);
     await trySubmit(tree);
     expect(findByTestID(toJson(freeRenderer), 'complete-warranty')).toBeUndefined();
     expect(freeDeps.onSubmit).toHaveBeenCalledTimes(1);
@@ -674,9 +670,9 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     // Charge — the one confirmation, carrying the expiry date.
     const chargeDeps = amcDeps();
     const chargeRenderer = await create(<CompleteSheet {...chargeDeps} />);
+    await chooseService(chargeRenderer, SERVICE_SWAP);
     await press(toJson(chargeRenderer), 'complete-amc-charge');
     await typeInto(toJson(chargeRenderer), 'complete-amount', '500');
-    await typeInto(toJson(chargeRenderer), 'complete-work-done', 'PCB swap on the covered unit.');
     await trySubmit(toJson(chargeRenderer));
 
     const dialogs = findAllByTestID(toJson(chargeRenderer), 'complete-warranty');
@@ -704,10 +700,10 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     const amc = amcView();
     const base = { view: amc, discountAmount: '', discountReason: '', lines: [], customerConfirmed: false, now: NOW, completedAt: '2026-09-11T10:00:00.000Z' };
     const freeBody = JSON.stringify(
-      payloadOf({ ...base, workSummary: 'Quarterly service.', amount: '', selectedMode: 'cash', amcChoice: 'free' }),
+      payloadOf({ ...base, workSummary: SERVICE_CHECK.name, serviceId: SERVICE_CHECK.id, amount: '', selectedMode: 'cash', amcChoice: 'free' }),
     );
     const chargeBody = JSON.stringify(
-      payloadOf({ ...base, workSummary: 'Quarterly service plus extra work.', amount: '1500', selectedMode: 'upi', amcChoice: 'charge' }),
+      payloadOf({ ...base, workSummary: SERVICE_CHECK.name, serviceId: SERVICE_CHECK.id, amount: '1500', selectedMode: 'upi', amcChoice: 'charge' }),
     );
     expect(freeBody).not.toBe(chargeBody);
 
@@ -829,8 +825,8 @@ describe('CompleteSheet — Done when (§T4)', () => {
     let tree = toJson(renderer);
 
     // A charge so the segments render — they are touch rows too.
+    await chooseService(renderer, SERVICE_SWAP);
     await typeInto(tree, 'complete-amount', '500');
-    await typeInto(tree, 'complete-work-done', 'Cleaned.');
     tree = toJson(renderer);
 
     // Segments, the no-payment line, the disclosures, the checkbox and
@@ -858,11 +854,10 @@ describe('CompleteSheet — Done when (§T4)', () => {
     const submitPressable = findAll(submit ?? null, (candidate) => candidate.type === 'Pressable')[0];
     expect(styleOf(submitPressable).minHeight).toBe(52);
 
-    // The Work done field is multiline and grows the same way.
-    const workField = findByTestID(tree, 'complete-work-done');
-    const workInput = workField === undefined ? undefined : firstDescendantOfType(workField, 'TextInput');
-    expect(workInput).toBeDefined();
-    expect((workInput!.props.style as Record<string, unknown>).minHeight).toBeGreaterThan(0);
+    // The service picker's trigger is a touch row too.
+    const serviceTrigger = findByTestID(tree, 'complete-service-trigger');
+    expect(serviceTrigger).toBeDefined();
+    expect(typeof styleOf(serviceTrigger).minHeight).toBe('number');
   });
 
   it('the pure branches agree with the screen: after-discount, blockers, and the payload shape', () => {
@@ -887,24 +882,19 @@ describe('CompleteSheet — Done when (§T4)', () => {
 
     // Submit blockers are validation facts only — no network-shaped
     // input exists to disable submit for a network reason (§T4 Never).
-    const valid = { workSummary: 'Done', amount: '', discountAmount: '', discountReason: '', lines: [] };
+    const valid = { serviceId: SERVICE_SWAP.id, amount: '', lines: [] };
     expect(submitBlockerOf(valid)).toBeNull();
-    expect(submitBlockerOf({ ...valid, workSummary: ' ' })).toBe('Say what work was done.');
-    expect(submitBlockerOf({ ...valid, amount: '100', discountAmount: '100', discountReason: '' })).toBe(
-      'A discount needs a reason — say why the amount was reduced.',
-    );
-    expect(
-      submitBlockerOf({ ...valid, amount: '100', discountAmount: '200', discountReason: 'why not' }),
-    ).toContain('larger than the amount');
+    expect(submitBlockerOf({ ...valid, serviceId: null })).toBe('Choose the service you did.');
+    // No discount rule lives here any more: the sheet cannot set one, so a
+    // blocker for it would be a rule about an unreachable field.
 
     // The payload never carries `amountCollected` — the column is
     // generated server-side; sending it would store derived money.
     const payload = payloadOf({
       view: viewOf(),
-      workSummary: 'Done',
+      workSummary: SERVICE_SWAP.name,
+      serviceId: SERVICE_SWAP.id,
       amount: '500',
-      discountAmount: '',
-      discountReason: '',
       selectedMode: 'upi',
       amcChoice: 'charge',
       lines: [],
@@ -921,10 +911,9 @@ describe('CompleteSheet — Done when (§T4)', () => {
     // the Charge side — and never a payment mode (the pure decision).
     const freePayload = payloadOf({
       view: viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }),
-      workSummary: 'Done',
+      workSummary: SERVICE_SWAP.name,
+      serviceId: SERVICE_SWAP.id,
       amount: '500',
-      discountAmount: '200',
-      discountReason: 'left over from the Charge side',
       selectedMode: 'upi',
       amcChoice: 'free',
       lines: [],
@@ -948,7 +937,11 @@ describe('the on-site fix rides the completion, and only once (2026-09-17)', () 
    * that moved between a first attempt and its retry would look like a
    * new intent and could file the job twice.
    */
-  const base: CompleteSheetPayload = { completedAt: '2026-09-17T10:00:00.000Z', workSummary: 'Serviced.' };
+  const base: CompleteSheetPayload = {
+    completedAt: '2026-09-17T10:00:00.000Z',
+    workSummary: 'Serviced.',
+    serviceId: SERVICE_SWAP.id,
+  };
 
   it('attaches both coordinates when the device gave a fix', () => {
     const body = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
@@ -985,5 +978,122 @@ describe('the on-site fix rides the completion, and only once (2026-09-17)', () 
 
     expect(writers.writerFor(JSON.stringify(first))).toBe(writers.writerFor(JSON.stringify(retry)));
     expect(writers.writerFor(JSON.stringify(moved))).not.toBe(writers.writerFor(JSON.stringify(first)));
+  });
+});
+
+/**
+ * The service picker, the missing discount, and the photos (2026-09-16,
+ * Yashas): "work done will have a dropdown menu and a list of services
+ * they can choose from and the cost is calculated from that … remove add
+ * discount button … add a button to take or attach photo".
+ */
+describe('CompleteSheet — the service, no discount, and photos', () => {
+  it('fills the amount from the catalogue when a service is chosen', async () => {
+    const deps = baseDeps();
+    const renderer = await create(<CompleteSheet {...deps} />);
+    let tree = toJson(renderer);
+
+    // Nothing chosen yet: the first question is unanswered and the amount
+    // is empty, so there is nothing to send.
+    expect(allText(findByTestID(tree, 'complete-service') ?? null).join(' ')).toContain('Which service did you do?');
+    expect(isDisabled(tree)).toBe(true);
+
+    await chooseService(renderer, SERVICE_SWAP);
+    tree = toJson(renderer);
+    const amount = firstDescendantOfType(findByTestID(tree, 'complete-amount')!, 'TextInput');
+    expect(amount!.props.value).toBe('750');
+    expect(isDisabled(tree)).toBe(false);
+
+    // And what is filed names the service as data, not just as prose.
+    await typeInto(tree, 'complete-amount', '');
+    tree = toJson(renderer); // the press handlers close over the last render
+    await trySubmit(tree);
+    const payload = submittedPayload(deps);
+    expect(payload.serviceId).toBe(SERVICE_SWAP.id);
+    expect(payload.workSummary).toBe(SERVICE_SWAP.name);
+  });
+
+  it('leaves the amount he typed alone when the service carries no charge', async () => {
+    const deps = baseDeps();
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await typeInto(toJson(renderer), 'complete-amount', '1200');
+    await chooseService(renderer, SERVICE_CHECK); // defaultCharge: null
+
+    const tree = toJson(renderer);
+    const amount = firstDescendantOfType(findByTestID(tree, 'complete-amount')!, 'TextInput');
+    // The field groups the digits it is handed (en-IN), so '1200' reads
+    // back as '1,200' — unchanged in substance, still his figure.
+    expect(amount!.props.value).toBe('1,200');
+  });
+
+  it('offers no discount anywhere on the sheet', async () => {
+    const deps = baseDeps();
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await chooseService(renderer, SERVICE_SWAP);
+    const tree = toJson(renderer);
+    expect(findByTestID(tree, 'complete-discount')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-discount-toggle')).toBeUndefined();
+    expect(allText(tree).join(' ')).not.toContain('discount');
+  });
+
+  it('files a taken photo against the job card and counts it', async () => {
+    const uploadPhoto = vi.fn(async () => ({ id: 'att-1' }));
+    const deps = baseDeps({
+      takePhoto: vi.fn(async () => 'file:///tmp/shot.jpg'),
+      choosePhoto: vi.fn(async () => null),
+      uploadPhoto,
+    });
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await press(toJson(renderer), 'complete-photos-toggle');
+    await press(toJson(renderer), 'complete-photo-take');
+
+    const tree = toJson(renderer);
+    expect(uploadPhoto).toHaveBeenCalledWith('file:///tmp/shot.jpg');
+    expect(findByTestID(tree, 'complete-photo-att-1')).toBeDefined();
+    // The count on the section marker is a fact, not a promise.
+    expect(allText(findByTestID(tree, 'complete-photos-toggle') ?? null).join(' ')).toContain('1');
+  });
+
+  it('backs out of a photo with nothing filed and nothing said', async () => {
+    const uploadPhoto = vi.fn(async () => ({ id: 'att-1' }));
+    const deps = baseDeps({
+      takePhoto: vi.fn(async () => null), // he backed out of the camera
+      uploadPhoto,
+    });
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await press(toJson(renderer), 'complete-photos-toggle');
+    await press(toJson(renderer), 'complete-photo-take');
+    expect(uploadPhoto).not.toHaveBeenCalled();
+    expect(findByTestID(toJson(renderer), 'complete-photo-error')).toBeUndefined();
+  });
+
+  it('says so when a photo cannot be filed — and never blocks the submit', async () => {
+    const deps = baseDeps({
+      takePhoto: vi.fn(async () => 'file:///tmp/shot.jpg'),
+      uploadPhoto: vi.fn(async () => {
+        throw new Error('The photo could not be uploaded.');
+      }),
+    });
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await press(toJson(renderer), 'complete-photos-toggle');
+    await press(toJson(renderer), 'complete-photo-take');
+    const tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'complete-photo-error') ?? null).join(' ')).toBe('The photo could not be uploaded.');
+
+    // A photo is never required to close a job: the submit still files.
+    await chooseService(renderer, SERVICE_SWAP);
+    await typeInto(toJson(renderer), 'complete-amount', '');
+    await trySubmit(toJson(renderer));
+    expect(deps.onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no capture buttons when the device seams are not wired', async () => {
+    const deps = baseDeps(); // no takePhoto/choosePhoto/uploadPhoto
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await press(toJson(renderer), 'complete-photos-toggle');
+    const tree = toJson(renderer);
+    expect(findByTestID(tree, 'complete-photo-take')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-photo-attach')).toBeUndefined();
+    expect(allText(findByTestID(tree, 'complete-photos-empty') ?? null).join(' ')).toContain('A photo is never required');
   });
 });

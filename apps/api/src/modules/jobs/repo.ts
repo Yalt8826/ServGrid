@@ -224,6 +224,8 @@ export async function listTimelineEvents(db: Db, jobId: string): Promise<Timelin
 export interface CompletionDetailRow {
   completed_at: Date;
   work_summary: string;
+  /** The service's name, read through the FK; null for pre-022 rows. */
+  service_name: string | null;
   cost: string | null;
   discount_amount: string | null;
   discount_reason: string | null;
@@ -234,11 +236,12 @@ export interface CompletionDetailRow {
 /** The filed completion's own columns — the owner's detail and amend sheet read these. */
 export async function findCompletionDetail(db: Db, jobId: string): Promise<CompletionDetailRow | null> {
   const r = await db.query<CompletionDetailRow>(
-    `SELECT completed_at, work_summary, cost::text AS cost,
-            discount_amount::text AS discount_amount, discount_reason,
-            amount_collected::text AS amount_collected, collection_mode
-       FROM job_completions
-      WHERE job_card_id = $1`,
+    `SELECT c.completed_at, c.work_summary, s.name AS service_name, c.cost::text AS cost,
+            c.discount_amount::text AS discount_amount, c.discount_reason,
+            c.amount_collected::text AS amount_collected, c.collection_mode
+       FROM job_completions c
+       LEFT JOIN services s ON s.id = c.service_id
+      WHERE c.job_card_id = $1`,
     [jobId],
   );
   return r.rows[0] ?? null;
@@ -299,6 +302,9 @@ export interface CompletionInsert {
   /** The client's completedAt, already clamped by the service (§6.2). */
   completedAt: string;
   workSummary: string;
+  /** The catalogue service performed; null for pre-022 rows and for a job
+   * closed without one (the sheet requires it, the column does not). */
+  serviceId: string | null;
   cost: string;
   discountAmount: string;
   discountReason: string | null;
@@ -320,15 +326,16 @@ export interface CompletionInsert {
 export async function insertCompletion(db: Db, c: CompletionInsert): Promise<void> {
   await db.query(
     `INSERT INTO job_completions
-       (job_card_id, completed_by, completed_at, work_summary, cost,
+       (job_card_id, completed_by, completed_at, work_summary, service_id, cost,
         discount_amount, discount_reason, collection_mode, payment_reference, customer_signed,
         latitude, longitude)
-     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12)`,
+     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8, $9, $10, $11, $12, $13)`,
     [
       c.jobCardId,
       c.completedBy,
       c.completedAt,
       c.workSummary,
+      c.serviceId,
       c.cost,
       c.discountAmount,
       c.discountReason,

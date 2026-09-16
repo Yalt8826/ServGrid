@@ -97,6 +97,9 @@ export interface TechnicianWorkDeps {
   completedAtById: Record<string, string>;
   /** The product catalogue — the complete sheet's parts picker. */
   products: Array<{ id: string; name: string; category: string }>;
+  /** The service catalogue — the complete sheet's first question, and
+   * where a visit's cost comes from (2026-09-16). */
+  services: Array<{ id: string; name: string; defaultCharge: string | null }>;
   /** Tracking health, last known; null before the first answer. */
   health: TrackingHealth | null;
   /** A refetch is running (pull to refresh). */
@@ -206,6 +209,7 @@ export function useTechnicianWork(actor: StoredActor | null): TechnicianWorkDeps
     views,
     completedAtById: built.completedAtById,
     products: built.products,
+    services: built.services,
     health,
     refreshing: work.isFetching,
     refresh,

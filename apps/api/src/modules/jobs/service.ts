@@ -526,6 +526,7 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
           : {
               completedAt: completion.completed_at.toISOString(),
               workSummary: completion.work_summary,
+              serviceName: completion.service_name,
               cost: completion.cost,
               discountAmount: completion.discount_amount,
               discountReason: completion.discount_reason,
@@ -1226,6 +1227,9 @@ function mapDbRefusal(error: unknown): Error {
 export interface CompletionInput {
   completedAt: string;
   workSummary: string;
+  /** The catalogue service performed (migration 022). Validated here, so an
+   * unknown id is a readable 422 rather than a foreign-key error at insert. */
+  serviceId?: string;
   /** Absent means 0 — the warranty/prepaid shape is cost 0, discount 0, mode none (§3.4). */
   cost?: string;
   discountAmount?: string;
@@ -1269,6 +1273,22 @@ export async function completeJob(
   const paymentReference = input.paymentReference ?? null;
   const customerSigned = input.customerSigned ?? false;
 
+  // The service the work was — validated here, before the transaction, so
+  // an id the catalogue does not have is a 422 that names the problem
+  // rather than a foreign-key error surfacing from the insert (2026-09-16,
+  // migration 022). A retired service is refused: the sheet only offers the
+  // active catalogue, so a retired id means a stale list on his phone, and
+  // filing work against a service that is no longer sold is worse than
+  // asking him to pick again.
+  let serviceId: string | null = null;
+  if (input.serviceId !== undefined) {
+    const service = await repo.findActiveService(getPool(), input.serviceId);
+    if (service === null) {
+      throw new AppError('VALIDATION_FAILED', 'That service is not in the catalogue any more — pick it again.');
+    }
+    serviceId = service.id;
+  }
+
   return withTransaction(async (client) => {
     // Step 1 — the row lock every later step holds; the status and the
     // actor asserts ride it.
@@ -1308,6 +1328,7 @@ export async function completeJob(
         completedBy: actor.id,
         completedAt,
         workSummary: input.workSummary,
+        serviceId: serviceId ?? null,
         cost,
         discountAmount,
         discountReason,

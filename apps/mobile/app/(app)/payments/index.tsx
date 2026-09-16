@@ -19,7 +19,7 @@ import { PaymentsScreen } from '../../../src/screens/rep/PaymentsScreen';
 import { useOnline, useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
 import { OwnerPaymentsScreen } from '../../../src/screens/owner/PaymentsScreen';
 import { fetchPaymentProof, useOwnerPayments, useVoidPayment } from '../../../src/screens/owner/useOwnerData';
-import { captureProofPhoto } from '../../../src/lib/captureProof';
+import { takePhoto } from '../../../src/lib/photo';
 import { isFlagOn } from '../../../src/state/featureFlags';
 import { useFlagsReady } from '../../../src/state/useFlagsReady';
 import { useSessionStore } from '../../../src/state/sessionStore';
@@ -57,7 +57,7 @@ function RepPaymentsRoute(): React.ReactNode {
         online={online}
         record={record}
         onOpenPayment={(paymentId) => router.push(`/payments/${paymentId}`)}
-        captureProof={captureProofPhoto}
+        captureProof={takePhoto}
         applyOptimisticPayment={payments.applyOptimisticPayment}
         onRetry={payments.reload}
       />
