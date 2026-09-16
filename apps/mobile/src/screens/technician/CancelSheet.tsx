@@ -36,9 +36,11 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { alpha, COLORS, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
 import { Banner } from '../../components/ui/Banner';
 import { Button } from '../../components/ui/Button';
+import { SectionHeader } from '../../components/ui/SectionHeader';
+import { Icon } from '../../components/ui/icons';
 import { DatePicker, formatDateEnIN } from '../../components/ui/DatePicker';
 import { Sheet } from '../../components/ui/Sheet';
 import { TextField } from '../../components/ui/TextField';
@@ -144,8 +146,13 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
     >
       {/* Reason code — nine large rows, not a dropdown (§T5). Selection
           haptic; the chosen row fills slate.900, the complete sheet's
-          selection idiom. */}
-      <View testID="cancel-reasons" style={styles.reasons}>
+          selection idiom. The rows took a radio mark on 2026-09-16: nine
+          identical outlined rows read as nine text fields, and a list of
+          choices has to look like one before the technician reads a word
+          of it. The mark is shape beside the colour, never colour alone. */}
+      <View style={styles.block}>
+        <SectionHeader label="Reason" icon="alert" />
+        <View testID="cancel-reasons" style={styles.reasons}>
         {CANCEL_REASONS.map((reason) => {
           const selected = reasonCode === reason.code;
           return (
@@ -161,10 +168,16 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
               }}
               style={[styles.reasonRow, selected ? styles.reasonRowSelected : null]}
             >
+              <Icon
+                name={selected ? 'checkFilled' : 'check'}
+                size={ICON.md}
+                color={selected ? FRAME.accent : SEMANTIC.text.placeholder}
+              />
               <Text
                 style={{
                   ...textStyle('body'),
                   color: selected ? SEMANTIC.text.onDark : SEMANTIC.text.primary,
+                  flex: 1,
                 }}
               >
                 {reason.label}
@@ -172,6 +185,7 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
             </Pressable>
           );
         })}
+        </View>
       </View>
 
       {/* The note — optional for every reason, required for `other`; the
@@ -181,7 +195,12 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
         value={note}
         onChangeText={setNote}
         placeholder="What happened here"
-        helperText="Required when the reason is Other."
+        // "Other" is the one reason the office cannot read on its own, so
+        // the field stops describing the rule and states it: an empty note
+        // with Other chosen is the error, on the field, before the submit
+        // button's own blocker says the same thing.
+        errorText={reasonCode === 'other' && note.trim() === '' ? 'Say what happened — Other needs a note.' : undefined}
+        helperText={reasonCode === 'other' ? undefined : 'Optional — add it when the office needs the detail.'}
         testID="cancel-note"
       />
 
@@ -189,6 +208,7 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
           the choice; the rows below offer today and the next fortnight,
           so every tappable day is a legal one. */}
       <View style={styles.block}>
+        <SectionHeader label="Reschedule" icon="calendar" tint={COLORS.accent} />
         <DatePicker
           label="Reschedule to"
           value={rescheduleTo}
@@ -201,29 +221,35 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
         />
         <Button
           label={rescheduleTo === null ? 'Choose a date' : 'Change date'}
-          variant="ghost"
+          icon="calendar"
+          variant="secondary"
           onPress={() => setPickerOpen(!pickerOpen)}
           testID="cancel-reschedule-open"
         />
 
         {pickerOpen ? (
           <View testID="cancel-reschedule-picker" style={styles.picker}>
-            {rescheduleWindow(today).map((iso) => (
-              <Pressable
-                key={iso}
-                testID={`cancel-reschedule-option-${iso}`}
-                accessibilityRole="button"
-                onPress={() => chooseDate(iso)}
-                style={styles.pickerRow}
-              >
-                <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary }}>
-                  {iso === today ? 'Today' : formatDateEnIN(iso, nowYear)}
-                </Text>
-                <Text style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] }}>
-                  {iso}
-                </Text>
-              </Pressable>
-            ))}
+            {rescheduleWindow(today).map((iso) => {
+              const chosenDay = rescheduleTo === iso;
+              return (
+                <Pressable
+                  key={iso}
+                  testID={`cancel-reschedule-option-${iso}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: chosenDay }}
+                  onPress={() => chooseDate(iso)}
+                  style={[styles.pickerRow, chosenDay ? styles.pickerRowChosen : null]}
+                >
+                  <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 }}>
+                    {iso === today ? 'Today' : formatDateEnIN(iso, nowYear)}
+                  </Text>
+                  {chosenDay ? <Icon name="check" size={ICON.sm} color={SEMANTIC.text.primary} /> : null}
+                  <Text style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] }}>
+                    {iso}
+                  </Text>
+                </Pressable>
+              );
+            })}
             <Button label="Never mind" variant="ghost" onPress={() => setPickerOpen(false)} testID="cancel-reschedule-close" />
           </View>
         ) : null}
@@ -231,12 +257,18 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
         {rescheduleTo !== null ? (
           <>
             {/* Choosing a date reveals the one-line confirmation (§T5) —
-                the sentence he can read back to the customer. */}
-            <Text testID="cancel-reschedule-confirm" style={styles.confirm}>
-              {rescheduleConfirmLine(rescheduleTo, nowYear)}
-            </Text>
+                the sentence he can read back to the customer. It is a
+                tinted strip now: this line is the one thing on the sheet
+                that must be said out loud, so it is not small grey print. */}
+            <View style={styles.confirmStrip}>
+              <Icon name="calendar" size={ICON.sm} color={SEMANTIC.text.primary} />
+              <Text testID="cancel-reschedule-confirm" style={styles.confirm}>
+                {rescheduleConfirmLine(rescheduleTo, nowYear)}
+              </Text>
+            </View>
             <Button
               label="Remove the date"
+              icon="close"
               variant="ghost"
               onPress={() => {
                 setRescheduleTo(null);
@@ -254,11 +286,14 @@ export function CancelSheet(deps: CancelSheetDeps): React.ReactNode {
 }
 
 const styles = StyleSheet.create({
-  block: { alignSelf: 'stretch', gap: SPACE[2], marginTop: SPACE[2] },
+  block: { alignSelf: 'stretch', gap: SPACE[3], marginTop: SPACE[4] },
   reasons: { alignSelf: 'stretch', gap: SPACE[2] },
   reasonRow: {
     minHeight: TAP.min, // ≥52pt (§T5 test): floor-sized, grows with type
     alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
     justifyContent: 'center',
     paddingHorizontal: SPACE[3],
     borderWidth: 1,
@@ -279,12 +314,31 @@ const styles = StyleSheet.create({
     minHeight: TAP.min,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: SPACE[2],
-    paddingHorizontal: SPACE[2],
+    paddingHorizontal: SPACE[3],
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: RADII.control,
+  },
+  pickerRowChosen: {
+    borderColor: alpha(COLORS.accent, TINT.chipLine),
+    backgroundColor: alpha(COLORS.accent, TINT.chip),
+  },
+  confirmStrip: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    borderWidth: 1,
+    borderColor: alpha(COLORS.accent, TINT.chipLine),
+    backgroundColor: alpha(COLORS.accent, TINT.chip),
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
   },
   confirm: {
     ...textStyle('bodyStrong'),
     color: SEMANTIC.text.primary,
+    flex: 1,
   },
 });
