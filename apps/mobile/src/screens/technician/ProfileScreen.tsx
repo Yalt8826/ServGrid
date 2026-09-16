@@ -153,7 +153,11 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
   // the same header every technician screen opens with. The route paints
   // the same slate behind the status bar.
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: SPACE[8] }} testID="profile-screen">
+    <ScrollView
+      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
+      contentContainerStyle={{ paddingBottom: SPACE[8] }}
+      testID="profile-screen"
+    >
       <View style={styles.frame}>
         <Text style={styles.heading} testID="profile-name">
           {name}
