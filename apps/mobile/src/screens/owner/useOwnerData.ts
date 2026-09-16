@@ -43,6 +43,34 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.data;
 }
 
+/**
+ * The ledger's sale row, clicked — the whole card with its line items
+ * (the products behind the document). The sales surface has no GET by
+ * id (the payments precedent); the list carries items, so the read is
+ * the list and a find.
+ */
+export async function fetchSaleWithItems(saleId: string): Promise<SaleRecord | null> {
+  const page = await apiGet<{ items: SaleRecord[] }>('/v1/sales?limit=200');
+  return page.items.find((s) => s.id === saleId) ?? null;
+}
+
+export interface PaymentProof {
+  /** Five-minute presigned URL — the sheet renders it before it expires. */
+  url: string;
+}
+
+/**
+ * The ledger's payment row, clicked — the proof photo behind it
+ * (GET /v1/payments/:id/proof, added 2026-09-17). Null when the
+ * collection was never photographed: the sheet must say so, not spin.
+ */
+export async function fetchPaymentProof(paymentId: string): Promise<PaymentProof | null> {
+  const res = await api.request<{ url: string }>('GET', `/v1/payments/${paymentId}/proof`);
+  if (res.ok && res.data !== null) return { url: res.data.url };
+  if (res.error?.code === 'NOT_FOUND') return null;
+  throw new Error(res.error?.message ?? 'The proof photo could not be loaded.');
+}
+
 /** POST/PATCH that throws with the server's message; one key per intent. */
 export async function apiSend<T>(
   method: 'POST' | 'PATCH',

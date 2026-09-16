@@ -39,6 +39,7 @@ function customer(id: string, overrides: Partial<TechnicianWork['customers'][num
     altPhone: null,
     addressLine1: '14, Gandhi Bazaar',
     addressLine2: 'Kormangala 3rd Blk',
+    area: null,
     city: 'Bengaluru',
     state: 'Karnataka',
     pincode: '560034',
@@ -94,6 +95,15 @@ describe('buildJobViews', () => {
     expect(views[0]!.pending).toBe(false);
     expect(views[0]!.rejectedMessage).toBeNull();
     expect(views[0]!.job).not.toHaveProperty('closedAt');
+  });
+
+  it('a named locality leads the site line, over the address tail and the city', () => {
+    // The column exists because the tail of an address is a guess; when
+    // someone has named the locality, that is what the technician scans.
+    const { views } = buildJobViews(
+      work({ jobs: [job('a0000000-0000-4000-8000-000000000001')], customers: [customer(SITE, { area: 'Koramangala' })] }),
+    );
+    expect(views[0]!.area).toBe('Koramangala');
   });
 
   it('a site without coordinates offers no Navigate; a missing site still renders', () => {

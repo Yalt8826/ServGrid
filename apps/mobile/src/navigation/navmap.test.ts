@@ -27,6 +27,7 @@ import { ROLES, type Role } from '@servgrid/shared';
 
 import {
   ROUTE_GUARDS,
+  activeRailRoute,
   flattenedRoutes,
   guardAllows,
   guardLands,
@@ -110,12 +111,12 @@ describe('cross-check, direction B — every permitted destination has a tab', (
   }
 });
 
-describe('tab counts — technician 4 · dispatcher 4 · sales rep 5 · owner 5', () => {
+describe('tab counts — technician 4 · dispatcher 4 · sales rep 5 · owner 6', () => {
   const EXPECTED: Record<Role, number> = {
     technician: 4,
     dispatcher: 4,
     sales_rep: 5,
-    owner: 5,
+    owner: 6,
   };
   for (const role of ROLES) {
     it(`${role} has ${EXPECTED[role]} tabs`, () => {
@@ -176,5 +177,57 @@ describe('runtime gate behaviour the RoleGate relies on', () => {
     // but /customers is never his landing route.
     expect(isRoutePermitted('technician', '/customers/42')).toBe(true);
     expect(guardLands(ROUTE_GUARDS['/customers']!, 'technician')).toBe(false);
+  });
+});
+
+describe('activeRailRoute — the ONE entry the rail lights', () => {
+  /**
+   * `routeIsCovered` is a prefix rule and the map nests sections inside
+   * each other, so "does this route cover the path" is true for a parent
+   * AND its child. The rail needs the single most specific answer, or
+   * pressing Dispatch leaves Jobs lit as well (owner, 2026-09-17).
+   */
+  it('a nested route wins over the section that contains it', () => {
+    expect(activeRailRoute('owner', '/jobs/new')).toBe('/jobs/new');
+    expect(activeRailRoute('dispatcher', '/jobs/new')).toBe('/jobs/new');
+    // `/contracts/new` is the DISPATCHER's AMC entry; the owner's
+    // Operations group lists only `/contracts`, so there the parent is
+    // the most specific entry there is.
+    expect(activeRailRoute('dispatcher', '/contracts/new')).toBe('/contracts/new');
+    expect(activeRailRoute('owner', '/contracts/new')).toBe('/contracts');
+  });
+
+  it('the section itself wins when a detail page hangs beneath it', () => {
+    expect(activeRailRoute('owner', '/jobs')).toBe('/jobs');
+    expect(activeRailRoute('owner', '/jobs/2627-00086')).toBe('/jobs');
+    expect(activeRailRoute('owner', '/customers/abc')).toBe('/customers');
+    expect(activeRailRoute('owner', '/contracts/abc')).toBe('/contracts');
+  });
+
+  it('a sibling is never lit by a path it does not prefix', () => {
+    // `/jobs/new` must not light `/jobs` … and `/jobs` must not light
+    // `/jobs/new`'s neighbour `/customers`.
+    for (const role of ROLES) {
+      for (const group of groupMapFor(role)) {
+        for (const route of group.routes) {
+          expect(activeRailRoute(role, route), `${role} ${route}`).toBe(route);
+        }
+      }
+    }
+  });
+
+  it('nothing lights for a route the role has no entry for', () => {
+    expect(activeRailRoute('technician', '/location')).toBeNull();
+    expect(activeRailRoute('technician', '/sales')).toBeNull();
+  });
+
+  it('every rail entry still matches itself through routeIsCovered — the fix narrowed nothing', () => {
+    for (const role of ROLES) {
+      for (const group of groupMapFor(role)) {
+        for (const route of group.routes) {
+          expect(routeIsCovered(route, route)).toBe(true);
+        }
+      }
+    }
   });
 });

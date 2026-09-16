@@ -60,7 +60,11 @@ export function buildJobViews(work: TechnicianWork): TechnicianWorkViews {
     return {
       job,
       customerName: customer?.name ?? 'Customer',
-      area: customer?.addressLine2 ?? customer?.city ?? '',
+      // The site's locality (migration 021) when someone has named it;
+      // the address tail is the fallback for sites nobody has yet. This
+      // is the line the technician scans to tell two jobs apart, so the
+      // real locality beats a guess derived from the address lines.
+      area: customer?.area ?? customer?.addressLine2 ?? customer?.city ?? '',
       coordinates:
         customer !== undefined && customer.latitude !== null && customer.longitude !== null
           ? { latitude: customer.latitude, longitude: customer.longitude }

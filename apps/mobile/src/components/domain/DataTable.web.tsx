@@ -79,11 +79,30 @@ export interface DataTableProps<T> {
   onRowPress?: (row: T) => void;
   rowAccessibilityLabel?: (row: T) => string;
   scrollTestID?: string;
+  /**
+   * Bound the list's height so a long table scrolls INSIDE its card
+   * instead of stretching the page (the dashboard's attention feed ran
+   * ~80 rows tall and left the charts column a blank half-page). Short
+   * tables hug their content — the bound only bites when the rows pass
+   * it, which is also what keeps FlashList's windowing honest.
+   */
+  maxHeight?: number;
 }
 
 const ROW_HEIGHT = DENSITY.desk.rowHeight; // 40 — desk density (§3.3)
 const HEADER_HEIGHT = ROW_HEIGHT;
 const EDGE_WIDTH = 4; // the status rail — same width the phone's JobCard wears
+
+/**
+ * A column that flexes never disappears entirely: when the fixed columns
+ * outgrow the container (a side detail squeezing the page, a narrow
+ * panel), flexGrow alone collapses the flex cell to zero width and the
+ * table reads as a row of clipped fragments — the "cut off" console the
+ * owner walked us to. The floor keeps a sliver of the row identifiable;
+ * `overflow: hidden` on the row contains whatever still spills.
+ */
+const FLEX_CELL_MIN_WIDTH = 48;
+
 
 /** §1.6: the two rails below the 3:1 non-text floor against the light
  * grounds. They — and only they — get the 1px slate.900 outer edge. */
@@ -106,6 +125,7 @@ const rowStyles = {
     height: ROW_HEIGHT,
     alignItems: 'center' as const,
     backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden' as const,
   },
   edgeGround: {
     // §1.6 — the 1px slate.900 outer edge on the leading side, for the
@@ -113,7 +133,9 @@ const rowStyles = {
     borderLeftWidth: 1,
     borderLeftColor: SEMANTIC.line.focus,
   },
-  cell: { paddingHorizontal: 12, justifyContent: 'center' as const },
+  cell: { paddingHorizontal: 12, justifyContent: 'center' as const, overflow: 'hidden' as const },
+  fixedCell: { flexShrink: 0 as const },
+  flexCell: { flex: 1 as const, minWidth: FLEX_CELL_MIN_WIDTH },
   firstCellWithEdge: { paddingLeft: 8 }, // 12 minus the 4px rail
 };
 
@@ -129,7 +151,7 @@ function RowInner<T>({ row, columns, edgeColor, onRowPress, rowKey, rowAccessibi
       key={column.key}
       style={[
         rowStyles.cell,
-        column.width === null ? { flex: 1 } : { width: column.width },
+        column.width === null ? rowStyles.flexCell : { width: column.width, ...rowStyles.fixedCell },
         edge !== undefined && index === 0 && rowStyles.firstCellWithEdge,
       ]}
     >
@@ -176,8 +198,9 @@ const headerStyles = {
     backgroundColor: SEMANTIC.bg.raised,
     borderBottomWidth: 1,
     borderBottomColor: SEMANTIC.line.default,
+    overflow: 'hidden' as const,
   },
-  cell: { paddingHorizontal: 12, justifyContent: 'center' as const },
+  cell: { paddingHorizontal: 12, justifyContent: 'center' as const, overflow: 'hidden' as const },
   cellLabel: {
     ...textStyle('bodyStrong', 'desk'),
     color: SEMANTIC.text.secondary,
@@ -201,6 +224,7 @@ function HeaderCell<T>({
   const active = column.sortValue !== undefined && sort.key === column.key;
   const label = (
     <Text
+      numberOfLines={1}
       style={[
         headerStyles.cellLabel,
         column.align === 'right' && { textAlign: 'right' as const },
@@ -212,7 +236,11 @@ function HeaderCell<T>({
     </Text>
   );
   if (column.sortValue === undefined) {
-    return <View style={column.width === null ? { flex: 1 } : { width: column.width }}>{label}</View>;
+    return (
+      <View style={[headerStyles.cell, column.width === null ? rowStyles.flexCell : { width: column.width, ...rowStyles.fixedCell }]}>
+        {label}
+      </View>
+    );
   }
   return (
     <Pressable
@@ -227,8 +255,9 @@ function HeaderCell<T>({
         )
       }
       style={({ pressed }) => [
+        headerStyles.cell,
         { justifyContent: 'center' },
-        column.width === null ? { flex: 1 } : { width: column.width },
+        column.width === null ? rowStyles.flexCell : { width: column.width, ...rowStyles.fixedCell },
         pressed && { backgroundColor: SEMANTIC.bg.pressed },
       ]}
     >
@@ -247,6 +276,7 @@ export function DataTable<T>({
   onRowPress,
   rowAccessibilityLabel,
   scrollTestID,
+  maxHeight,
 }: DataTableProps<T>): React.ReactNode {
   const sorted = useMemo(() => {
     const column = columns.find((c) => c.key === sort.key);
@@ -311,6 +341,7 @@ export function DataTable<T>({
       getItemType={itemType}
       stickyHeaderIndices={[0]}
       testID={scrollTestID}
+      style={maxHeight === undefined ? undefined : { maxHeight }}
     />
   );
 }

@@ -39,6 +39,9 @@ export interface DeskTableProps<T> {
   edgeColor?: (row: T) => string | null;
   onRowPress?: (row: T) => void;
   scrollTestID?: string;
+  /** The web seam's scroll bound; accepted here so both sides of the
+  * seam share one call site shape (a phone never hits desk density). */
+  maxHeight?: number;
 }
 
 export function DeskTable<T>({ data, columns, rowKey, sort, onSort, edgeColor, onRowPress, scrollTestID }: DeskTableProps<T>): React.ReactNode {

@@ -101,6 +101,8 @@ let matrixContractId = '';
 let matrixAttachmentId = '';
 /** A locate-now request by the matrix owner, for the GET probe (T4.4). */
 let matrixLocationRequestId = '';
+/** A payment the matrix sales_rep COLLECTED, with a proof photo on it — the proof route's target. */
+let matrixPaymentId = '';
 
 /** A tiny valid PNG — big enough to sniff, small enough to not care about. */
 async function probePng(): Promise<Buffer> {
@@ -1855,6 +1857,25 @@ const ENDPOINTS: EndpointRow[] = [
     },
   },
   {
+    name: 'GET /v1/payments/:id/proof',
+    method: 'GET',
+    url: '/v1/payments/:id/proof',
+    // The ledger's payment row, clicked: the proof photo behind it. The
+    // read access rule is the attachments module's own — `all` reads
+    // every collection, a rep only the money he took (the matrix rep
+    // collected this one), a dispatcher holds no payment cell at all.
+    probe: (actor) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/payments/${matrixPaymentId}/proof`,
+        headers: bearer(actor),
+      }),
+    expect: COMPANY_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(typeof res.json<{ url: string }>().url).toBe('string');
+    },
+  },
+  {
     name: 'POST /v1/payments',
     method: 'POST',
     url: '/v1/payments',
@@ -2209,6 +2230,48 @@ beforeAll(async () => {
   });
   expect(uploaded.statusCode, uploaded.body).toBe(200);
   matrixAttachmentId = uploaded.json<{ id: string }>().id;
+
+  // The proof route (2026-09-17) needs a payment the matrix sales_rep
+  // actually collected, carrying a photo — seeded through the real doors
+  // so the owner's OK and everyone else's refusal are the only two
+  // answers the scope rule can give.
+  const paid = await app.inject({
+    method: 'POST',
+    url: '/v1/payments',
+    headers: { ...bearer('sales_rep'), 'idempotency-key': randomUUID() },
+    payload: {
+      companyId: matrixCompanyId,
+      amount: '10.00',
+      mode: 'cash',
+      receivedAt: new Date().toISOString(),
+    },
+  });
+  expect(paid.statusCode, paid.body).toBe(200);
+  matrixPaymentId = paid.json<{ id: string }>().id;
+
+  const proofBytes = await probePng();
+  const proofBody = multipartBody(
+    {
+      ownerType: 'payment',
+      ownerId: matrixPaymentId,
+      kind: 'photo',
+      capturedAt: new Date().toISOString(),
+      fileChecksum: createHash('sha256').update(proofBytes).digest('hex'),
+    },
+    { data: proofBytes, filename: 'proof.png' },
+  );
+  const proofUpload = await app.inject({
+    method: 'POST',
+    url: '/v1/attachments',
+    headers: {
+      authorization: `Bearer ${tokens.sales_rep}`,
+      'content-type': proofBody.contentType,
+      'idempotency-key': randomUUID(),
+    },
+    payload: proofBody.payload,
+  });
+  expect(proofUpload.statusCode, proofUpload.body).toBe(200);
+
   todayIst = (await db.query<{ d: string }>('SELECT business_date(now())::text AS d')).rows[0]!.d;
 });
 

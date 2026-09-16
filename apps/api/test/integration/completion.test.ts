@@ -893,3 +893,111 @@ async function seedJobWithContract(contractId: string): Promise<string> {
   await db.query('UPDATE job_cards SET contract_id = $2 WHERE id = $1', [jobId, contractId]);
   return jobId;
 }
+
+describe('the on-site capture becomes the site’s pin (§6.4, 2026-09-17)', () => {
+  /**
+   * The owner asked for a customer `location` that a technician updates
+   * "when he is at the customer place", so the next visit can find it. A
+   * technician holds NO write on the customer (permissions.ts: his cell is
+   * `assigned` read only), so the fix cannot be a PATCH against
+   * `customers` — it rides the completion and the SERVER writes the site
+   * pin, inside the same transaction. These four tests pin that contract.
+   */
+  async function customerPin(id: string): Promise<{ latitude: number | null; longitude: number | null }> {
+    const r = await db.query<{ latitude: number | null; longitude: number | null }>(
+      'SELECT latitude, longitude FROM customers WHERE id = $1',
+      [id],
+    );
+    return r.rows[0]!;
+  }
+
+  function completionPin(jobId: string) {
+    return db
+      .query<{ latitude: number | null; longitude: number | null }>(
+        'SELECT latitude, longitude FROM job_completions WHERE job_card_id = $1',
+        [jobId],
+      )
+      .then((r) => r.rows[0] ?? null);
+  }
+
+  it('a completion carrying a fix stores it on the completion AND on the customer', async () => {
+    await db.query('UPDATE customers SET latitude = NULL, longitude = NULL WHERE id = $1', [customerId]);
+    const jobId = await seedJob('in_progress');
+
+    const res = await postComplete(TECH_A.token, jobId, {
+      completedAt: sent(30),
+      workSummary: 'Serviced the unit on site.',
+      latitude: 12.9716,
+      longitude: 77.5946,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    // The completion keeps what the handset saw…
+    expect(await completionPin(jobId)).toMatchObject({ latitude: 12.9716, longitude: 77.5946 });
+    // …and the SITE now carries it, which is the point of the feature.
+    expect(await customerPin(customerId)).toMatchObject({ latitude: 12.9716, longitude: 77.5946 });
+  });
+
+  it('a completion with no fix leaves the site’s existing pin untouched', async () => {
+    await db.query('UPDATE customers SET latitude = 12.9, longitude = 77.5 WHERE id = $1', [customerId]);
+    const jobId = await seedJob('in_progress');
+
+    // No permission, no lock, capture never ran — all arrive as "no fix".
+    const res = await postComplete(TECH_A.token, jobId, {
+      completedAt: sent(30),
+      workSummary: 'Serviced the unit on site.',
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    expect(await completionPin(jobId)).toMatchObject({ latitude: null, longitude: null });
+    // The pin a previous visit captured survives a completion without one —
+    // a day of refused permissions must not erase where the site is.
+    expect(await customerPin(customerId)).toMatchObject({ latitude: 12.9, longitude: 77.5 });
+  });
+
+  it('a later on-site fix moves the pin — the freshest on-site truth wins', async () => {
+    await db.query('UPDATE customers SET latitude = 12.9, longitude = 77.5 WHERE id = $1', [customerId]);
+    const jobId = await seedJob('in_progress');
+
+    const res = await postComplete(TECH_A.token, jobId, {
+      completedAt: sent(30),
+      workSummary: 'Second visit — corrected the pin.',
+      latitude: 12.9352,
+      longitude: 77.6245,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(await customerPin(customerId)).toMatchObject({ latitude: 12.9352, longitude: 77.6245 });
+  });
+
+  it('half a point is refused as a field error, and the transaction leaves nothing behind', async () => {
+    await db.query('UPDATE customers SET latitude = NULL, longitude = NULL WHERE id = $1', [customerId]);
+    const jobId = await seedJob('in_progress');
+
+    // The table's paired CHECK would refuse this too, but a CHECK can only
+    // reject a ROW — it cannot name the box that was left empty. The
+    // payload rule says it first, so the technician reads which one.
+    const half = await postComplete(TECH_A.token, jobId, {
+      completedAt: sent(30),
+      workSummary: 'Serviced the unit on site.',
+      latitude: 12.9716,
+    });
+    expect(half.statusCode, half.body).toBe(422);
+
+    // Nothing was recorded: no completion row, no pin, card still open.
+    expect(await completionPin(jobId)).toBeNull();
+    expect(await customerPin(customerId)).toMatchObject({ latitude: null, longitude: null });
+    expect((await cardRow(jobId)).status).toBe('in_progress');
+  });
+
+  it('a coordinate off the planet is refused before it can reach the column', async () => {
+    const jobId = await seedJob('in_progress');
+    const res = await postComplete(TECH_A.token, jobId, {
+      completedAt: sent(30),
+      workSummary: 'Serviced the unit on site.',
+      latitude: 120.5,
+      longitude: 77.5946,
+    });
+    expect(res.statusCode, res.body).toBe(422);
+    expect((await cardRow(jobId)).status).toBe('in_progress');
+  });
+});

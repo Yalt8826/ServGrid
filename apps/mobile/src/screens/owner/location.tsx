@@ -136,7 +136,7 @@ function RosterRowView({ row, selected, pulse, desk, onPress }: RowProps): React
         <HealthDot color={health.color} pulse={pulse} />
         <Text style={[styles.healthWord, { color: health.color }]}>{health.label}</Text>
       </View>
-      <Text style={[styles.rowSeen, desk && styles.rowSeenDesk]}>{formatLastSeen(row.minutesSince)}</Text>
+      <Text numberOfLines={1} style={[styles.rowSeen, desk && styles.rowSeenDesk]}>{formatLastSeen(row.minutesSince)}</Text>
     </Pressable>
   );
 }
@@ -273,6 +273,9 @@ export function LocationConsoleScreen(deps: LocationConsoleDeps): React.ReactNod
         <Text style={styles.selectedName}>Select a technician to locate.</Text>
       )}
       <View style={styles.actions}>
+        {/* The disabled reason reads once — under the primary action.
+        Both buttons share the same gate, and the caption printed twice
+        read like a rendering fault (2026-09-16 walk). */}
         <Button
           label="Locate now"
           onPress={deps.onLocateNow}
@@ -285,7 +288,6 @@ export function LocationConsoleScreen(deps: LocationConsoleDeps): React.ReactNod
           variant="secondary"
           onPress={deps.onLive}
           disabled={actionsDisabled}
-          disabledReason={disabledReason}
           testID="locate-live"
         />
       </View>
@@ -374,7 +376,7 @@ export function LocationConsoleScreen(deps: LocationConsoleDeps): React.ReactNod
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   deskRow: { flex: 1, flexDirection: 'row' },
-  rosterPane: { width: 340, borderRightWidth: 1, borderRightColor: SEMANTIC.line.default },
+  rosterPane: { width: 380, flexShrink: 0, borderRightWidth: 1, borderRightColor: SEMANTIC.line.default },
   mapPane: { flex: 1 },
   paneTitle: {
     ...textStyle('h2'),
@@ -412,7 +414,7 @@ const styles = StyleSheet.create({
   healthChip: { flexDirection: 'row', alignItems: 'center', gap: SPACE[1], width: 116, paddingHorizontal: SPACE[1] },
   healthWord: { ...textStyle('caption') },
   rowSeen: { ...textStyle('caption'), color: SEMANTIC.text.secondary, width: 108, textAlign: 'right', paddingRight: SPACE[2] },
-  rowSeenDesk: { width: 84, paddingRight: SPACE[2], fontVariant: ['tabular-nums'] },
+  rowSeenDesk: { width: 104, paddingRight: SPACE[2], fontVariant: ['tabular-nums'] },
   skeletonRow: { gap: SPACE[2], paddingRight: SPACE[3] },
   skeletonSpacer: { flex: 1 },
   locatePanel: {

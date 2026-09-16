@@ -27,7 +27,7 @@ import { useMemo, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { STATUS, SEMANTIC, SPACE } from '@servgrid/shared';
+import { DESK, STATUS, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, EmptyState, Skeleton, useDensity } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { FilterBar, type JobLogsTechnician } from '../dispatcher/job-logs';
@@ -132,9 +132,11 @@ function jobColumns(rows: readonly JobRow[], nowYear: number): DeskTableColumn<J
     {
       key: 'jobNumber',
       label: 'Number',
-      width: 120,
+      // 13 mono chars — the full number must read, never an ellipsis:
+      // the suffix is the job's identity in every conversation about it.
+      width: 140,
       render: (r) => (
-        <Text style={styles.cellMono} testID={`job-number-${r.card.id}`}>
+        <Text numberOfLines={1} style={styles.cellMono} testID={`job-number-${r.card.id}`}>
           {r.card.jobNumber}
         </Text>
       ),
@@ -150,7 +152,7 @@ function jobColumns(rows: readonly JobRow[], nowYear: number): DeskTableColumn<J
     {
       key: 'service',
       label: 'Service',
-      width: 170,
+      width: 130,
       render: (r) => (
         <Text style={styles.cell} numberOfLines={1}>
           {r.card.title}
@@ -161,22 +163,36 @@ function jobColumns(rows: readonly JobRow[], nowYear: number): DeskTableColumn<J
     {
       key: 'technician',
       label: 'Technician',
-      width: 110,
-      render: (r) => <Text style={styles.cell}>{r.technicianName ?? 'Unassigned'}</Text>,
+      width: 108,
+      render: (r) => (
+        <Text numberOfLines={1} style={styles.cell}>
+          {r.technicianName ?? 'Unassigned'}
+        </Text>
+      ),
       sortValue: (r) => r.technicianName ?? '',
     },
     {
       key: 'scheduled',
       label: 'Scheduled',
-      width: 120,
-      render: (r) => <Text style={styles.cellMono}>{scheduledLabelOf(r.card.scheduledFor, nowYear)}</Text>,
+      // "16 Sep · 15:00" — the date and the time both read or the
+      // column is decoration; ellipsising the hour hid the day's plan.
+      width: 132,
+      render: (r) => (
+        <Text numberOfLines={1} style={styles.cellMono}>
+          {scheduledLabelOf(r.card.scheduledFor, nowYear)}
+        </Text>
+      ),
       sortValue: (r) => r.card.scheduledFor ?? '',
     },
     {
       key: 'status',
       label: 'Status',
-      width: 96,
-      render: (r) => <Text style={styles.cell}>{statusWordOf(r.card.status)}</Text>,
+      width: 112,
+      render: (r) => (
+        <Text numberOfLines={1} style={styles.cell}>
+          {statusWordOf(r.card.status)}
+        </Text>
+      ),
       sortValue: (r) => statusWordOf(r.card.status),
     },
   ];
@@ -186,10 +202,10 @@ function jobColumns(rows: readonly JobRow[], nowYear: number): DeskTableColumn<J
     columns.push({
       key: 'amount',
       label: 'Amount',
-      width: 110,
+      width: 100,
       align: 'right',
       render: (r) => (
-        <Text style={styles.cellMono} testID={`job-amount-${r.card.id}`}>
+        <Text numberOfLines={1} style={styles.cellMono} testID={`job-amount-${r.card.id}`}>
           {amountLabelOf(r.card) ?? '—'}
         </Text>
       ),
@@ -218,8 +234,11 @@ export function OwnerJobsScreen(deps: OwnerJobsDeps): React.ReactNode {
   const selectedRow = desk ? (rows.find((r) => r.card.id === deps.selectedJobId) ?? null) : null;
 
   return (
-    <View style={styles.screen} testID="owner-jobs-screen">
-      <View style={styles.header}>
+    <View
+      style={[styles.screen, desk && styles.screenDesk]}
+      testID="owner-jobs-screen"
+    >
+      <View style={[styles.header, desk && styles.headerDesk]}>
         <Text style={styles.title}>Jobs</Text>
         <Text style={styles.count} testID="owner-jobs-count">
           {formatResultCount(sorted.length, overdue)}
@@ -323,6 +342,16 @@ export function OwnerJobsScreen(deps: OwnerJobsDeps): React.ReactNode {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
+  // The page furniture the DeskListShell gives the other console lists —
+  // this screen owns its header, so it wears the same padding itself.
+  screenDesk: {
+    paddingHorizontal: DESK.page.padX,
+    paddingTop: DESK.page.padY,
+    paddingBottom: DESK.page.padY,
+    maxWidth: DESK.page.maxWidth,
+    width: '100%',
+    alignSelf: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -331,14 +360,19 @@ const styles = StyleSheet.create({
     paddingTop: SPACE[3],
     paddingBottom: SPACE[1],
   },
+  headerDesk: { paddingHorizontal: 0, paddingTop: 0 },
   title: { ...textStyle('h1'), color: SEMANTIC.text.primary },
   count: { ...textStyle('caption'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] },
   loading: { padding: SPACE[4], gap: SPACE[2] },
   skeletonRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10 },
+  // No gap: the side detail's border-left is the separator, and the
+  // 24px a gap costs is exactly what squeezes the table's last column
+  // out of view when a row is open (2026-09-16 walk).
   deskBody: { flex: 1, flexDirection: 'row' },
   tableWrap: { flex: 1 },
   sideDetail: {
-    width: 420,
+    width: 356,
+    flexShrink: 0,
     borderLeftWidth: 1,
     borderLeftColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.app,

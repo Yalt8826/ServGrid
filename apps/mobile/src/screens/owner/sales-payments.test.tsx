@@ -49,6 +49,7 @@ describe('Sales — void lives here, reason required (§O5)', () => {
     const onVoid = vi.fn();
     const r = await create(
       <OwnerSalesScreen
+        onLoadSale={async () => null}
         rows={[sale({}), sale({ id: 's1000000-0000-4000-8000-000000000002', status: 'draft', saleNumber: null })]}
         error={null}
         loading={false}
@@ -90,6 +91,7 @@ describe('Payments — void lives here too, reason required (§O5)', () => {
     const onVoid = vi.fn();
     const r = await create(
       <OwnerPaymentsScreen
+        onLoadPaymentProof={async () => null}
         rows={[payment({})]}
         error={null}
         loading={false}
@@ -129,11 +131,13 @@ describe('Running totals — confirmed documents only (§O5)', () => {
 
   it('both lists render the totals bar', async () => {
     const s = await create(
-      <OwnerSalesScreen rows={[sale({})]} error={null} loading={false} onVoid={() => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
+      <OwnerSalesScreen
+        onLoadSale={async () => null} rows={[sale({})]} error={null} loading={false} onVoid={() => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
     );
     expect(findByTestID(toJson(s), 'owner-sales-running-total')).toBeDefined();
     const p = await create(
-      <OwnerPaymentsScreen rows={[payment({})]} error={null} loading={false} onVoid={() => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
+      <OwnerPaymentsScreen
+        onLoadPaymentProof={async () => null} rows={[payment({})]} error={null} loading={false} onVoid={() => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
     );
     expect(findByTestID(toJson(p), 'owner-payments-running-total')).toBeDefined();
   });
@@ -144,6 +148,7 @@ describe('The screen rule — cards on a phone, a table on the desk (§O5)', () 
     const r = await create(
       <DensityProvider density="desk">
         <OwnerSalesScreen
+        onLoadSale={async () => null}
           rows={[sale({}), sale({ id: 's1000000-0000-4000-8000-000000000002', total: '5000', status: 'draft', saleNumber: null })]}
           error={null}
           loading={false}
@@ -162,5 +167,124 @@ describe('The screen rule — cards on a phone, a table on the desk (§O5)', () 
     expect(findByTestID(tree, 'data-row-s1000000-0000-4000-8000-000000000002')).toBeDefined();
     expect(findByTestID(tree, 'owner-sales-running-total')).toBeDefined();
     expect(allText(tree).join(' ')).toContain('16,800');
+  });
+});
+
+describe('the row IS the door to its document (owner, 2026-09-17)', () => {
+  /**
+   * The company page's ledger rows open the document behind them; the
+   * owner asked for the same on these two lists. Sales rows preview the
+   * products sold, payments rows the proof photo — through the SAME two
+   * sheets the ledger uses, so the three doors cannot drift apart.
+   */
+  it('pressing a sale row opens the items sheet, which reads that row', async () => {
+    const onLoadSale = vi.fn(async () => null);
+    const r = await create(
+      <DensityProvider density="desk">
+        <OwnerSalesScreen
+          onLoadSale={onLoadSale}
+          rows={[sale({})]}
+          error={null}
+          loading={false}
+          onVoid={() => {}}
+          voidBusy={false}
+          voidError={null}
+          onRetry={() => {}}
+        />
+      </DensityProvider>,
+    );
+    // Closed until a row is pressed: the sheet is absent, not invisible.
+    expect(findByTestID(toJson(r), 'owner-sales-items-sheet')).toBeUndefined();
+
+    const row = findByTestID(toJson(r), 'data-row-s1000000-0000-4000-8000-000000000001')!;
+    await act(async () => {
+      (row.props.onPress as () => void)();
+    });
+
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'owner-sales-items-sheet')).toBeDefined();
+    // The number the row showed names the sheet — the owner can tell which
+    // document he is looking at.
+    expect(allText(tree).join(' ')).toContain('Sale SL-2627-00018');
+    expect(onLoadSale).toHaveBeenCalledWith('s1000000-0000-4000-8000-000000000001');
+  });
+
+  it('pressing a payment row opens the proof sheet for THAT payment', async () => {
+    const onLoadPaymentProof = vi.fn(async () => null);
+    const r = await create(
+      <DensityProvider density="desk">
+        <OwnerPaymentsScreen
+          onLoadPaymentProof={onLoadPaymentProof}
+          rows={[payment({})]}
+          error={null}
+          loading={false}
+          onVoid={() => {}}
+          voidBusy={false}
+          voidError={null}
+          onRetry={() => {}}
+        />
+      </DensityProvider>,
+    );
+    expect(findByTestID(toJson(r), 'owner-payments-proof-sheet')).toBeUndefined();
+
+    const row = findByTestID(toJson(r), 'data-row-p1000000-0000-4000-8000-000000000001')!;
+    await act(async () => {
+      (row.props.onPress as () => void)();
+    });
+
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'owner-payments-proof-sheet')).toBeDefined();
+    expect(allText(tree).join(' ')).toContain('Payment PM-2627-00031');
+    expect(onLoadPaymentProof).toHaveBeenCalledWith('p1000000-0000-4000-8000-000000000001');
+  });
+
+  it('a payment nobody photographed says so — the sheet never shows a broken image', async () => {
+    const r = await create(
+      <DensityProvider density="desk">
+        <OwnerPaymentsScreen
+          onLoadPaymentProof={async () => null}
+          rows={[payment({})]}
+          error={null}
+          loading={false}
+          onVoid={() => {}}
+          voidBusy={false}
+          voidError={null}
+          onRetry={() => {}}
+        />
+      </DensityProvider>,
+    );
+    const row = findByTestID(toJson(r), 'data-row-p1000000-0000-4000-8000-000000000001')!;
+    await act(async () => {
+      (row.props.onPress as () => void)();
+    });
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'owner-payments-proof-sheet-empty')).toBeDefined();
+    expect(findByTestID(tree, 'owner-payments-proof-sheet-image')).toBeUndefined();
+  });
+
+  it('a dead read says what broke, and offers no image', async () => {
+    const r = await create(
+      <DensityProvider density="desk">
+        <OwnerSalesScreen
+          onLoadSale={async () => {
+            throw new Error('The sales list could not be loaded.');
+          }}
+          rows={[sale({})]}
+          error={null}
+          loading={false}
+          onVoid={() => {}}
+          voidBusy={false}
+          voidError={null}
+          onRetry={() => {}}
+        />
+      </DensityProvider>,
+    );
+    const row = findByTestID(toJson(r), 'data-row-s1000000-0000-4000-8000-000000000001')!;
+    await act(async () => {
+      (row.props.onPress as () => void)();
+    });
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'owner-sales-items-sheet-error')).toBeDefined();
+    expect(allText(tree).join(' ')).toContain('The sales list could not be loaded.');
   });
 });

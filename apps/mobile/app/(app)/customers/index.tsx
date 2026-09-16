@@ -25,7 +25,7 @@ import { CustomerSearchScreen } from '../../../src/screens/dispatcher/customer';
 import { useCustomerSearch } from '../../../src/screens/dispatcher/useCustomer';
 import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
 import { OwnerCustomersScreen } from '../../../src/screens/owner/CustomersScreen';
-import { useOwnerCustomerDetail, useOwnerCustomers } from '../../../src/screens/owner/useOwnerCustomers';
+import { useOwnerCustomers } from '../../../src/screens/owner/useOwnerCustomers';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -47,10 +47,6 @@ function OwnerCustomersRoute(): React.ReactNode {
     return () => clearTimeout(timer);
   }, [query]);
   const list = useOwnerCustomers(debouncedQuery);
-  // The desk's side detail follows the selected row; the phone pushes a
-  // screen instead, so nothing is selected there.
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const detail = useOwnerCustomerDetail(selectedCustomerId);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
@@ -97,32 +93,6 @@ function OwnerCustomersRoute(): React.ReactNode {
               : `No customer matches “${debouncedQuery.trim()}”.`
           }
           onOpenCustomer={(customerId) => router.push(`/customers/${customerId}`)}
-          selectedCustomerId={selectedCustomerId}
-          onSelectCustomer={setSelectedCustomerId}
-          detail={detail.detail}
-          detailError={detail.detailError}
-          companyName={detail.companyName}
-          stack={detail.stack}
-          history={detail.history}
-          historyError={detail.historyError}
-          editing={detail.editing}
-          savingStack={detail.savingStack}
-          stackError={detail.stackError}
-          onEditStackItemOpen={detail.onEditStackItemOpen}
-          onCloseSheet={detail.onCloseSheet}
-          onSaveStackItem={detail.onSaveStackItem}
-          onRemoveStackItem={detail.onRemoveStackItem}
-          onCall={detail.onCall}
-          onOpenJob={detail.onOpenJob}
-          onEdit={() => {
-            const id = detail.detail?.id;
-            if (id !== undefined) router.push(`/customers/${id}/edit`);
-          }}
-          onOpenCompany={() => {
-            const companyId = detail.detail?.companyId ?? null;
-            if (companyId !== null) router.push(`/companies/${companyId}`);
-          }}
-          onRetry={detail.reload}
         />
       </DeskListShell>
     </SafeAreaView>

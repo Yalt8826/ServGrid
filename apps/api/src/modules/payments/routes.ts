@@ -3,7 +3,9 @@ import { z, type ZodTypeAny } from 'zod';
 import { PaymentSchema, paymentCreateSchema, paymentVoidSchema, uuid } from '@servgrid/shared';
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
+import type { StorageConfig } from '../../lib/storage.js';
 import { salesPaymentsEnabled } from '../flags/gates.js';
+import { createAttachmentsService } from '../attachments/service.js';
 import { createPaymentsService } from './service.js';
 
 /**
@@ -66,8 +68,14 @@ function claimsOf(request: FastifyRequest) {
 
 const OWNER_RESPONSE = { owner: PaymentSchema as ZodTypeAny, sales_rep: PaymentSchema as ZodTypeAny };
 
-export const paymentsRoutes: FastifyPluginAsync = async (app) => {
+type PaymentsRoutesOptions = { s3: StorageConfig };
+
+export const paymentsRoutes: FastifyPluginAsync<PaymentsRoutesOptions> = async (app, opts) => {
   const service = createPaymentsService();
+  // The proof photo reads live here, not on the attachments surface:
+  // "show me the photo for THIS payment" is a payment question, and the
+  // attachment id is an implementation detail the client never holds.
+  const attachments = createAttachmentsService(opts.s3);
 
   // §11: rep (own — received_by), owner (all). The scope predicate is
   // built here, once, and handed to the service so it lands inside the
@@ -107,6 +115,31 @@ export const paymentsRoutes: FastifyPluginAsync = async (app) => {
       const auth = claimsOf(request);
       const body = paymentCreateSchema.parse(request.body);
       return service.createPayment({ id: auth.sub, role: auth.role }, body);
+    },
+  );
+
+  // The ledger's payment row, clicked: the proof photo behind it, as a
+  // short-lived presigned URL (§9's five minutes, same as the by-id
+  // attachment read — the bytes are never proxied). The read access
+  // rule is the attachments module's own: owner all, the receiving rep
+  // own. JSON rather than the 302 the by-id read sends, because the
+  // browser cannot put an Authorization header on an <img> request.
+  app.get(
+    '/v1/payments/:id/proof',
+    {
+      preHandler: [app.requireAuth, app.requirePermission('payment', 'read'), salesPaymentsEnabled],
+      config: {
+        responseSchemaByRole: {
+          owner: z.object({ url: z.string() }).strict() as unknown as ZodTypeAny,
+          sales_rep: z.object({ url: z.string() }).strict() as unknown as ZodTypeAny,
+        },
+      },
+    },
+    async (request) => {
+      const auth = claimsOf(request);
+      const paymentId = uuidParam(request, 'id');
+      const { url } = await attachments.readUrlForOwner({ id: auth.sub, role: auth.role }, 'payment', paymentId, 'photo');
+      return { url };
     },
   );
 

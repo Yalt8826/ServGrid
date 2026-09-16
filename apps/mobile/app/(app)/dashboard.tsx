@@ -43,6 +43,7 @@ import { OwnerDashboardScreen } from '../../src/screens/owner/dashboard';
 import { PerformancePanels } from '../../src/screens/owner/PerformancePanels';
 import { useOwnerDashboard } from '../../src/screens/owner/useOwnerDashboard';
 import { useSessionStore } from '../../src/state/sessionStore';
+import { useFullName } from '../../src/state/useAuthMe';
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -123,11 +124,16 @@ function DispatcherDashboardRoute(): React.ReactNode {
 function OwnerDashboardRoute(): React.ReactNode {
   const router = useRouter();
   const data = useOwnerDashboard(new Date());
+  // The session store carries a username, not a name — this resolves the
+  // full name from the same `/v1/auth/me` read the flags already make, and
+  // degrades to the username until it lands (the profile screens' rule).
+  const ownerName = useFullName();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
       <OwnerDashboardScreen
         now={new Date()}
+        ownerName={ownerName}
         offline={data.offline}
         figures={data.figures}
         jobsPerDay={data.jobsPerDay}

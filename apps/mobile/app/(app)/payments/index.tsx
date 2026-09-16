@@ -14,12 +14,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
+import { DeskListShell } from '../../../src/components/ui';
 import { PaymentsScreen } from '../../../src/screens/rep/PaymentsScreen';
 import { useOnline, useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
 import { OwnerPaymentsScreen } from '../../../src/screens/owner/PaymentsScreen';
-import { useOwnerPayments, useVoidPayment } from '../../../src/screens/owner/useOwnerData';
+import { fetchPaymentProof, useOwnerPayments, useVoidPayment } from '../../../src/screens/owner/useOwnerData';
 import { captureProofPhoto } from '../../../src/lib/captureProof';
 import { isFlagOn } from '../../../src/state/featureFlags';
+import { useFlagsReady } from '../../../src/state/useFlagsReady';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -66,8 +68,11 @@ function RepPaymentsRoute(): React.ReactNode {
 function OwnerPaymentsRoute(): React.ReactNode {
   const payments = useOwnerPayments();
   const { voidBusy, voidError, voidPayment } = useVoidPayment(payments.reload);
+  const flagsReady = useFlagsReady();
 
-  if (!isFlagOn('sales.payments')) {
+  if (!flagsReady || !isFlagOn('sales.payments')) {
+    // Unknown flags read as off on a cold browser load — wait for the
+    // /auth/me answer before rendering the honest dark placeholder.
     return (
       <View style={styles.root}>
         <Text>Payments</Text>
@@ -77,17 +82,20 @@ function OwnerPaymentsRoute(): React.ReactNode {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
-      <OwnerPaymentsScreen
-        rows={payments.rows}
-        error={payments.error}
-        loading={payments.loading}
-        onVoid={(payment, reason) => {
-          void voidPayment(payment.id, reason).catch(() => {});
-        }}
-        voidBusy={voidBusy}
-        voidError={voidError}
-        onRetry={payments.reload}
-      />
+      <DeskListShell title="Payments" testID="owner-payments-page">
+        <OwnerPaymentsScreen
+          rows={payments.rows}
+          error={payments.error}
+          loading={payments.loading}
+          onVoid={(payment, reason) => {
+            void voidPayment(payment.id, reason).catch(() => {});
+          }}
+          voidBusy={voidBusy}
+          voidError={voidError}
+          onRetry={payments.reload}
+          onLoadPaymentProof={(paymentId) => fetchPaymentProof(paymentId)}
+        />
+      </DeskListShell>
     </SafeAreaView>
   );
 }

@@ -201,13 +201,14 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
               onSort={setSort}
               scrollTestID="amc-all-table"
               onRowPress={(c) => props.onOpen(c.id)}
+              maxHeight={640}
               columns={[
                 {
                   key: 'contractNumber',
                   label: 'Number',
-                  width: 140,
+                  width: 156,
                   render: (c) => (
-                    <Text style={styles.monoCell} testID={`amc-number-${c.id}`}>
+                    <Text numberOfLines={1} style={styles.monoCell} testID={`amc-number-${c.id}`}>
                       {c.contractNumber}
                     </Text>
                   ),
@@ -217,22 +218,22 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
                   key: 'customer',
                   label: 'Customer',
                   width: null,
-                  render: (c) => <Text style={styles.cell}>{c.customerName}</Text>,
+                  render: (c) => <Text numberOfLines={1} style={styles.cell}>{c.customerName}</Text>,
                   sortValue: (c) => c.customerName,
                 },
                 {
                   key: 'startDate',
                   label: 'Start',
-                  width: 90,
-                  render: (c) => <Text style={styles.monoCell}>{formatDateEnIN(c.startDate, nowYear)}</Text>,
+                  width: 116,
+                  render: (c) => <Text numberOfLines={1} style={styles.monoCell}>{formatDateEnIN(c.startDate, nowYear)}</Text>,
                   sortValue: (c) => c.startDate,
                 },
                 {
                   key: 'endDate',
                   label: 'End',
-                  width: 110,
+                  width: 116,
                   render: (c) => (
-                    <Text style={styles.monoCell} testID={`amc-end-${c.id}`}>
+                    <Text numberOfLines={1} style={styles.monoCell} testID={`amc-end-${c.id}`}>
                       {formatDateWithYear(c.endDate)}
                     </Text>
                   ),
@@ -241,24 +242,24 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
                 {
                   key: 'price',
                   label: 'Price',
-                  width: 100,
+                  width: 110,
                   align: 'right',
-                  render: (c) => <Text style={styles.monoCell}>{`₹${formatMoneyEnIN(c.contractValue)}`}</Text>,
+                  render: (c) => <Text numberOfLines={1} style={styles.monoCell}>{`₹${formatMoneyEnIN(c.contractValue)}`}</Text>,
                   sortValue: (c) => Number(c.contractValue),
                 },
                 {
                   key: 'state',
                   label: 'State',
                   width: 100,
-                  render: (c) => <Text style={styles.cell}>{stateLabel(c.state)}</Text>,
+                  render: (c) => <Text numberOfLines={1} style={styles.cell}>{stateLabel(c.state)}</Text>,
                   sortValue: (c) => stateLabel(c.state),
                 },
                 {
                   key: 'nextVisitDue',
                   label: 'Next due',
-                  width: 100,
+                  width: 116,
                   render: (c) => (
-                    <Text style={styles.monoCell}>
+                    <Text numberOfLines={1} style={styles.monoCell}>
                       {c.state === 'active' ? formatDateWithYear(c.nextVisitDue) : '—'}
                     </Text>
                   ),
@@ -327,7 +328,9 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   mono: { ...textStyle('mono'), color: SEMANTIC.text.primary },
-  searchWrap: { marginTop: SPACE[1] },
+  // A search field is a sentence, not a paragraph — the full 1160px
+  // measure read as an unstyled input on the desk (2026-09-16 walk).
+  searchWrap: { marginTop: SPACE[1], maxWidth: 420 },
   allRow: {
     minHeight: 56,
     justifyContent: 'center',

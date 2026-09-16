@@ -33,7 +33,6 @@
  * that account existing and being remembered. NO tracking chip: owners
  * are not tracked.
  */
-import { useEffect, useState } from 'react';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
@@ -41,7 +40,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppState, Text, View, StyleSheet } from 'react-native';
 
-import type { AuthMeResponse, TrackingHealth } from '@servgrid/shared';
+import type { TrackingHealth } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
 import { api } from '../../../src/lib/api';
 import { loadMyDevice } from '../../../src/lib/myDevice';
@@ -52,6 +51,7 @@ import { OwnerProfileScreen } from '../../../src/screens/owner/OwnerProfileScree
 import { useOtherOwners } from '../../../src/screens/owner/useOwnerData';
 import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
 import { useSessionStore } from '../../../src/state/sessionStore';
+import { useFullName } from '../../../src/state/useAuthMe';
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -156,25 +156,9 @@ function DispatcherProfileRoute(): React.ReactNode {
   const flags = useDispatchJobLogsFlags();
 
   // §D6 names a NAME and a username; the session store carries only the
-  // username, so the name resolves from `/v1/auth/me` (the same read the
-  // flags just made) and degrades to the username until it lands — the
-  // same resolve-into-state rule the technician's screen uses. No
-  // tracking read: this role is not tracked.
-  const [fullName, setFullName] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void (async (): Promise<AuthMeResponse | null> => {
-      const res = await api.request<AuthMeResponse>('GET', '/v1/auth/me');
-      return res.ok && res.data !== null ? res.data : null;
-    })()
-      .then((me) => {
-        if (alive && me !== null) setFullName(me.employee.fullName);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // username, so the name comes from `useFullName` and degrades to the
+  // username until it lands. No tracking read: this role is not tracked.
+  const fullName = useFullName();
 
   if (actor === null) return null;
 
@@ -193,7 +177,7 @@ function DispatcherProfileRoute(): React.ReactNode {
       edges={['top', 'left', 'right', 'bottom']}
     >
       <DispatcherProfileScreen
-        fullName={fullName ?? actor.username}
+        fullName={fullName}
         username={actor.username}
         appVersion={Constants.expoConfig?.version ?? 'dev'}
         changePassword={() => router.push('/change-password')}
@@ -216,24 +200,9 @@ function OwnerProfileRoute(): React.ReactNode {
   const actor = useSessionStore((s) => s.actor);
   const { others } = useOtherOwners();
 
-  // §O9 names a NAME; the session store carries only the username, so
-  // the name resolves from /v1/auth/me — the dispatcher route's
-  // resolve-into-state rule.
-  const [fullName, setFullName] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void (async (): Promise<AuthMeResponse | null> => {
-      const res = await api.request<AuthMeResponse>('GET', '/v1/auth/me');
-      return res.ok && res.data !== null ? res.data : null;
-    })()
-      .then((me) => {
-        if (alive && me !== null) setFullName(me.employee.fullName);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // §O9 names a NAME; the session store carries only the username, so the
+  // name comes from `useFullName`.
+  const fullName = useFullName();
 
   if (actor === null) return null;
 
@@ -243,7 +212,7 @@ function OwnerProfileRoute(): React.ReactNode {
       edges={['top', 'left', 'right', 'bottom']}
     >
       <OwnerProfileScreen
-        fullName={fullName ?? actor.username}
+        fullName={fullName}
         username={actor.username}
         appVersion={Constants.expoConfig?.version ?? 'dev'}
         otherOwners={others}

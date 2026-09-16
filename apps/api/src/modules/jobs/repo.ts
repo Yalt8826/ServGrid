@@ -305,6 +305,9 @@ export interface CompletionInsert {
   collectionMode: 'cash' | 'upi' | 'card' | 'bank_transfer' | 'none';
   paymentReference: string | null;
   customerSigned: boolean;
+  /** Where the technician stood, when the device captured it (§6.4). Null when it did not. */
+  latitude: number | null;
+  longitude: number | null;
 }
 
 /**
@@ -318,8 +321,9 @@ export async function insertCompletion(db: Db, c: CompletionInsert): Promise<voi
   await db.query(
     `INSERT INTO job_completions
        (job_card_id, completed_by, completed_at, work_summary, cost,
-        discount_amount, discount_reason, collection_mode, payment_reference, customer_signed)
-     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10)`,
+        discount_amount, discount_reason, collection_mode, payment_reference, customer_signed,
+        latitude, longitude)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12)`,
     [
       c.jobCardId,
       c.completedBy,
@@ -331,6 +335,8 @@ export async function insertCompletion(db: Db, c: CompletionInsert): Promise<voi
       c.collectionMode,
       c.paymentReference,
       c.customerSigned,
+      c.latitude,
+      c.longitude,
     ],
   );
 }

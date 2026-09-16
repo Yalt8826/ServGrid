@@ -20,6 +20,7 @@ import type { TokenStore, StoredSession } from './tokenStore';
 import type { Role, ErrorCode, ErrorEnvelope } from './types';
 import { parseErrorEnvelope } from './types';
 import { resetFeatureFlags } from '../state/featureFlags';
+import { resetAuthMe } from '../state/authMe';
 import { uuid } from './uuid';
 
 export interface ApiClientOptions {
@@ -448,8 +449,11 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
       // left. Keeping them shows the NEXT user another role's flag
       // profile (seen on device: tech1's sales flags darkened rep1's
       // sale form after a user switch), and every rep route reads this
-      // cache first — so it must die with the session.
+      // cache first — so it must die with the session. The cached
+      // `/auth/me` answer dies with it for the same reason: it carries
+      // the leaver's name, and the dashboard greets by it.
       resetFeatureFlags();
+      resetAuthMe();
     },
   };
 }

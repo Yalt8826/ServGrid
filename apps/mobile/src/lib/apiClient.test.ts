@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient, type ApiClient } from './apiClient';
+import { cachedAuthMe, resetAuthMe, setAuthMe } from '../state/authMe';
 import type { StoredSession, TokenStore } from './tokenStore';
 import type { Role } from './types';
 
@@ -364,5 +365,24 @@ describe('apiClient — headers, keys, and single-flight', () => {
     // keep credentials because the office was unreachable.
     expect(store.session).toBeNull();
     expect(store.clearCount).toBe(1);
+  });
+
+  it('logout() drops the cached /auth/me answer — the dashboard greets by that name', async () => {
+    resetAuthMe();
+    // A shared handset: the next person to sign in must never be
+    // greeted by the name of the person who just left, and every flag
+    // the leaver held rides the same cached answer.
+    setAuthMe({
+      employee: { id: 'e-owner', role: 'owner', username: 'owner', fullName: 'ServGrid Owner' },
+      permissions: {},
+      featureFlags: {},
+      consent: {},
+    } as unknown as Parameters<typeof setAuthMe>[0]);
+    expect(cachedAuthMe()).not.toBeNull();
+
+    const f = scriptedFetch([{ status: 200, body: {} }]);
+    await api(f.impl, store).logout();
+
+    expect(cachedAuthMe()).toBeNull();
   });
 });

@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
 import type { ErrorEnvelope, LoginResponse } from '@servgrid/shared';
@@ -959,5 +962,244 @@ describe('products and services (§6.4)', () => {
     });
     expect(res.statusCode).toBe(409);
     expect(errorOf(res.body).code).toBe('VERSION_CONFLICT');
+  });
+});
+
+// ── the site's area and its pin (migration 021, 2026-09-17) ─────────────────
+
+describe('a customer reads as area · address · location', () => {
+  /**
+   * The owner asked for a site to carry three distinct things: its
+   * locality, its address, and the coordinates a technician captures on
+   * site. `area` is new (the console used to fake it from `address_line1`,
+   * so the "area" column showed a street); the coordinates existed on the
+   * read path since 005 with no way to write them. These tests pin the
+   * write path for both, and the payload rule that keeps a pin whole.
+   */
+  it('the owner creates a site with its area and a captured pin, and both are readable', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(OWNER),
+      payload: {
+        name: 'Rajajinagar Bakery',
+        phone: uniquePhone(),
+        area: 'Rajajinagar',
+        addressLine1: '5th Block, 60 Feet Road',
+        city: 'Bengaluru',
+        latitude: 12.9916,
+        longitude: 77.5521,
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const created = res.json<{
+      id: string;
+      area: string | null;
+      latitude: number | null;
+      longitude: number | null;
+    }>();
+    expect(created.area).toBe('Rajajinagar');
+    expect(created.latitude).toBe(12.9916);
+    expect(created.longitude).toBe(77.5521);
+
+    // …and it is on the response, not merely accepted: a `.strict()`
+    // response schema silently drops a column it does not name.
+    const read = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${created.id}`,
+      headers: bearer(OWNER),
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json<{ area: string | null }>().area).toBe('Rajajinagar');
+  });
+
+  it('an owner PATCH moves the area and the pin, and null on both clears the pin', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(OWNER),
+      payload: { name: 'Pin Test Site', phone: uniquePhone() },
+    });
+    const id = created.json<{ id: string }>().id;
+
+    const first = await app.inject({
+      method: 'PATCH',
+      url: `/v1/customers/${id}`,
+      headers: { ...bearer(OWNER), 'if-match': '1' },
+      payload: {
+        area: 'Koramangala',
+        addressLine1: '80 Feet Road',
+        city: 'Bengaluru',
+        pincode: '560095',
+        latitude: 12.9352,
+        longitude: 77.6245,
+      },
+    });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.json<{ area: string; latitude: number }>()).toMatchObject({
+      area: 'Koramangala',
+      latitude: 12.9352,
+    });
+
+    const cleared = await app.inject({
+      method: 'PATCH',
+      url: `/v1/customers/${id}`,
+      headers: { ...bearer(OWNER), 'if-match': '2' },
+      payload: { latitude: null, longitude: null },
+    });
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    expect(cleared.json<{ latitude: null; longitude: null }>()).toMatchObject({
+      latitude: null,
+      longitude: null,
+    });
+    // Clearing the pin is not clearing the area — they are separate facts.
+    expect(cleared.json<{ area: string }>().area).toBe('Koramangala');
+  });
+
+  it('half a pin is refused as a field error, before the table’s CHECK could see it', async () => {
+    // The paired CHECK can only reject a row; it cannot say which box was
+    // left empty. The payload rule says it in the user's own terms.
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(OWNER),
+      payload: { name: 'Half Pin Site', phone: uniquePhone(), latitude: 12.9 },
+    });
+    expect(create.statusCode, create.body).toBe(422);
+    // The envelope's message is deliberately generic (errors.ts); the
+    // specific refusal rides details.issues, which is what a client shows
+    // beside the field.
+    const issues = JSON.parse(create.body).error.details.issues as Array<{ message: string }>;
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/travel together/i);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(OWNER),
+      payload: { name: 'Half Pin Site', phone: uniquePhone() },
+    });
+    const id = created.json<{ id: string }>().id;
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/v1/customers/${id}`,
+      headers: { ...bearer(OWNER), 'if-match': '1' },
+      payload: { longitude: 77.5 },
+    });
+    expect(patch.statusCode, patch.body).toBe(422);
+  });
+
+  it('a coordinate off the planet is refused on both write paths', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(OWNER),
+      payload: { name: 'Atlantis', phone: uniquePhone(), latitude: 91, longitude: 77.5 },
+    });
+    expect(create.statusCode, create.body).toBe(422);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(OWNER),
+      payload: { name: 'Atlantis', phone: uniquePhone() },
+    });
+    const id = created.json<{ id: string }>().id;
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/v1/customers/${id}`,
+      headers: { ...bearer(OWNER), 'if-match': '1' },
+      payload: { latitude: 12.9, longitude: 181 },
+    });
+    expect(patch.statusCode, patch.body).toBe(422);
+  });
+
+  it('the dispatcher may set the area and the pin — the site’s own facts, unlike companyId (§5 rule 3)', async () => {
+    // The strip exists for a field the dispatcher cannot READ. Area and
+    // coordinates are read by every role that reads a customer, so there
+    // is nothing to strip — he is the one who often stands at the site.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(DISPATCHER),
+      payload: {
+        name: 'Dispatcher Pin Site',
+        phone: uniquePhone(),
+        area: 'Jayanagar',
+        latitude: 12.925,
+        longitude: 77.5938,
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json<{ area: string; latitude: number }>()).toMatchObject({
+      area: 'Jayanagar',
+      latitude: 12.925,
+    });
+    expect(res.json<object>()).not.toHaveProperty('companyId');
+  });
+});
+
+describe('migration 021 — the column itself', () => {
+  it('refuses a coordinate off the planet at the table, for writers that bypass the API', async () => {
+    // The schema refuses this first for every legitimate writer; the CHECK
+    // is what holds for a script, a psql session, or a future endpoint
+    // whose author forgets the schema.
+    await expect(
+      db.query('INSERT INTO customers (name, phone, latitude, longitude) VALUES ($1, $2, $3, $4)', [
+        'Out of range',
+        uniquePhone(),
+        91.5,
+        77.5,
+      ]),
+    ).rejects.toThrow(/customers_latitude_range/);
+    await expect(
+      db.query('INSERT INTO customers (name, phone, latitude, longitude) VALUES ($1, $2, $3, $4)', [
+        'Out of range',
+        uniquePhone(),
+        12.9,
+        -181,
+      ]),
+    ).rejects.toThrow(/customers_longitude_range/);
+  });
+
+  it('the backfill rule derives a locality from the address tail, and refuses what is not one', async () => {
+    // The migration runs on an EMPTY table in this scratch database, so
+    // there is nothing backfilled to inspect here — instead this evaluates
+    // the rule's own expression against inputs, which is what the
+    // migration's comment claims and what runs against real data.
+    // The migration's own expression, with $1 standing in for address_line1.
+    const RULE = `(
+      SELECT CASE WHEN $1::text IS NOT NULL
+        AND position(',' IN $1::text) > 0
+        AND btrim(regexp_replace($1::text, '^.*,', '')) <> ''
+        AND length(btrim(regexp_replace($1::text, '^.*,', ''))) BETWEEN 3 AND 60
+        AND btrim(regexp_replace($1::text, '^.*,', '')) !~ '[0-9]'
+        AND array_length(regexp_split_to_array(btrim(regexp_replace($1::text, '^.*,', '')), '\\s+'), 1) <= 4
+      THEN btrim(regexp_replace($1::text, '^.*,', '')) END)`;
+
+    const inputs: Array<[string | null, string | null]> = [
+      // The seeded shape: "<street>, <locality>" → the locality.
+      ['80 Feet Road, HSR Layout', 'HSR Layout'],
+      ['80 Feet Road, Koramangala', 'Koramangala'],
+      ['5th Cross, Rajajinagar', 'Rajajinagar'],
+      // A number in the tail means it is a phase/plot, not a place.
+      ['Plot 7, Industrial Area, Phase 2', null],
+      // No comma: never guess that its whole street is an area.
+      ['Rajshahi', null],
+      ['', null],
+      [null, null],
+      // Too long to be a locality.
+      [`Street, ${'x'.repeat(70)}`, null],
+    ];
+
+    for (const [input, expected] of inputs) {
+      const r = await db.query<{ candidate: string | null }>(`SELECT ${RULE} AS candidate`, [input]);
+      expect(r.rows[0]!.candidate, `input: ${JSON.stringify(input)}`).toBe(expected);
+    }
+    // And the expression above is the one the migration carries.
+    const sql = readFileSync(
+      join(fileURLToPath(new URL('../../src/db/migrations/021_customer_area_location.up.sql', import.meta.url).href)),
+      'utf8',
+    );
+    expect(sql).toContain("array_length(regexp_split_to_array(btrim(regexp_replace(address_line1, '^.*,', '')), '\\s+'), 1) <= 4");
   });
 });

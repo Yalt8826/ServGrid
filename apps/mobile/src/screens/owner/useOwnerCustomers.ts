@@ -28,6 +28,7 @@ import { useRouter } from 'expo-router';
 
 import type {
   Company,
+  Customer,
   CustomerDetail,
   CustomerRecord,
   CustomerStackItem,
@@ -84,6 +85,27 @@ async function poolStackCounts(ids: string[]): Promise<Map<string, number>> {
   }
   await Promise.all(Array.from({ length: Math.min(STACK_CONCURRENCY, ids.length) }, worker));
   return counts;
+}
+
+/**
+ * The site's address as one line: both street lines, then the
+ * area/city/pincode tail, skipping whatever is empty. The console shows
+ * it in a single cell, so the parts are joined once — here — rather than
+ * inside the column's render.
+ */
+export function fullAddressOf(c: Customer): string | null {
+  const tail = [c.area, c.city, c.pincode].filter((p): p is string => p !== null && p !== '');
+  const parts = [c.addressLine1, c.addressLine2, tail.join(' ')]
+    .map((p) => (p === null ? '' : p.trim()))
+    .filter((p) => p !== '');
+  return parts.length === 0 ? null : parts.join(', ');
+}
+
+/** "12.971600, 77.594600" — six decimals is ~10cm, so it is worth reading aloud. */
+export function locationOf(c: Customer): string | null {
+  return c.latitude === null || c.longitude === null
+    ? null
+    : `${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)}`;
 }
 
 function listErrorMessage(error: unknown, fallback: string): string {
@@ -156,7 +178,9 @@ export function useOwnerCustomers(query = ''): {
       return {
         id: c.id,
         name: c.name,
-        area: c.addressLine1 ?? c.city ?? null,
+        area: c.area,
+        address: fullAddressOf(c),
+        location: locationOf(c),
         phone: c.phone,
         companyId: c.companyId,
         companyName: c.companyId === null ? null : (nameOf.get(c.companyId) ?? null),

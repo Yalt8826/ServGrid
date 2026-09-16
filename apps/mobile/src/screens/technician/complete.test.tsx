@@ -56,6 +56,7 @@ import {
   payloadOf,
   submitBlockerOf,
   warrantyConfirmMessageOf,
+  withSiteFix,
   type CompleteSheetPayload,
   type PartProduct,
 } from './completeSheet';
@@ -935,5 +936,54 @@ describe('CompleteSheet — Done when (§T4)', () => {
     expect(freePayload.discountAmount).toBeUndefined();
     expect(freePayload.discountReason).toBeUndefined();
     expect(freePayload.collectionMode).toBe('none');
+  });
+});
+
+describe('the on-site fix rides the completion, and only once (2026-09-17)', () => {
+  /**
+   * The owner asked that a technician's presence at a site leave a
+   * location behind. The server files it on the completion and makes it
+   * the customer's pin; the handset's only job is to attach ONE fix and
+   * keep it stable, because the completion is keyed by its body — a fix
+   * that moved between a first attempt and its retry would look like a
+   * new intent and could file the job twice.
+   */
+  const base: CompleteSheetPayload = { completedAt: '2026-09-17T10:00:00.000Z', workSummary: 'Serviced.' };
+
+  it('attaches both coordinates when the device gave a fix', () => {
+    const body = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
+    expect(body.latitude).toBe(12.9716);
+    expect(body.longitude).toBe(77.5946);
+    // Everything the sheet built survives untouched.
+    expect(body.workSummary).toBe('Serviced.');
+    expect(body.completedAt).toBe('2026-09-17T10:00:00.000Z');
+  });
+
+  it('leaves the body byte-identical when there is no fix — so the key still replays', () => {
+    // No permission, no lock, or the web console: the completion files
+    // without a pin rather than failing, and its body is unchanged —
+    // which is what lets a retry reuse the pinned idempotency key.
+    const noFix = withSiteFix(base, null);
+    expect(noFix).toEqual(base);
+    expect(JSON.stringify(noFix)).toBe(JSON.stringify(base));
+    expect(noFix).not.toHaveProperty('latitude');
+  });
+
+  it('the same fix twice produces the same key; a moved fix would not', () => {
+    // The property the route depends on, stated as the request it makes:
+    // one capture per sheet → one body across attempts → one intent.
+    // A writer that only has to be DISTINCT per intent — the assertion is
+    // about identity, not about sending.
+    let n = 0;
+    const writers = bodyKeyedWriters(() => ({
+      send: async () => undefined,
+      pendingKey: () => `k${++n}`,
+    }));
+    const first = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
+    const retry = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
+    const moved = withSiteFix(base, { latitude: 12.9720, longitude: 77.5950 });
+
+    expect(writers.writerFor(JSON.stringify(first))).toBe(writers.writerFor(JSON.stringify(retry)));
+    expect(writers.writerFor(JSON.stringify(moved))).not.toBe(writers.writerFor(JSON.stringify(first)));
   });
 });

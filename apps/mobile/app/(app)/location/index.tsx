@@ -20,9 +20,11 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 
 import { SEMANTIC } from '@servgrid/shared';
+import { DeskListShell } from '../../../src/components/ui';
 import { useDensity } from '../../../src/components/ui/DensityProvider';
 import { LocationConsoleScreen } from '../../../src/screens/owner/location';
 import { useLocationConsole } from '../../../src/screens/owner/useLocationConsole';
+import { useFlagsReady } from '../../../src/state/useFlagsReady';
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -40,7 +42,10 @@ export default function Screen() {
   );
 
   const deps = useLocationConsole({ desk, focused });
-  if (!deps.flagOn) {
+  const flagsReady = useFlagsReady();
+  if (!flagsReady || !deps.flagOn) {
+    // Unknown flags read as off on a cold browser load — wait for the
+    // /auth/me answer before rendering the honest dark placeholder.
     return (
       <View style={styles.root}>
         <Text>Location</Text>
@@ -50,7 +55,9 @@ export default function Screen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
-      <LocationConsoleScreen {...deps} />
+      <DeskListShell title="Location" testID="owner-location-page">
+        <LocationConsoleScreen {...deps} />
+      </DeskListShell>
     </SafeAreaView>
   );
 }

@@ -75,6 +75,7 @@ const DETAIL = {
   altPhone: ALT_PHONE,
   addressLine1: '12 3rd Cross, Kormangala',
   addressLine2: 'Near Jyoti Nivas',
+  area: null,
   city: 'Bengaluru',
   state: 'Karnataka',
   pincode: '560034',
@@ -244,6 +245,30 @@ describe('CustomerDetailScreen (§D4)', () => {
     expect(findAll(findID(readOnly, 'customer-stack')!, (n) => n.type === 'Pressable')).toHaveLength(0);
   });
 
+  it('a site nobody has pinned yet says who fills it — the office cannot', async () => {
+    const deps = baseDetailDeps();
+    const renderer = await create(
+      <CustomerDetailScreen {...deps} detail={{ ...deps.detail!, latitude: null, longitude: null }} />,
+    );
+    expect(allText(findID(renderer, 'customer-location-empty')!).join(' ')).toContain('technician');
+    expect(findID(renderer, 'customer-location')).toBeUndefined();
+  });
+
+  it('a captured location reads as six decimals and opens a map', async () => {
+    const onOpenMap = vi.fn();
+    const deps = baseDetailDeps();
+    const renderer = await create(
+      <CustomerDetailScreen
+        {...deps}
+        onOpenMap={onOpenMap}
+        detail={{ ...deps.detail!, latitude: 12.9352, longitude: 77.6245 }}
+      />,
+    );
+    expect(allText(findID(renderer, 'customer-location')!).join(' ')).toContain('12.935200, 77.624500');
+    await press(renderer, 'customer-location');
+    expect(onOpenMap).toHaveBeenCalledWith(12.9352, 77.6245);
+  });
+
   it('the detail carries name, phones tappable to call, address, area and notes', async () => {
     const deps = baseDetailDeps();
     const renderer = await create(<CustomerDetailScreen {...deps} />);
@@ -251,8 +276,18 @@ describe('CustomerDetailScreen (§D4)', () => {
 
     expect(allText(tree).join(' | ')).toContain('Sunrise Apartments');
     expect(allText(tree).join(' | ')).toContain('12 3rd Cross, Kormangala');
+    // The area line is the site's LOCALITY leading, then city and pincode
+    // (2026-09-17) — it used to be "city · pincode" alone, which is what
+    // the console's "area" column also showed before the column existed.
     expect(findID(renderer, 'customer-area')).toBeDefined();
-    expect(allText(findID(renderer, 'customer-area')!).join(' ')).toContain('Bengaluru · 560034');
+    expect(allText(findID(renderer, 'customer-area')!).join(' ')).toContain('Bengaluru 560034');
+    // No locality named yet is normal: the line never invents one.
+    expect(allText(findID(renderer, 'customer-area')!).join(' ')).not.toContain('· ');
+
+    // The captured location is its own block. This fixture is pinned, so
+    // it reads as coordinates; the unpinned case is its own test below.
+    expect(findID(renderer, 'customer-location-block')).toBeDefined();
+    expect(allText(findID(renderer, 'customer-location')!).join(' ')).toContain('12.935200, 77.624500');
     expect(allText(tree).join(' | ')).toContain('Gate closes at 21:00');
 
     // Phones are tappable to call — both of them, the number as given.

@@ -19,7 +19,13 @@ import { SEMANTIC } from '@servgrid/shared';
 import { CompanyLedgerScreen } from '../../../src/screens/rep/CompanyLedgerScreen';
 import { useOnline, useRecordPayment, useRepCompanyLedger, useRepPayments } from '../../../src/screens/rep/useRepData';
 import { OwnerCompanyDetailScreen } from '../../../src/screens/owner/CompanyDetailScreen';
-import { useOwnerCompanyLedger, useOwnerReps, useReassignCompany } from '../../../src/screens/owner/useOwnerData';
+import {
+  fetchPaymentProof,
+  fetchSaleWithItems,
+  useOwnerCompanyLedger,
+  useOwnerReps,
+  useReassignCompany,
+} from '../../../src/screens/owner/useOwnerData';
 import { captureProofPhoto } from '../../../src/lib/captureProof';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
@@ -85,6 +91,8 @@ function OwnerCompanyLedgerRoute({ companyId }: { companyId: string }): React.Re
         reassignError={reassignError}
         onNewSale={() => router.push(`/sales/new?company=${companyId}`)}
         onRecordPayment={() => router.push(`/payments/new?company=${companyId}`)}
+        onLoadSale={(saleId) => fetchSaleWithItems(saleId)}
+        onLoadPaymentProof={(paymentId) => fetchPaymentProof(paymentId)}
         onRetry={ledger.reload}
       />
     </SafeAreaView>

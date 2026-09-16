@@ -30,7 +30,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { SEMANTIC } from '@servgrid/shared';
 import { createIntentWriter } from '../../../../src/lib/intentWrite';
 import { CompleteSheet } from '../../../../src/screens/technician/CompleteSheet';
-import { bodyKeyedWriters, type PartProduct } from '../../../../src/screens/technician/completeSheet';
+import { bodyKeyedWriters, withSiteFix, type PartProduct } from '../../../../src/screens/technician/completeSheet';
+import { captureSiteFix, type SiteFix } from '../../../../src/location/siteFix';
 import {
   TECHNICIAN_WORK_KEY,
   intentRequest,
@@ -58,6 +59,12 @@ export default function Screen() {
   // replays the pinned key (the dropped-connection retry), a changed
   // body — Free ↔ Charge — starts a new intent under a new key.
   const writers = useRef<ReturnType<typeof bodyKeyedWriters> | null>(null);
+  // The on-site fix, captured ONCE per sheet. `undefined` = not asked yet,
+  // `null` = asked and the device could not say. It is held across
+  // attempts on purpose: the write is keyed by its body, so a fix that
+  // moved between the first try and its retry would look like a new
+  // intent and could file the completion twice.
+  const fix = useRef<SiteFix | null | undefined>(undefined);
 
   const view = jobId === undefined || deps === null ? null : (deps.views.find((v) => v.job.id === jobId) ?? null);
   const products: PartProduct[] =
@@ -86,8 +93,10 @@ export default function Screen() {
         now={new Date()}
         onDismiss={() => router.back()}
         onSubmit={async (payload) => {
+          if (fix.current === undefined) fix.current = await captureSiteFix();
+          const body = withSiteFix(payload, fix.current);
           writers.current ??= bodyKeyedWriters(() => createIntentWriter(intentRequest));
-          await writers.current.writerFor(JSON.stringify(payload)).send('POST', `/v1/jobs/${view.job.id}/complete`, payload);
+          await writers.current.writerFor(JSON.stringify(body)).send('POST', `/v1/jobs/${view.job.id}/complete`, body);
           void queryClient.invalidateQueries({ queryKey: TECHNICIAN_WORK_KEY });
           void queryClient.invalidateQueries({ queryKey: jobEventsKey(view.job.id) });
         }}

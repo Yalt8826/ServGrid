@@ -16,23 +16,27 @@ import { Banner, EmptyState, Skeleton, useDensity } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { DeskTable } from './deskTable';
 import type { DeskTableColumn, SortState } from './deskTable';
-import { OwnerCustomerDetailBody, type OwnerCustomerDetailDeps } from './CustomerDetailBody';
+
 import {
   sortOwnerCustomers,
   unitsLabelOf,
   type OwnerCustomerRow,
 } from './customersModel';
 
-export interface OwnerCustomersDeps extends OwnerCustomerDetailDeps {
+/**
+ * The LIST's deps, and only the list's (2026-09-17). This used to extend
+ * the detail body's deps so the desk could mount it in a side pane; the
+ * row now opens the site's own page instead, so every detail prop that
+ * travelled through here is gone rather than ignored.
+ */
+export interface OwnerCustomersDeps {
   offline: boolean;
   error: string | null;
   loading: boolean;
   rows: OwnerCustomerRow[];
   onRetryList(): void;
-  /** Phone: push. Desk: the side detail takes over. */
+  /** The row, pressed: the site's page. Phone cards and the desk table both. */
   onOpenCustomer(customerId: string): void;
-  selectedCustomerId: string | null;
-  onSelectCustomer(customerId: string | null): void;
   /**
    * What an empty list means here (OW.6). "No customers yet" is a lie
    * when a search is narrowing them, and the difference between "you have
@@ -55,6 +59,7 @@ function phoneCard(row: OwnerCustomerRow, onOpen: (id: string) => void): React.R
       <View style={styles.cardMain}>
         <Text style={styles.cardName}>{row.name}</Text>
         <Text style={styles.cardMeta}>{`${row.phone}${row.area === null ? '' : ` · ${row.area}`}`}</Text>
+        <Text style={styles.cardMeta}>{row.location ?? 'Location not captured'}</Text>
         <Text style={styles.cardMeta}>
           {row.companyName === null ? 'No company' : row.companyName}
         </Text>
@@ -76,10 +81,20 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
     {
       key: 'name',
       label: 'Name',
+      // The one flexing column, and it holds the company too: a standalone
+      // Company column spent 128px saying "No company" on nearly every row,
+      // which is width the address needs more (2026-09-17).
       width: null,
       render: (r) => (
-        <Text style={styles.cell} numberOfLines={1} testID={`customer-name-${r.id}`}>
-          {r.name}
+        <Text numberOfLines={1}>
+          <Text style={styles.cell} testID={`customer-name-${r.id}`}>
+            {r.name}
+          </Text>
+          {r.companyName === null ? null : (
+            <Text style={styles.cellMuted} testID={`customer-company-${r.id}`}>
+              {`  ${r.companyName}`}
+            </Text>
+          )}
         </Text>
       ),
       sortValue: (r) => r.name,
@@ -87,39 +102,64 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
     {
       key: 'area',
       label: 'Area',
-      width: 130,
+      width: 118,
       render: (r) => (
-        <Text style={styles.cell} numberOfLines={1}>
+        <Text style={styles.cell} numberOfLines={1} testID={`customer-area-${r.id}`}>
           {r.area ?? '—'}
         </Text>
       ),
       sortValue: (r) => r.area ?? '',
     },
     {
-      key: 'phone',
-      label: 'Phone',
-      width: 120,
-      render: (r) => <Text style={styles.cellMono}>{r.phone}</Text>,
-      sortValue: (r) => r.phone,
-    },
-    {
-      key: 'company',
-      label: 'Company',
-      width: 150,
+      key: 'address',
+      label: 'Address',
+      // The widest cell on the list, and the one worth the room: a full
+      // address is how a site is recognised when the name means nothing.
+      width: 236,
       render: (r) => (
-        <Text style={styles.cell} numberOfLines={1} testID={`customer-company-${r.id}`}>
-          {r.companyName ?? 'No company'}
+        <Text style={styles.cell} numberOfLines={1} testID={`customer-address-${r.id}`}>
+          {r.address ?? '—'}
         </Text>
       ),
-      sortValue: (r) => r.companyName ?? '',
+      sortValue: (r) => r.address ?? '',
+    },
+    {
+      key: 'location',
+      label: 'Location',
+      // 20 mono characters — "12.971600, 77.594600" — plus the cell's padding.
+      width: 194,
+      render: (r) =>
+        r.location === null ? (
+          // Never captured is a fact about the site, and it names who
+          // fills it — the office is not the one standing there.
+          <Text style={styles.cellMuted} numberOfLines={1} testID={`customer-location-${r.id}`}>
+            Not captured
+          </Text>
+        ) : (
+          <Text style={styles.cellMono} numberOfLines={1} testID={`customer-location-${r.id}`}>
+            {r.location}
+          </Text>
+        ),
+      sortValue: (r) => r.location ?? '',
+    },
+    {
+      key: 'phone',
+      label: 'Phone',
+      width: 122,
+      render: (r) => (
+        <Text numberOfLines={1} style={styles.cellMono}>
+          {r.phone}
+        </Text>
+      ),
+      sortValue: (r) => r.phone,
     },
     {
       key: 'units',
       label: 'Units',
-      width: 64,
+      width: 62,
       align: 'right',
       render: (r) => (
-        <Text style={styles.cellMono} testID={`customer-units-${r.id}`}>
+        <Text numberOfLines={1} style={styles.cellMono} testID={`customer-units-${r.id}`}>
           {unitsLabelOf(r.units)}
         </Text>
       ),
@@ -128,10 +168,10 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
     {
       key: 'openJobs',
       label: 'Open jobs',
-      width: 88,
+      width: 82,
       align: 'right',
       render: (r) => (
-        <Text style={styles.cellMono} testID={`customer-open-${r.id}`}>
+        <Text numberOfLines={1} style={styles.cellMono} testID={`customer-open-${r.id}`}>
           {String(r.openJobs)}
         </Text>
       ),
@@ -140,7 +180,7 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
     {
       key: 'lastJob',
       label: 'Last job',
-      width: 150,
+      width: 96,
       render: (r) => (
         <Text style={styles.cellMono} numberOfLines={1}>
           {r.lastJob ?? '—'}
@@ -152,12 +192,16 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
 
   return (
     <View style={styles.screen} testID="owner-customers-screen">
-      <View style={styles.header}>
-        <Text style={styles.title}>Customers</Text>
-        <Text style={styles.count} testID="owner-customers-count">
-          {`${rows.length} sites`}
-        </Text>
-      </View>
+      {/* The route's DeskListShell owns the desk header; this one is the
+      phone's title — on the desk it duplicated the page header. */}
+      {!desk ? (
+        <View style={styles.header}>
+          <Text style={styles.title}>Customers</Text>
+          <Text style={styles.count} testID="owner-customers-count">
+            {`${rows.length} sites`}
+          </Text>
+        </View>
+      ) : null}
 
       {deps.offline ? (
         <Banner tone="danger" message="No connection. This screen is not live." testID="owner-customers-offline" />
@@ -176,44 +220,20 @@ export function OwnerCustomersScreen(deps: OwnerCustomersDeps): React.ReactNode 
       ) : rows.length === 0 ? (
         <EmptyState message={deps.emptyMessage ?? 'No customers yet.'} testID="owner-customers-empty" />
       ) : desk ? (
+        // The row opens the SITE'S PAGE, not a pane beside it (owner,
+        // 2026-09-17). The page is the same body this pane mounted, with
+        // room for the address, the equipment and the job history — and
+        // one click from the list rather than a selection to manage.
         <View style={styles.deskBody}>
-          <View style={styles.tableWrap}>
-            <DeskTable
-              data={rows}
-              rowKey={(r) => r.id}
-              sort={sort}
-              onSort={setSort}
-              scrollTestID="owner-customers-table"
-              onRowPress={(r) => deps.onSelectCustomer(r.id)}
-              columns={columns}
-            />
-          </View>
-          {deps.selectedCustomerId !== null ? (
-            <View style={styles.sideDetail} testID="owner-customers-side-detail">
-              <OwnerCustomerDetailBody
-                detail={deps.detail}
-                loading={deps.loading}
-                detailError={deps.detailError}
-                companyName={deps.companyName}
-                stack={deps.stack}
-                history={deps.history}
-                historyError={deps.historyError}
-                editing={deps.editing}
-                savingStack={deps.savingStack}
-                stackError={deps.stackError}
-                onSaveStackItem={deps.onSaveStackItem}
-                onRemoveStackItem={deps.onRemoveStackItem}
-                onCloseSheet={deps.onCloseSheet}
-                onEditStackItemOpen={deps.onEditStackItemOpen}
-                onCall={deps.onCall}
-                onEdit={deps.onEdit}
-                onOpenJob={deps.onOpenJob}
-                onOpenCompany={deps.onOpenCompany}
-                onRetry={deps.onRetry}
-                testID="owner-customers-side-detail-body"
-              />
-            </View>
-          ) : null}
+          <DeskTable
+            data={rows}
+            rowKey={(r) => r.id}
+            sort={sort}
+            onSort={setSort}
+            scrollTestID="owner-customers-table"
+            onRowPress={(r) => deps.onOpenCustomer(r.id)}
+            columns={columns}
+          />
         </View>
       ) : (
         <View style={styles.phoneBody}>
@@ -244,14 +264,7 @@ const styles = StyleSheet.create({
   count: { ...textStyle('caption'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] },
   loading: { padding: SPACE[4], gap: SPACE[2] },
   skeletonRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10 },
-  deskBody: { flex: 1, flexDirection: 'row' },
-  tableWrap: { flex: 1 },
-  sideDetail: {
-    width: 420,
-    borderLeftWidth: 1,
-    borderLeftColor: SEMANTIC.line.default,
-    backgroundColor: SEMANTIC.bg.app,
-  },
+  deskBody: { flex: 1 },
   phoneBody: { flex: 1 },
   card: {
     minHeight: 72,
@@ -267,4 +280,5 @@ const styles = StyleSheet.create({
   cardMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   cell: { ...textStyle('body', 'desk'), color: SEMANTIC.text.primary },
   cellMono: { ...textStyle('mono', 'desk'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] },
+  cellMuted: { ...textStyle('body', 'desk'), color: SEMANTIC.text.secondary },
 });

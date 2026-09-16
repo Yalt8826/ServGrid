@@ -106,6 +106,38 @@ export const jobCompletionPartSchema = z
     message: 'Name the part — pick a product or type what it is.',
   });
 
+/**
+ * The site pin (§6.4, migration 021). Latitude and longitude are one fact
+ * — a point — so they are written and cleared together, and both are
+ * bounded. `customers` has carried a paired CHECK since 005 (`(latitude
+ * IS NULL) = (longitude IS NULL)`), but a CHECK can only refuse a row: it
+ * cannot tell an office user which box they left empty. These two rules
+ * say it in the payload's own vocabulary, so the refusal arrives as a
+ * field error instead of a database error, and no writer — the owner's
+ * form, the dispatcher's, the technician's on-site capture — can produce
+ * the half-written point the CHECK would reject anyway.
+ *
+ * Range is the same ±90/±180 the `location_pings` table has always
+ * enforced on its own coordinates.
+ *
+ * Declared here, above the first schema that uses it (the completion
+ * payload), because these are `const`s evaluated at module load: a
+ * reference from an earlier schema would be a temporal-dead-zone crash,
+ * not merely a style problem.
+ */
+export const latitudeSchema = z.number().min(-90).max(90);
+export const longitudeSchema = z.number().min(-180).max(180);
+
+/** Both keys, or neither. `null` on both clears the pin. */
+export function pinTravelsTogether(v: { latitude?: unknown; longitude?: unknown }): boolean {
+  return (v.latitude === undefined) === (v.longitude === undefined);
+}
+
+export const PIN_PAIR_MESSAGE = 'Latitude and longitude travel together — set both, or clear both.';
+
+/** The site's locality — "Rajajinagar", "HSR Layout" (migration 021). */
+export const areaField = z.string().min(1).max(80);
+
 export const jobCompleteSchema = z
   .object({
     completedAt: isoDateTime,
@@ -120,8 +152,18 @@ export const jobCompleteSchema = z
     customerSigned: z.boolean().optional(),
     stackChanges: z.array(jobStackChangeSchema).max(50).optional(),
     parts: z.array(jobCompletionPartSchema).max(50).optional(),
+    /**
+     * Where the technician stood when he filed this (§6.4, 2026-09-17).
+     * `job_completions` has had these columns since 007 and nothing ever
+     * wrote them; the capture also becomes the site's own pin, because
+     * the person who had to find the place is the best source for where
+     * it is. Paired and bounded exactly like the customer's.
+     */
+    latitude: latitudeSchema.optional(),
+    longitude: longitudeSchema.optional(),
   })
   .strict()
+  .refine(pinTravelsTogether, { message: PIN_PAIR_MESSAGE })
   .refine(
     (v) =>
       v.discountAmount === undefined ||
@@ -570,6 +612,8 @@ export type CompanyOwnerPatch = z.infer<typeof companyOwnerPatchSchema>;
 
 // ── customers (§5 rule 3, §6.4) ─────────────────────────────────────────────
 
+
+
 export const CustomerCreateSchema = z
   .object({
     name: z.string().min(1),
@@ -577,12 +621,16 @@ export const CustomerCreateSchema = z
     altPhone: z.string().optional(),
     addressLine1: z.string().optional(),
     addressLine2: z.string().optional(),
+    area: areaField.optional(),
     city: z.string().optional(),
     pincode: z.string().optional(),
     notes: z.string().optional(),
+    latitude: latitudeSchema.optional(),
+    longitude: longitudeSchema.optional(),
     companyId: uuid.nullish(),
   })
-  .strict();
+  .strict()
+  .refine(pinTravelsTogether, { message: PIN_PAIR_MESSAGE });
 
 /**
  * The dispatcher's create payload (§5 rule 3): `companyId` is STRIPPED by
@@ -608,13 +656,19 @@ export const customerPatchSchema = z
     altPhone: z.string().max(32).nullish(),
     addressLine1: z.string().max(200).nullish(),
     addressLine2: z.string().max(200).nullish(),
+    area: areaField.nullish(),
     city: z.string().max(100).nullish(),
     pincode: z.string().max(10).nullish(),
     notes: z.string().max(2000).nullish(),
+    // `null` on both clears the pin; one without the other is refused
+    // here rather than by the table's paired CHECK.
+    latitude: latitudeSchema.nullish(),
+    longitude: longitudeSchema.nullish(),
     companyId: uuid.nullish(),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' });
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change.' })
+  .refine(pinTravelsTogether, { message: PIN_PAIR_MESSAGE });
 
 /**
  * The dispatcher's PATCH: `companyId` cannot survive it — the same
@@ -1210,6 +1264,8 @@ export const SyncCustomerSchema = z
     altPhone: z.string().nullable(),
     addressLine1: z.string().nullable(),
     addressLine2: z.string().nullable(),
+    /** The locality (migration 021); null until someone names it. */
+    area: z.string().nullable(),
     city: z.string().nullable(),
     state: z.string().nullable(),
     pincode: z.string().nullable(),

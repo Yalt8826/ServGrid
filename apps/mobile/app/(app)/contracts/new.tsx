@@ -28,6 +28,7 @@ import { istBusinessDate } from '../../../src/screens/dispatcher/useDispatcherDa
 import type { Contract } from '@servgrid/shared';
 import { WriteNotSaved } from '../../../src/lib/intentWrite';
 import { isFlagOn } from '../../../src/state/featureFlags';
+import { useFlagsReady } from '../../../src/state/useFlagsReady';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
@@ -145,6 +146,7 @@ function draftOrNew(
 export default function Screen() {
   const actor = useSessionStore((s) => s.actor);
   const params = useLocalSearchParams<{ renewOf?: string | string[]; editId?: string | string[] }>();
+  const flagsReady = useFlagsReady();
   if (actor === null) return null;
   if (actor.role !== 'dispatcher' && actor.role !== 'owner') {
     return (
@@ -153,7 +155,9 @@ export default function Screen() {
       </View>
     );
   }
-  if (!isFlagOn('contracts.manage')) {
+  // Unknown flags read as off on a cold browser load — wait for the
+  // /auth/me answer before rendering the honest dark placeholder.
+  if (!flagsReady || !isFlagOn('contracts.manage')) {
     return (
       <View style={styles.root}>
         <Text>New AMC</Text>

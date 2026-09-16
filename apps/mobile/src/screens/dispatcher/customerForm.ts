@@ -26,6 +26,8 @@ export interface CustomerFormFields {
   name: string;
   phone: string;
   altPhone: string;
+  /** The locality — "Rajajinagar", "HSR Layout" (migration 021). */
+  area: string;
   addressLine1: string;
   addressLine2: string;
   city: string;
@@ -35,7 +37,17 @@ export interface CustomerFormFields {
 
 /** A blank form — every field empty, nothing prefilled. */
 export function emptyCustomerForm(): CustomerFormFields {
-  return { name: '', phone: '', altPhone: '', addressLine1: '', addressLine2: '', city: '', pincode: '', notes: '' };
+  return {
+    name: '',
+    phone: '',
+    altPhone: '',
+    area: '',
+    addressLine1: '',
+    addressLine2: '',
+    city: '',
+    pincode: '',
+    notes: '',
+  };
 }
 
 /** The form as the site's current record holds it — the edit mode's
@@ -45,6 +57,7 @@ export function customerFormOf(detail: {
   name: string;
   phone: string;
   altPhone: string | null;
+  area?: string | null;
   addressLine1: string | null;
   addressLine2: string | null;
   city: string | null;
@@ -55,6 +68,7 @@ export function customerFormOf(detail: {
     name: detail.name,
     phone: detail.phone,
     altPhone: detail.altPhone ?? '',
+    area: detail.area ?? '',
     addressLine1: detail.addressLine1 ?? '',
     addressLine2: detail.addressLine2 ?? '',
     city: detail.city ?? '',
@@ -86,6 +100,7 @@ export interface DispatcherCustomerCreateBody {
   name: string;
   phone: string;
   altPhone?: string;
+  area?: string;
   addressLine1?: string;
   addressLine2?: string;
   city?: string;
@@ -100,6 +115,7 @@ export function customerCreateBody(fields: CustomerFormFields): DispatcherCustom
     name: fields.name.trim(),
     phone: fields.phone.trim(),
     altPhone: orUndefined(fields.altPhone),
+    area: orUndefined(fields.area),
     addressLine1: orUndefined(fields.addressLine1),
     addressLine2: orUndefined(fields.addressLine2),
     city: orUndefined(fields.city),
@@ -120,6 +136,7 @@ export interface DispatcherCustomerPatchBody {
   name?: string;
   phone?: string;
   altPhone?: string | null;
+  area?: string | null;
   addressLine1?: string | null;
   addressLine2?: string | null;
   city?: string | null;
@@ -130,13 +147,16 @@ export interface DispatcherCustomerPatchBody {
 export function customerPatchBody(before: CustomerFormFields, next: CustomerFormFields): DispatcherCustomerPatchBody | null {
   const body: DispatcherCustomerPatchBody = {};
   /** Changed-vs-before, `null` when emptied (a clear), absent when not. */
-  const nullable = (key: 'altPhone' | 'addressLine1' | 'addressLine2' | 'city' | 'pincode' | 'notes'): void => {
+  const nullable = (
+    key: 'altPhone' | 'area' | 'addressLine1' | 'addressLine2' | 'city' | 'pincode' | 'notes',
+  ): void => {
     const value = orNull(next[key]);
     if (value !== before[key]) body[key] = value;
   };
   if (next.name.trim() !== before.name) body.name = next.name.trim();
   if (next.phone.trim() !== before.phone) body.phone = next.phone.trim();
   nullable('altPhone');
+  nullable('area');
   nullable('addressLine1');
   nullable('addressLine2');
   nullable('city');

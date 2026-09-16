@@ -66,6 +66,7 @@ function makeCustomer(): TechnicianWork['customers'][number] {
     altPhone: null,
     addressLine1: '14, Gandhi Bazaar',
     addressLine2: 'Kormangala 3rd Blk',
+    area: null,
     city: 'Bengaluru',
     state: 'Karnataka',
     pincode: '560034',

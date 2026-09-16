@@ -29,7 +29,7 @@ import { Button, EmptyState, Sheet, Skeleton, TextField, DatePicker } from '../.
 import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
 import type { CustomerHistoryJob, CustomerStackUnit } from '../dispatcher/customer';
-import { StackSection } from '../dispatcher/customer';
+import { SiteFacts, StackSection } from '../dispatcher/customer';
 
 /** The stack correction sheet's payload — EXACTLY the three fields
  * §6.4's PATCH takes. No `sourceJobId`, no `source_job_id`: the
@@ -55,7 +55,8 @@ export interface OwnerCustomerDetailDeps {
   /** Opens the correction sheet on one unit. */
   onEditStackItemOpen(unitId: string): void;
   onCall(phone: string): void;
-  onEdit(): void;
+  /** The site's captured location, opened in a map. */
+  onOpenMap?(latitude: number, longitude: number): void;
   onOpenJob(jobId: string): void;
   /** Through to the company ledger (§O4b). Null company → no link. */
   onOpenCompany(): void;
@@ -68,6 +69,15 @@ export interface OwnerCustomerDetailDeps {
   onSaveStackItem(itemId: string, version: number, patch: StackItemPatchInput): void;
   onRemoveStackItem(itemId: string): void;
   onCloseSheet(): void;
+  /** Closes the desk side detail — the jobs side detail's ✕ Close. */
+  onClose?(): void;
+  /**
+   * Whether this body paints the site's name itself. True by default;
+   * the PAGE passes false, because its header owns the name and two
+   * headings for one site is the duplication the console spent a phase
+   * removing (2026-09-17).
+   */
+  showName?: boolean;
   testID?: string;
 }
 
@@ -115,6 +125,21 @@ export function OwnerCustomerDetailBody(deps: OwnerCustomerDetailDeps): React.Re
 
   return (
     <View style={styles.root} testID={deps.testID ?? 'owner-customer-detail'}>
+      {deps.onClose !== undefined ? (
+        <View style={styles.closeRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close detail"
+            hitSlop={8}
+            onPress={deps.onClose}
+            style={styles.closeButton}
+            testID="owner-customer-detail-close"
+          >
+            <Text style={styles.closeLabel}>✕ Close</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {deps.detailError !== null ? (
         <EmptyState message={deps.detailError} actionLabel="Retry" onAction={deps.onRetry} testID="owner-customer-detail-error" />
       ) : deps.loading && detail === null ? (
@@ -124,9 +149,11 @@ export function OwnerCustomerDetailBody(deps: OwnerCustomerDetailDeps): React.Re
         </View>
       ) : detail === null ? null : (
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title} testID="owner-customer-name">
-            {detail.name}
-          </Text>
+          {deps.showName === false ? null : (
+            <Text style={styles.title} testID="owner-customer-name">
+              {detail.name}
+            </Text>
+          )}
 
           {deps.companyName !== null ? (
             <Pressable
@@ -166,14 +193,9 @@ export function OwnerCustomerDetailBody(deps: OwnerCustomerDetailDeps): React.Re
             ) : null}
           </View>
 
-          <View style={styles.section} testID="owner-customer-address">
-            <Text style={styles.sectionLabel}>Address</Text>
-            {detail.addressLine1 !== null ? <Text style={styles.body}>{detail.addressLine1}</Text> : null}
-            {detail.addressLine2 !== null ? <Text style={styles.body}>{detail.addressLine2}</Text> : null}
-            {detail.city !== null || detail.pincode !== null ? (
-              <Text style={styles.caption}>{[detail.city, detail.pincode].filter((p) => p !== null).join(' · ')}</Text>
-            ) : null}
-          </View>
+          {/* The address and the captured location — the SAME block the
+          dispatcher's phone mounts, so a site never reads two ways. */}
+          <SiteFacts facts={detail} onOpenMap={deps.onOpenMap} />
 
           {/* The stack, EDITABLE — the owner is the correction path
           (§O4b). Same `StackSection` the dispatcher mounts read-only. */}
@@ -208,9 +230,6 @@ export function OwnerCustomerDetailBody(deps: OwnerCustomerDetailDeps): React.Re
             </View>
           ) : null}
 
-          <View style={styles.actions}>
-            <Button label="Edit customer" variant="secondary" onPress={deps.onEdit} fullwidth testID="owner-customer-edit" />
-          </View>
         </ScrollView>
       )}
 
@@ -260,6 +279,9 @@ export function OwnerCustomerDetailBody(deps: OwnerCustomerDetailDeps): React.Re
 }
 
 const styles = StyleSheet.create({
+  closeRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: SPACE[3], paddingTop: SPACE[2] },
+  closeButton: { minHeight: 36, justifyContent: 'center', paddingHorizontal: SPACE[2] },
+  closeLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
   root: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   loading: { padding: SPACE[4], gap: SPACE[2] },
   content: { padding: SPACE[4], paddingBottom: SPACE[8] },

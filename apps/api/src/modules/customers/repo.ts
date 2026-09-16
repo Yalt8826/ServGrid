@@ -65,9 +65,9 @@ export type CustomerVariant = 'full' | 'dispatcher';
 
 const CUSTOMER_COLUMNS: Readonly<Record<CustomerVariant, string>> = {
   full: `c.id, c.name, c.phone, c.alt_phone, c.address_line1, c.address_line2,
-    c.city, c.state, c.pincode, c.latitude, c.longitude, c.notes, c.company_id, c.version`,
+    c.area, c.city, c.state, c.pincode, c.latitude, c.longitude, c.notes, c.company_id, c.version`,
   dispatcher: `c.id, c.name, c.phone, c.alt_phone, c.address_line1, c.address_line2,
-    c.city, c.state, c.pincode, c.latitude, c.longitude, c.notes, c.version`,
+    c.area, c.city, c.state, c.pincode, c.latitude, c.longitude, c.notes, c.version`,
 };
 
 interface CustomerRowBase {
@@ -77,6 +77,8 @@ interface CustomerRowBase {
   alt_phone: string | null;
   address_line1: string | null;
   address_line2: string | null;
+  /** The locality (migration 021). */
+  area: string | null;
   city: string | null;
   state: string | null;
   pincode: string | null;
@@ -152,9 +154,13 @@ export interface CustomerInsert {
   altPhone: string | null;
   addressLine1: string | null;
   addressLine2: string | null;
+  area: string | null;
   city: string | null;
   pincode: string | null;
   notes: string | null;
+  /** The site pin — both or neither, guaranteed by the schema before it gets here. */
+  latitude: number | null;
+  longitude: number | null;
   /** Already role-stripped: the service never receives a dispatcher's companyId (§5 rule 3). */
   companyId: string | null;
 }
@@ -162,8 +168,9 @@ export interface CustomerInsert {
 /** POST /v1/customers — a soft-deleteable row, active from birth (§3.2). */
 export async function insertCustomer(db: Db, input: CustomerInsert): Promise<string> {
   const r = await db.query<{ id: string }>(
-    `INSERT INTO customers (name, phone, alt_phone, address_line1, address_line2, city, pincode, notes, company_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO customers (name, phone, alt_phone, address_line1, address_line2, area, city, pincode,
+                            notes, latitude, longitude, company_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING id`,
     [
       input.name,
@@ -171,9 +178,12 @@ export async function insertCustomer(db: Db, input: CustomerInsert): Promise<str
       input.altPhone,
       input.addressLine1,
       input.addressLine2,
+      input.area,
       input.city,
       input.pincode,
       input.notes,
+      input.latitude,
+      input.longitude,
       input.companyId,
     ],
   );
@@ -187,9 +197,12 @@ export interface CustomerPatchFields {
   altPhone?: string | null;
   addressLine1?: string | null;
   addressLine2?: string | null;
+  area?: string | null;
   city?: string | null;
   pincode?: string | null;
   notes?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   companyId?: string | null;
 }
 
@@ -199,9 +212,12 @@ const PATCH_COLUMNS: Readonly<Record<keyof CustomerPatchFields, string>> = {
   altPhone: 'alt_phone',
   addressLine1: 'address_line1',
   addressLine2: 'address_line2',
+  area: 'area',
   city: 'city',
   pincode: 'pincode',
   notes: 'notes',
+  latitude: 'latitude',
+  longitude: 'longitude',
   companyId: 'company_id',
 };
 
@@ -215,6 +231,35 @@ export async function updateCustomer(db: Db, customerId: string, fields: Custome
   }
   values.push(customerId);
   await db.query(`UPDATE customers SET ${sets.join(', ')} WHERE id = $${values.length}`, values);
+}
+
+/**
+ * The site pin, written by the technician's on-site completion instead of
+ * by anyone editing the customer.
+ *
+ * It lives here — in the module that owns `customers`' columns — rather
+ * than in the jobs repo that calls it, so the customer's write rules stay
+ * in one file. It is deliberately NOT `updateCustomer`: that path exists
+ * for a person editing a record and takes a version lock and an If-Match,
+ * while this is a fact the job produced, arriving inside the completion's
+ * own transaction. It touches exactly two columns and never the version
+ * (the touch trigger bumps that).
+ *
+ * Both coordinates are required — the table's paired CHECK would refuse
+ * half a point, and the caller only has a fix when the device captured
+ * one.
+ */
+export async function setSitePin(
+  db: Db,
+  customerId: string,
+  latitude: number,
+  longitude: number,
+): Promise<void> {
+  await db.query('UPDATE customers SET latitude = $2, longitude = $3 WHERE id = $1', [
+    customerId,
+    latitude,
+    longitude,
+  ]);
 }
 
 export interface CustomerLockRow {

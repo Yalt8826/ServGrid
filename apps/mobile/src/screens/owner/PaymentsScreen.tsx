@@ -16,7 +16,9 @@ import { formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { DeskTable } from './deskTable';
 import type { SortState } from './deskTable';
+import { PaymentProofSheet, type PreviewSubject } from './ledgerPreviews';
 import { paymentsRunningTotalOf, sortOwnerPayments, type OwnerPaymentRow } from './model';
+import type { PaymentProof } from './useOwnerData';
 import { VoidReasonSheet } from './VoidReasonSheet';
 
 export interface OwnerPaymentsScreenProps {
@@ -27,6 +29,8 @@ export interface OwnerPaymentsScreenProps {
   voidBusy: boolean;
   voidError: string | null;
   onRetry: () => void;
+  /** A row, pressed — resolves the collection's proof photo for the preview. */
+  onLoadPaymentProof: (paymentId: string) => Promise<PaymentProof | null>;
   testID?: string;
 }
 
@@ -38,6 +42,8 @@ export const PAYMENT_STATUS_PILL: Record<OwnerPaymentRow['status'], { label: str
 export function OwnerPaymentsScreen(props: OwnerPaymentsScreenProps): React.ReactNode {
   const [sort, setSort] = useState<SortState>({ key: 'businessDate', dir: 'desc' });
   const [voidTarget, setVoidTarget] = useState<OwnerPaymentRow | null>(null);
+  // One state: which row is previewing. The sheet owns its own read.
+  const [preview, setPreview] = useState<PreviewSubject | null>(null);
   const density = useDensity();
   const desk = density === 'desk';
   const rows = sortOwnerPayments(props.rows);
@@ -66,13 +72,16 @@ export function OwnerPaymentsScreen(props: OwnerPaymentsScreenProps): React.Reac
             sort={sort}
             onSort={setSort}
             scrollTestID="owner-payments-table"
+            // The row IS the door to its proof photo (owner, 2026-09-17),
+            // the same preview the company ledger's payment rows open.
+            onRowPress={(r) => setPreview({ id: r.id, number: r.paymentNumber })}
             columns={[
               {
                 key: 'paymentNumber',
                 label: 'Number',
-                width: 120,
+                width: 140,
                 render: (r) => (
-                  <Text style={styles.monoCell} testID={`payment-number-${r.id}`}>
+                  <Text numberOfLines={1} style={styles.monoCell} testID={`payment-number-${r.id}`}>
                     {r.paymentNumber}
                   </Text>
                 ),
@@ -82,28 +91,28 @@ export function OwnerPaymentsScreen(props: OwnerPaymentsScreenProps): React.Reac
                 key: 'companyName',
                 label: 'Company',
                 width: null,
-                render: (r) => <Text style={styles.cell}>{r.companyName}</Text>,
+                render: (r) => <Text style={styles.cell} numberOfLines={1}>{r.companyName}</Text>,
                 sortValue: (r) => r.companyName,
               },
               {
                 key: 'repName',
                 label: 'Collected by',
                 width: 120,
-                render: (r) => <Text style={styles.cell}>{r.repName ?? '—'}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.cell}>{r.repName ?? '—'}</Text>,
                 sortValue: (r) => r.repName ?? '',
               },
               {
                 key: 'businessDate',
                 label: 'Date',
                 width: 96,
-                render: (r) => <Text style={styles.monoCell}>{formatDateEnIN(r.businessDate, nowYear)}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{formatDateEnIN(r.businessDate, nowYear)}</Text>,
                 sortValue: (r) => r.businessDate,
               },
               {
                 key: 'mode',
                 label: 'Mode',
                 width: 90,
-                render: (r) => <Text style={styles.cell}>{r.mode}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.cell}>{r.mode}</Text>,
                 sortValue: (r) => r.mode,
               },
               {
@@ -111,15 +120,15 @@ export function OwnerPaymentsScreen(props: OwnerPaymentsScreenProps): React.Reac
                 label: 'Amount',
                 width: 110,
                 align: 'right',
-                render: (r) => <Text style={styles.monoCell}>{`₹${formatMoneyEnIN(r.amount)}`}</Text>,
+                render: (r) => <Text numberOfLines={1} style={styles.monoCell}>{`₹${formatMoneyEnIN(r.amount)}`}</Text>,
                 sortValue: (r) => Number(r.amount),
               },
               {
                 key: 'status',
                 label: 'Status',
-                width: 90,
+                width: 96,
                 render: (r) => (
-                  <Text style={[styles.pill, { color: PAYMENT_STATUS_PILL[r.status].color }]} testID={`payment-status-${r.id}`}>
+                  <Text numberOfLines={1} style={[styles.pill, { color: PAYMENT_STATUS_PILL[r.status].color }]} testID={`payment-status-${r.id}`}>
                     {PAYMENT_STATUS_PILL[r.status].label}
                   </Text>
                 ),
@@ -170,6 +179,13 @@ export function OwnerPaymentsScreen(props: OwnerPaymentsScreenProps): React.Reac
           })}
         </ScrollView>
       )}
+
+      <PaymentProofSheet
+        payment={preview}
+        onLoad={props.onLoadPaymentProof}
+        onDismiss={() => setPreview(null)}
+        testID="owner-payments-proof-sheet"
+      />
 
       <VoidReasonSheet
         visible={voidTarget !== null}

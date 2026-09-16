@@ -97,6 +97,7 @@ function toCustomer(variant: repo.CustomerVariant, row: repo.CustomerRow): Custo
       altPhone: row.alt_phone,
       addressLine1: row.address_line1,
       addressLine2: row.address_line2,
+      area: row.area,
       city: row.city,
       state: row.state,
       pincode: row.pincode,
@@ -114,6 +115,7 @@ function toCustomer(variant: repo.CustomerVariant, row: repo.CustomerRow): Custo
     altPhone: row.alt_phone,
     addressLine1: row.address_line1,
     addressLine2: row.address_line2,
+    area: row.area,
     city: row.city,
     state: row.state,
     pincode: row.pincode,
@@ -262,9 +264,12 @@ export function createCustomersService() {
       altPhone?: string;
       addressLine1?: string;
       addressLine2?: string;
+      area?: string;
       city?: string;
       pincode?: string;
       notes?: string;
+      latitude?: number;
+      longitude?: number;
       companyId?: string | null;
     },
   ): Promise<CustomerRecord | CustomerDispatcher> {
@@ -277,9 +282,12 @@ export function createCustomersService() {
         altPhone: input.altPhone ?? null,
         addressLine1: input.addressLine1 ?? null,
         addressLine2: input.addressLine2 ?? null,
+        area: input.area ?? null,
         city: input.city ?? null,
         pincode: input.pincode ?? null,
         notes: input.notes ?? null,
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null,
         companyId: input.companyId ?? null,
       });
     } catch (error) {
