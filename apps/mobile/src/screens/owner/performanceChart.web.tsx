@@ -33,7 +33,7 @@ import type { PerfPerson, StackRow } from './performance';
  * cross that line. The type ramp still decides the sizes: these read the
  * same tokens, in the units the browser wants.
  */
-function domText(step: 'label' | 'caption', color: string): CSSProperties {
+export function domText(step: 'label' | 'caption', color: string): CSSProperties {
   return {
     fontSize: TYPE[step].size,
     lineHeight: `${TYPE[step].lineHeight}px`,
@@ -59,7 +59,7 @@ function colourFor(index: number): string {
 }
 
 /** `₹1,200` on an axis, `₹1,200.00` in a tooltip — the axis is a scale, the tooltip is the figure. */
-function axisValue(value: number, kind: 'money' | 'count'): string {
+export function axisValue(value: number, kind: 'money' | 'count'): string {
   if (kind === 'count') return String(value);
   return `₹${formatMoneyEnIN(String(Math.round(value)))}`;
 }
@@ -69,7 +69,7 @@ function exactValue(value: number, kind: 'money' | 'count'): string {
   return `₹${formatMoneyEnIN(value.toFixed(2))}`;
 }
 
-interface TooltipEntry {
+export interface TooltipEntry {
   name?: string;
   value?: number;
   color?: string;
@@ -81,7 +81,7 @@ interface TooltipEntry {
  * out — a list of eight people where six did nothing that day is a list
  * nobody reads.
  */
-function ChartTooltip({
+export function ChartTooltip({
   active,
   payload,
   label,

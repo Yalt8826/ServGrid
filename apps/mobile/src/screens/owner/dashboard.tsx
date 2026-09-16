@@ -46,12 +46,10 @@ import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../../components/ui/motion';
 import { AttentionRows } from './AttentionRows';
 import { AttentionTable } from './AttentionTable';
-import {
-  CHART_HEIGHT_DESK,
-  CHART_HEIGHT_PHONE,
-  JobsPerDayBarChart,
-  RevenuePerWeekLineChart,
-} from './charts';
+import { CHART_HEIGHT_DESK, CHART_HEIGHT_PHONE } from './charts';
+// The two long-view charts come through the web/native seam (OW.5):
+// Recharts on the desk, the hand-drawn pair on a phone.
+import { JobsPerDayBarChart, RevenuePerWeekLineChart } from './trendCharts';
 import type { AttentionRowVm, JobsPerDayPoint, OwnerFigure, RevenuePerWeekPoint } from './model';
 
 /** §O1: the empty feed's words, verbatim — never paraphrased, never blank. */
