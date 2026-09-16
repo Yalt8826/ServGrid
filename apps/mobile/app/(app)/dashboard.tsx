@@ -40,6 +40,7 @@ import {
 import { DashboardScreen } from '../../src/screens/technician/DashboardScreen';
 import { useTechJobsFlag, useTechnicianWork } from '../../src/screens/technician/useTechnicianWork';
 import { OwnerDashboardScreen } from '../../src/screens/owner/dashboard';
+import { PerformancePanels } from '../../src/screens/owner/PerformancePanels';
 import { useOwnerDashboard } from '../../src/screens/owner/useOwnerDashboard';
 import { useSessionStore } from '../../src/state/sessionStore';
 
@@ -136,6 +137,9 @@ function OwnerDashboardRoute(): React.ReactNode {
         attentionError={data.attentionError}
         onRetry={data.retry}
         onOpenRow={(target) => router.push(target)}
+        // OW.3: the four performance charts own their range and their
+        // read, so they arrive as a slot rather than as eight more props.
+        performanceSlot={<PerformancePanels />}
       />
     </SafeAreaView>
   );

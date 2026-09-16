@@ -29,6 +29,7 @@ import type {
 } from '@servgrid/shared';
 import { api } from '../../lib/api';
 import { itemsOf } from '../../lib/listShape';
+import type { PerfCountPoint, PerfMoneyPoint, PerfPerson, PerformanceRange } from './performance';
 import { uuid } from '../../lib/uuid';
 import { sumMoney } from '../rep/money';
 import type { BlockingRow, EmployeeListRow, OwnerCompanyRow, OwnerPaymentRow, OwnerSaleRow, SecondOwner } from './model';
@@ -729,3 +730,59 @@ export function useOtherOwners(): {
 
 /** Re-exported for the routes' running-total footers, if they need it. */
 export { sumMoney };
+
+// ── the performance charts (OW.3, 2026-09-16) ──────────────────────────────
+
+/** The wire shape of `GET /v1/dashboard/owner/performance`. */
+export interface PerformanceWire {
+  range: { key: PerformanceRange; from: string; to: string };
+  days: string[];
+  technicians: PerfPerson[];
+  reps: PerfPerson[];
+  technicianRevenue: PerfMoneyPoint[];
+  technicianJobs: PerfCountPoint[];
+  repSalesValue: PerfMoneyPoint[];
+  repSalesCount: PerfCountPoint[];
+}
+
+/**
+ * One read for all four charts, so they cannot end up describing
+ * different weeks (OW.3). Re-reads when the range changes and keeps the
+ * previous answer on screen while the next one lands — a switcher that
+ * blanks the charts on every press reads as breakage.
+ */
+export function useOwnerPerformance(range: PerformanceRange): {
+  data: PerformanceWire | null;
+  error: string | null;
+  loading: boolean;
+  reload: () => void;
+} {
+  const [data, setData] = useState<PerformanceWire | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((n) => n + 1), []);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    void apiGet<PerformanceWire>(`/v1/dashboard/owner/performance?range=${range}`)
+      .then((wire) => {
+        if (!alive) return;
+        setData(wire);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setError(messageOf(e, 'The performance charts could not be loaded.'));
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [range, tick]);
+
+  return { data, error, loading, reload };
+}

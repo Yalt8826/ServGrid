@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeAny } from 'zod';
-import { ownerAttentionResponseSchema, ownerDashboardResponseSchema } from './schemas.js';
+import { ownerAttentionResponseSchema, ownerDashboardResponseSchema, ownerPerformanceResponseSchema, performanceQuerySchema } from './schemas.js';
 import { createDashboardService } from './service.js';
 
 /**
@@ -41,6 +41,21 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       config: { responseSchema: asResponseSchema(ownerDashboardResponseSchema) },
     },
     async () => service.ownerDashboard(),
+  );
+
+  // OW.3: the four performance charts, one read, one range. Same owner
+  // door as the rest of the dashboard — every series is money or the work
+  // behind it, and `cash.confirm` is the cell only the owner holds.
+  app.get(
+    '/v1/dashboard/owner/performance',
+    {
+      preHandler: [app.requireAuth, app.requireAll('cash.confirm', 'read', OWNER_DASHBOARD_MESSAGE)],
+      config: { responseSchema: asResponseSchema(ownerPerformanceResponseSchema) },
+    },
+    async (request) => {
+      const { range } = performanceQuerySchema.parse(request.query ?? {});
+      return service.ownerPerformance(range);
+    },
   );
 
   app.get(

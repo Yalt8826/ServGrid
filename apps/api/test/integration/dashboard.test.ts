@@ -882,3 +882,181 @@ describe('every query reads a view — proven from the SQL the pool actually ran
     expect(sql).toMatch(/FROM\s+v_employee_tracking_health/i);
   });
 });
+
+// ── OW.3: the four performance charts ──────────────────────────────────────
+
+/**
+ * `GET /v1/dashboard/owner/performance` — revenue collected and jobs
+ * closed per technician, sales value and count per rep, over one range
+ * (owner's decisions, 2026-09-16).
+ *
+ * The probes seed their OWN people, so the numbers are exact rather than
+ * "at least": this file's other fixtures put completions and sales on the
+ * same days, and an assertion that tolerated them would pass while the
+ * grouping was wrong.
+ */
+function getPerformance(who: { token: string }, range: 'week' | '30d' | '90d' = 'week') {
+  return app.inject({
+    method: 'GET',
+    url: `/v1/dashboard/owner/performance?range=${range}`,
+    headers: bearer(who.token),
+  });
+}
+
+interface PerfBody {
+  range: { key: string; from: string; to: string };
+  days: string[];
+  technicians: { id: string; name: string }[];
+  reps: { id: string; name: string }[];
+  technicianRevenue: { date: string; employeeId: string; value: string }[];
+  technicianJobs: { date: string; employeeId: string; count: number }[];
+  repSalesValue: { date: string; employeeId: string; value: string }[];
+  repSalesCount: { date: string; employeeId: string; count: number }[];
+}
+
+const PERF_TECH = { username: '', id: '', token: '' };
+const PERF_REP = { username: '', id: '', token: '' };
+
+describe('GET /v1/dashboard/owner/performance — the owner’s four charts', () => {
+  let perfCompany = '';
+  let today = '';
+
+  beforeAll(async () => {
+    await seedEmployee('technician', PERF_TECH);
+    await seedEmployee('sales_rep', PERF_REP);
+    perfCompany = await seedCompany(`Perf Co ${randomBytes(3).toString('hex')}`);
+    today = await istToday();
+
+    // Two completions today for this technician alone: ₹1,200 collected
+    // (1500 charged less a 300 discount) and ₹800 flat.
+    const closedMorning = await istInstant(today, '11:00');
+    const closedAfternoon = await istInstant(today, '15:00');
+    const j1 = await seedJob({
+      status: 'completed',
+      scheduledFor: null,
+      assignedTo: PERF_TECH.id,
+      closedAt: closedMorning,
+    });
+    await db.query(
+      `INSERT INTO job_completions
+         (job_card_id, completed_by, completed_at, work_summary, cost, discount_amount, discount_reason, collection_mode)
+       VALUES ($1, $2, $3, 'Perf fixture', '1500.00', '300.00', 'goodwill', 'cash')`,
+      [j1, PERF_TECH.id, closedMorning],
+    );
+    const j2 = await seedJob({
+      status: 'completed',
+      scheduledFor: null,
+      assignedTo: PERF_TECH.id,
+      closedAt: closedAfternoon,
+    });
+    await seedCompletion({
+      jobId: j2,
+      completedBy: PERF_TECH.id,
+      completedAt: closedAfternoon,
+      cost: '800.00',
+      mode: 'upi',
+    });
+
+    // One confirmed sale today for this rep, plus a draft and a void that
+    // must not count: a draft is not a sale and a void never was one.
+    for (const [status, amount] of [
+      ['confirmed', '5000.00'],
+      ['draft', '9999.00'],
+      ['void', '7777.00'],
+    ] as const) {
+      await db.query(
+        `INSERT INTO sales_cards (sale_number, company_id, sales_rep_id, sale_date, status,
+                                  confirmed_at, voided_at, voided_by, void_reason)
+         VALUES ($1, $2, $3, business_date(now()), $4::sales_card_status,
+                 CASE WHEN $4::text <> 'draft' THEN now() END,
+                 CASE WHEN $4::text = 'void' THEN now() END,
+                 CASE WHEN $4::text = 'void' THEN $5::uuid END,
+                 CASE WHEN $4::text = 'void' THEN 'entered twice' END)
+         RETURNING id`,
+        [
+          status === 'draft' ? null : `SC-PERF-${randomBytes(5).toString('hex')}`,
+          perfCompany,
+          PERF_REP.id,
+          status,
+          OWNER.id,
+        ],
+      ).then(async (r) => {
+        await db.query(
+          `INSERT INTO sales_card_items (sales_card_id, line_no, product_name, quantity, unit_price)
+           VALUES ($1, 1, 'Perf fixture sale', 1, $2)`,
+          [r.rows[0]!.id, amount],
+        );
+      });
+    }
+  });
+
+  it('is the owner’s door — every other role is refused', async () => {
+    expect((await getPerformance(OWNER)).statusCode).toBe(200);
+    for (const who of [DISPATCHER, TECH_A, SALES_REP]) {
+      const res = await getPerformance(who);
+      expect(res.statusCode, res.body).toBe(403);
+      expect(envelopeOf(res.statusCode, res.body).code).toBe('FORBIDDEN');
+    }
+  });
+
+  it('answers for the current IST week, Monday to Sunday, with every day in it', async () => {
+    const body = (await getPerformance(OWNER, 'week')).json<PerfBody>();
+    expect(body.range.key).toBe('week');
+    expect(body.range.from).toBe(await istWeekStart());
+    expect(body.days).toHaveLength(7);
+    expect(body.days[0]).toBe(body.range.from);
+    expect(body.days[6]).toBe(body.range.to);
+  });
+
+  it('30d and 90d are rolling windows ending today', async () => {
+    const thirty = (await getPerformance(OWNER, '30d')).json<PerfBody>();
+    expect(thirty.days).toHaveLength(30);
+    expect(thirty.range.to).toBe(today);
+    expect(thirty.range.from).toBe(await istDateOffset(-29));
+
+    const ninety = (await getPerformance(OWNER, '90d')).json<PerfBody>();
+    expect(ninety.days).toHaveLength(90);
+    expect(ninety.range.to).toBe(today);
+  });
+
+  it('technician revenue is CASH COLLECTED — charged less discount — grouped per day', async () => {
+    const body = (await getPerformance(OWNER, 'week')).json<PerfBody>();
+    const mine = body.technicianRevenue.filter((p) => p.employeeId === PERF_TECH.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.date).toBe(today);
+    // 1500 − 300 discount, plus 800 flat.
+    expect(mine[0]!.value).toBe('2000.00');
+  });
+
+  it('jobs done counts the completions, per technician per day', async () => {
+    const body = (await getPerformance(OWNER, 'week')).json<PerfBody>();
+    const mine = body.technicianJobs.filter((p) => p.employeeId === PERF_TECH.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ date: today, count: 2 });
+  });
+
+  it('rep sales count confirmed cards only — a draft is not a sale and a void never was', async () => {
+    const body = (await getPerformance(OWNER, 'week')).json<PerfBody>();
+    const value = body.repSalesValue.filter((p) => p.employeeId === PERF_REP.id);
+    const count = body.repSalesCount.filter((p) => p.employeeId === PERF_REP.id);
+    expect(value).toHaveLength(1);
+    expect(value[0]!.value).toBe('5000.00');
+    expect(count[0]).toMatchObject({ date: today, count: 1 });
+  });
+
+  it('lists the people the charts stack, technicians and reps apart', async () => {
+    const body = (await getPerformance(OWNER, 'week')).json<PerfBody>();
+    expect(body.technicians.map((p) => p.id)).toContain(PERF_TECH.id);
+    expect(body.reps.map((p) => p.id)).toContain(PERF_REP.id);
+    // A technician is never offered as a rep filter, or the chart would
+    // stack a person who cannot appear in it.
+    expect(body.reps.map((p) => p.id)).not.toContain(PERF_TECH.id);
+  });
+
+  it('keeps someone who has left, when the range still holds their work', async () => {
+    await db.query(`UPDATE employees SET is_active = false WHERE id = $1`, [PERF_TECH.id]);
+    const body = (await getPerformance(OWNER, 'week')).json<PerfBody>();
+    expect(body.technicians.map((p) => p.id)).toContain(PERF_TECH.id);
+    await db.query(`UPDATE employees SET is_active = true WHERE id = $1`, [PERF_TECH.id]);
+  });
+});

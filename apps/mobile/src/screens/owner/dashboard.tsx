@@ -68,6 +68,12 @@ export interface OwnerDashboardDeps {
   figures: OwnerFigure[] | null;
   jobsPerDay: JobsPerDayPoint[] | null;
   revenuePerWeek: RevenuePerWeekPoint[] | null;
+  /**
+   * The performance charts (OW.3) — passed in by the route because that
+   * section owns its own read and its own range. A slot keeps this screen
+   * pure and its tests unchanged.
+   */
+  performanceSlot?: React.ReactNode;
   /** The figures and charts share one read; they fail together. */
   dashboardError: string | null;
   /** Consequence-ordered attention rows; null = not loaded, [] = genuinely clear. */
@@ -296,6 +302,8 @@ export function OwnerDashboardScreen(deps: OwnerDashboardDeps): React.ReactNode 
           )}
         </View>
       ) : null}
+
+      {deps.performanceSlot ?? null}
 
       {desk ? (
         // Desk anatomy: charts side by side, the attention table to their right.

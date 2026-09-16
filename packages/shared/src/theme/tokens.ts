@@ -253,6 +253,29 @@ export const DESK = {
     barWidth: 2,
     itemHeight: 38,
   },
+  /**
+   * Categorical colour for charts (OW.3). A stacked bar with eight
+   * technicians needs eight tellable-apart inks, which the product's
+   * two-colour vocabulary cannot give — and the STATUS palette must not
+   * be borrowed, because a green segment that does not mean "completed"
+   * is how a colour stops meaning anything. These are chart-only inks:
+   * muted, industrial, and never used to say what state a row is in. The
+   * accent leads, because the first series is the one being read.
+   */
+  chart: {
+    series: [
+      COLORS.accent,
+      '#2C6E7F',
+      '#8A5A2B',
+      '#4B5E8E',
+      '#6B7A3A',
+      '#8C4A63',
+      '#3F7D5B',
+      '#7C5E9B',
+    ],
+    grid: SLATE[200],
+    axis: SLATE[500],
+  },
   table: {
     headBg: SLATE[100],
     headText: SLATE[500],

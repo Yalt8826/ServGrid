@@ -107,3 +107,56 @@ export const ownerAttentionResponseSchema = z
 
 export type OwnerAttentionResponse = z.infer<typeof ownerAttentionResponseSchema>;
 export type AttentionItem = z.infer<typeof attentionItemSchema>;
+
+// ── the performance charts (OW.3, 2026-09-16) ──────────────────────────────
+
+/**
+ * The owner's four charts: revenue collected and jobs closed per
+ * technician, sales value and sales count per rep. One endpoint serves
+ * all four, because they answer for the SAME range — a screen where each
+ * chart could be looking at a different week is a screen that invites the
+ * wrong comparison.
+ *
+ * Every series is grouped per day and per person server-side. The client
+ * stacks; it never sums money (PLAN.md §6).
+ */
+export const performanceRangeKeySchema = z.enum(['week', '30d', '90d']);
+export type PerformanceRangeKey = z.infer<typeof performanceRangeKeySchema>;
+
+/** `?range=` — the switcher over all four charts. Defaults to this week. */
+export const performanceQuerySchema = z
+  .object({ range: performanceRangeKeySchema.default('week') })
+  .strict();
+
+/** A person a chart stacks or filters by. */
+export const performancePersonSchema = z.object({ id: uuid, name: z.string() }).strict();
+
+/** One person's money on one day — absent when they took nothing that day. */
+export const performanceMoneyPointSchema = z
+  .object({ date: z.string().date(), employeeId: uuid, value: moneyString })
+  .strict();
+
+/** One person's count on one day. */
+export const performanceCountPointSchema = z
+  .object({ date: z.string().date(), employeeId: uuid, count: z.number().int().nonnegative() })
+  .strict();
+
+export const ownerPerformanceResponseSchema = z
+  .object({
+    range: z
+      .object({ key: performanceRangeKeySchema, from: z.string().date(), to: z.string().date() })
+      .strict(),
+    /** Every day in the range, in order — a day nobody worked is a gap, not a missing column. */
+    days: z.array(z.string().date()),
+    technicians: z.array(performancePersonSchema),
+    reps: z.array(performancePersonSchema),
+    /** Cash collected (job_completions.amount_collected), by the day the work was done. */
+    technicianRevenue: z.array(performanceMoneyPointSchema),
+    technicianJobs: z.array(performanceCountPointSchema),
+    /** Confirmed sales only, on the sale's own date. */
+    repSalesValue: z.array(performanceMoneyPointSchema),
+    repSalesCount: z.array(performanceCountPointSchema),
+  })
+  .strict();
+
+export type OwnerPerformanceResponse = z.infer<typeof ownerPerformanceResponseSchema>;
