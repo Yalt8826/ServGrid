@@ -151,8 +151,15 @@ export function StatusStepper({ status, history, onAnimateStart, testID }: Statu
 // ── pieces ───────────────────────────────────────────────────────────────────
 
 const NODE_COLUMN_WIDTH = 76;
-const NODE_SIZE = 12;
-const NODE_RING = 20;
+/**
+ * The node square and the ring that marks the current one (2026-09-16:
+ * 14 and 22, up from 12 and 20). On the handset the twelve-pixel square
+ * read as a speck beside its own label — the status of the job he is
+ * standing in front of is not a detail, and the stepper is the screen's
+ * hero.
+ */
+const NODE_SIZE = 14;
+const NODE_RING = 22;
 
 /** One node plus its word. Every colour renders DIRECTLY beside its word
  * (§1.6): the node square sits above the label, always. */
@@ -258,8 +265,9 @@ function Segment({
       testID={testID}
       style={{
         flex: 1,
-        height: 4,
-        marginTop: 8, // centres the 4pt bar on the 20pt node ring
+        height: 3,
+        borderRadius: 1.5,
+        marginTop: 9.5, // centres the 3pt bar on the 22pt node ring
         backgroundColor: SEMANTIC.line.default,
         overflow: 'hidden',
       }}

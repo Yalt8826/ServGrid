@@ -166,6 +166,20 @@ export function statusHistoryOf(entries: readonly JobTimelineEntry[]): JobStatus
  * `In warranty · to 14 Mar 2027`; an expired warranty still names its
  * date — "Warranty to 14 Mar 2026" — because the date is the fact.
  */
+/**
+ * Whether the unit is still inside its warranty, judged in IST against
+ * the same day the chip prints (2026-09-16). It exists because the chip's
+ * *tone* and the chip's *words* have to agree: the screen tints the
+ * warranty chip green while it is live and danger-red once it has run
+ * out, and a second copy of this comparison inside the screen is how the
+ * two drift apart. A unit with no expiry is not in warranty — it says
+ * nothing rather than claiming cover.
+ */
+export function warrantyIsLive(unit: UnitView | null | undefined, now: Date): boolean {
+  const expiry = unit?.warrantyExpiresOn ?? null;
+  return expiry !== null && expiry >= istDateKey(now);
+}
+
 export function warrantyChipOf(unit: UnitView | null | undefined, now: Date): string | null {
   const expiry = unit?.warrantyExpiresOn ?? null;
   if (expiry === null) return null;
@@ -175,7 +189,7 @@ export function warrantyChipOf(unit: UnitView | null | undefined, now: Date): st
     year: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(`${expiry}T00:00:00Z`));
-  return expiry >= istDateKey(now) ? `In warranty · to ${day}` : `Warranty to ${day}`;
+  return warrantyIsLive(unit, now) ? `In warranty · to ${day}` : `Warranty to ${day}`;
 }
 
 /**

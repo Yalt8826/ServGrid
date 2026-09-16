@@ -28,7 +28,7 @@ const VOCABULARY: IconName[] = [
   'navigate', 'clock', 'calendar', 'refresh',
   'phone', 'location',
   'warning', 'alert', 'check', 'checkFilled', 'info', 'tick', 'close',
-  'chevronRight', 'chevronDown', 'chevronUp', 'forward',
+  'back', 'chevronRight', 'chevronDown', 'chevronUp', 'forward',
   'wrench', 'cube', 'camera', 'document', 'business', 'people', 'wallet',
   'plus', 'search', 'list', 'edit', 'key', 'logout', 'send', 'trending',
   'shield', 'battery', 'rocket', 'bell',

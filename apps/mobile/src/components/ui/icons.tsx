@@ -54,6 +54,7 @@ const GLYPH = {
   tick: 'checkmark',
   close: 'close',
   // Disclosure and direction.
+  back: 'arrow-back',
   chevronRight: 'chevron-forward',
   chevronDown: 'chevron-down',
   chevronUp: 'chevron-up',
