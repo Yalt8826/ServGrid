@@ -13,12 +13,17 @@
  * customer is read-only: an AMC never moves between sites (decision 1,
  * the AMC is the site's).
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { SEMANTIC, TAP, SPACE } from '@servgrid/shared';
-import { Banner, Button, DatePicker, MoneyField, TextField } from '../../components/ui';
+import { COLORS, FRAME, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { Banner, Button, CalendarGrid, DatePicker, MoneyField, SectionHeader, Sheet, TextField, useDensity } from '../../components/ui';
+import type { IconName } from '../../components/ui/icons';
 import { haptic } from '../../components/ui/haptics';
+// The IST business day, from the module that already owns that arithmetic
+// (`useDispatcherDashboard`'s copy pulls Expo native modules in, which the
+// screen tests cannot load). One helper, not a third copy of the shift.
+import { istBusinessDateKey } from '../dispatcher/jobLogsFilters';
 import { textStyle } from '../../fonts/textStyle';
 import { CustomerSearchRows } from '../dispatcher/CustomerSearchRows';
 import type { DispatchCustomerOption } from '../dispatcher/dispatchForm';
@@ -52,6 +57,12 @@ const hitSlop = { top: TAP.hitSlop, bottom: TAP.hitSlop, left: TAP.hitSlop, righ
 
 export function AmcFormScreen(props: AmcFormScreenProps): React.ReactNode {
   const [attempted, setAttempted] = useState(false);
+  // Which date field is being picked, if any (2026-09-17). The term used
+  // to hang off two bare `DatePicker`s — a field with a trigger and no
+  // choosing UI — so a start or an end could be read but never changed.
+  const [daySheet, setDaySheet] = useState<'start' | 'end' | null>(null);
+  const density = useDensity();
+  const bodyStrong = useMemo(() => textStyle('bodyStrong', density), [density]);
   const draft = props.draft;
   const customerPicked = draft.customerId !== null;
   const readOnlyCustomer = props.mode !== 'new';
@@ -75,9 +86,18 @@ export function AmcFormScreen(props: AmcFormScreenProps): React.ReactNode {
 
   return (
     <View style={styles.screen} testID="amc-form">
+      {/* The frame (2026-09-17): which form this is, and what it records. */}
+      <View style={styles.frame}>
+        <Text style={styles.frameTitle} testID="amc-form-title">
+          {TITLE[props.mode]}
+        </Text>
+        <Text style={styles.frameCaption}>
+          {props.mode === 'renew'
+            ? 'A new term, prefilled from the one that is ending.'
+            : 'A year of cover for one site, at one price.'}
+        </Text>
+      </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>{TITLE[props.mode]}</Text>
-
         {props.saveError !== null ? (
           props.saveError.existing !== null ? (
             <Banner
@@ -97,12 +117,13 @@ export function AmcFormScreen(props: AmcFormScreenProps): React.ReactNode {
         ) : null}
 
         {/* ── customer ────────────────────────────────────────────────── */}
+        <Section label="Customer" icon="business" first>
         <View style={styles.fieldWrap} testID="amc-customer">
           {readOnlyCustomer || customerPicked ? (
             <View>
               <Text style={styles.fieldLabel}>Customer</Text>
               <View style={styles.selectedRow} testID="amc-customer-selected">
-                <Text numberOfLines={1} style={styles.selectedName}>
+                <Text numberOfLines={1} style={[styles.selectedName, bodyStrong]}>
                   {draft.customerName ?? ''}
                 </Text>
                 {!readOnlyCustomer ? (
@@ -154,30 +175,45 @@ export function AmcFormScreen(props: AmcFormScreenProps): React.ReactNode {
           ) : null}
         </View>
 
+        </Section>
+
         {/* ── term ────────────────────────────────────────────────────── */}
-        <View style={styles.fieldWrap}>
-          <DatePicker
-            label="Start"
-            value={draft.startDate}
-            onChange={onStartChange}
-            errorText={problems.startDate}
-            disabled={props.saving}
-            testID="amc-start"
-          />
-        </View>
-        <View style={styles.fieldWrap}>
-          <DatePicker
-            label="End"
-            value={draft.endDate}
-            onChange={(end) => props.onChange({ ...draft, endDate: end })}
-            helperText="12 months by default"
-            errorText={problems.endDate}
-            disabled={props.saving}
-            testID="amc-end"
-          />
-        </View>
+        <Section label="Term" icon="calendar">
+          <View style={styles.fieldWrap}>
+            {/* `DatePicker` has a trigger and no choosing UI of its own —
+                a tap used to re-emit the date it already held, so a term
+                could be read but never moved. The trigger opens the same
+                `CalendarGrid` every other day picker in the app uses. */}
+            <DatePicker
+              label="Start"
+              value={draft.startDate}
+              onChange={() => {
+                haptic('pickerSelect');
+                setDaySheet('start');
+              }}
+              errorText={problems.startDate}
+              disabled={props.saving}
+              testID="amc-start"
+            />
+          </View>
+          <View style={styles.fieldWrap}>
+            <DatePicker
+              label="End"
+              value={draft.endDate}
+              onChange={() => {
+                haptic('pickerSelect');
+                setDaySheet('end');
+              }}
+              helperText="12 months by default"
+              errorText={problems.endDate}
+              disabled={props.saving}
+              testID="amc-end"
+            />
+          </View>
+        </Section>
 
         {/* ── price and notes ─────────────────────────────────────────── */}
+        <Section label="Price" icon="wallet" tint={COLORS.accent}>
         <View style={styles.fieldWrap}>
           <MoneyField
             label="Price"
@@ -188,45 +224,127 @@ export function AmcFormScreen(props: AmcFormScreenProps): React.ReactNode {
             testID="amc-price"
           />
         </View>
-        <View style={styles.fieldWrap}>
-          <TextField
-            label="Notes"
-            value={draft.notes}
-            onChangeText={(notes) => props.onChange({ ...draft, notes })}
-            multiline
-            rows={3}
-            testID="amc-notes"
-          />
-        </View>
+        </Section>
+
+        <Section label="Notes" icon="document">
+          <View style={styles.fieldWrap}>
+            <TextField
+              label="Notes"
+              value={draft.notes}
+              onChangeText={(notes) => props.onChange({ ...draft, notes })}
+              multiline
+              rows={3}
+              testID="amc-notes"
+            />
+          </View>
+        </Section>
 
         <View style={styles.submitWrap}>
-          <Button label="Save AMC" loading={props.saving} onPress={submit} fullwidth testID="amc-save" />
+          <Button label="Save AMC" icon="check" loading={props.saving} onPress={submit} fullwidth testID="amc-save" />
         </View>
       </ScrollView>
+
+      {/* One day sheet at a time, mounted only while open. The floor is
+          what makes the pair coherent: a term may start in the past (the
+          record is often backdated) but never end before it starts. */}
+      {daySheet === 'start' ? (
+        <Sheet visible title="Which day" onDismiss={() => setDaySheet(null)} testID="amc-start-sheet">
+          <CalendarGrid
+            value={draft.startDate}
+            todayIso={istBusinessDateKey(new Date())}
+            minIso={AMC_BACKDATE_FLOOR}
+            onSelect={(iso) => {
+              haptic('pickerSelect');
+              onStartChange(iso);
+              setDaySheet(null);
+            }}
+            testID="amc-start-calendar"
+          />
+        </Sheet>
+      ) : null}
+      {daySheet === 'end' ? (
+        <Sheet visible title="Which day" onDismiss={() => setDaySheet(null)} testID="amc-end-sheet">
+          <CalendarGrid
+            value={draft.endDate}
+            todayIso={istBusinessDateKey(new Date())}
+            minIso={draft.startDate}
+            onSelect={(iso) => {
+              haptic('pickerSelect');
+              props.onChange({ ...draft, endDate: iso });
+              setDaySheet(null);
+            }}
+            testID="amc-end-calendar"
+          />
+        </Sheet>
+      ) : null}
+    </View>
+  );
+}
+
+/** How far back a term may be dated. A record is written after the fact
+ * often enough that "today" is the wrong floor, and a floor the owner
+ * cannot reach is a floor nobody wanted. */
+const AMC_BACKDATE_FLOOR = '2020-01-01';
+
+/**
+ * One block of the form under its marker — the same shape the dispatch
+ * form wears (2026-09-17): the screen was five bare fields in a column,
+ * each carrying its own margin, with nothing naming what it was asking.
+ */
+function Section({
+  label,
+  icon,
+  tint,
+  first = false,
+  children,
+}: {
+  label: string;
+  icon: IconName;
+  tint?: string;
+  first?: boolean;
+  children: React.ReactNode;
+}): React.ReactNode {
+  return (
+    <View style={[styles.section, first ? styles.sectionFirst : null]}>
+      <SectionHeader label={label} icon={icon} {...(tint === undefined ? {} : { tint })} />
+      <View style={styles.sectionBody}>{children}</View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
-  content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8] },
-  title: { ...textStyle('h1'), color: SEMANTIC.text.primary, paddingTop: SPACE[3], paddingBottom: SPACE[2] },
-  fieldWrap: { marginTop: SPACE[3] },
+  /** The frame: which form this is (2026-09-17). */
+  frame: {
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[3],
+    paddingBottom: SPACE[3],
+    gap: 2,
+  },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8], paddingTop: SPACE[2] },
+  section: { marginTop: SPACE[5] },
+  sectionFirst: { marginTop: SPACE[3] },
+  sectionBody: { alignSelf: 'stretch', gap: SPACE[3], marginTop: SPACE[3] },
+  fieldWrap: { alignSelf: 'stretch' },
   fieldLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 },
   fieldError: { ...textStyle('caption'), color: SEMANTIC.feedback.danger, marginTop: 4 },
   selectedRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: SPACE[2],
     backgroundColor: SEMANTIC.bg.raised,
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
-    borderRadius: 4,
+    borderRadius: TAP.hitSlop,
     paddingHorizontal: SPACE[3],
     paddingVertical: SPACE[2],
-    minHeight: TAP.min,
+    minHeight: TAP.console,
   },
   selectedName: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary, flex: 1 },
-  selectedClear: { paddingHorizontal: SPACE[2], minHeight: TAP.min, justifyContent: 'center' },
+  selectedClear: { flexDirection: 'row', alignItems: 'center', gap: SPACE[1], paddingHorizontal: SPACE[2], minHeight: TAP.console, justifyContent: 'center' },
   selectedClearLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
   submitWrap: { marginTop: SPACE[5] },
 });

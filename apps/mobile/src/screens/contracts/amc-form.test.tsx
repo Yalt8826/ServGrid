@@ -122,13 +122,45 @@ describe('AmcFormScreen (§D5)', () => {
     expect(allText(findID(renderer, 'amc-start')!).join(' ')).toContain('15 Sep');
     expect(allText(findID(renderer, 'amc-end')!).join(' ')).toContain('14 Sep 2027');
 
-    // The date field's trigger runs the coupling through the real render
-    // path: whatever start the picker hands over, the end lands on that
+    // The trigger opens the app's day picker — it used to re-emit the date
+    // it already held, because `DatePicker` is a field with no choosing UI
+    // of its own (found on the handset 2026-09-17: a term could be read
+    // but never moved). The coupling then runs through the real render
+    // path: whatever start the calendar hands over, the end lands on that
     // start's default.
     press(pressableOf(findID(renderer, 'amc-start-trigger')!));
+    const calendar = findID(renderer, 'amc-start-calendar');
+    expect(calendar).toBeDefined();
+    // It opens on the month the term is in, and a term may be BACKDATED —
+    // the record is often written after the fact, so this picker is the
+    // one in the app whose floor is not today.
+    expect(allText(findID(renderer, 'amc-start-calendar-month')!).join(' ')).toBe('September 2026');
+    const backdated = findID(renderer, 'amc-start-calendar-day-2026-09-05')!;
+    expect((backdated.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+
+    press(pressableOf(findID(renderer, 'amc-start-calendar-day-2026-09-20')!));
     expect(onChange).toHaveBeenCalled();
     const emitted = onChange.mock.calls.at(-1)![0] as typeof draft;
-    expect(emitted.endDate).toBe(defaultEndFor(emitted.startDate));
+    expect(emitted.startDate).toBe('2026-09-20');
+    expect(emitted.endDate).toBe(defaultEndFor('2026-09-20'));
+    // Choosing a day closes the sheet.
+    renderer.update(<AmcFormScreen {...baseProps({ draft, onChange })} />);
+    expect(findID(renderer, 'amc-start-calendar')).toBeUndefined();
+  });
+
+  it('the end field has its own day picker, opening on the end’s own month', async () => {
+    const draft = newDraft(TODAY);
+    const onChange = vi.fn();
+    const renderer = await create(<AmcFormScreen {...baseProps({ draft, onChange })} />);
+
+    press(pressableOf(findID(renderer, 'amc-end-trigger')!));
+    expect(findID(renderer, 'amc-end-calendar')).toBeDefined();
+    // The end of a fresh term is a year out: the sheet opens there, not on
+    // today's month, so the day the dispatcher came to change is on screen.
+    expect(allText(findID(renderer, 'amc-end-calendar-month')!).join(' ')).toBe('September 2027');
+
+    press(pressableOf(findID(renderer, 'amc-end-calendar-day-2027-09-30')!));
+    expect(onChange).toHaveBeenCalledWith({ ...draft, endDate: '2027-09-30' });
   });
 
   it('a hand-edited end survives the start changing on the render path', async () => {
@@ -137,7 +169,9 @@ describe('AmcFormScreen (§D5)', () => {
     const renderer = await create(<AmcFormScreen {...baseProps({ draft: handEdited, onChange })} />);
 
     press(pressableOf(findID(renderer, 'amc-start-trigger')!));
+    press(pressableOf(findID(renderer, 'amc-start-calendar-day-2026-09-20')!));
     const emitted = onChange.mock.calls[0]![0] as typeof handEdited;
+    expect(emitted.startDate).toBe('2026-09-20');
     expect(emitted.endDate).toBe('2028-03-31');
   });
 
