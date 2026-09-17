@@ -13,8 +13,9 @@
  * FlashList, so it cannot collapse on scroll; a section marker carrying
  * the result count always above the list ("24 jobs · 3 overdue" — the
  * dispatcher knows whether the filter worked before scrolling); two-line
- * rows at 56pt, not cards — eight jobs per screen where a field card list
- * shows four.
+ * cards at 56pt with 8pt of air between them (2026-09-17) — the console's
+ * density is still the point, and the gap costs a row or so per screen
+ * against the ruled list this used to be.
  *
  * Density (01-FOUNDATIONS.md §3): the ROW is the tap target at 56pt,
  * above the global 52; the 44pt `console` floor applies to the filter
@@ -68,12 +69,12 @@ import {
 import { StatusPill } from '../../components/domain/StatusPill';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
 import { Banner, Button, EmptyState, SectionHeader, Select, Sheet, Skeleton, TextField, useDensity } from '../../components/ui';
-import { Icon } from '../../components/ui/icons';
+import { Icon, type IconName } from '../../components/ui/icons';
 import { haptic } from '../../components/ui/haptics';
 import { useSkeleton } from '../../components/ui/Skeleton';
 import { useToggleProgress } from '../../components/ui/motion';
 import { textStyle } from '../../fonts/textStyle';
-import { istTimeLabel, railColorOf } from '../technician/jobView';
+import { istTimeLabel, railColorOf, statusPillOf } from '../technician/jobView';
 import {
   STATUS_LABELS,
   countOverdueRows,
@@ -164,23 +165,29 @@ export interface JobLogsDeps {
 export interface JobLogsOption<T> {
   value: T;
   label: string;
+  /** The leading glyph, for the options a glyph names (a day, a person). */
+  icon?: IconName;
+  /** …or the status dot, for the options that ARE a status colour. */
+  dot?: string;
 }
 
 /** The date chip's sheet, in display order. */
 export const JOB_LOGS_DATE_OPTIONS: readonly JobLogsOption<JobLogsDateFilter>[] = [
-  { value: 'today', label: 'Today' },
-  { value: 'tomorrow', label: 'Tomorrow' },
-  { value: 'week', label: 'This week' },
-  { value: 'all', label: 'All days' },
+  { value: 'today', label: 'Today', icon: 'calendar' },
+  { value: 'tomorrow', label: 'Tomorrow', icon: 'calendar' },
+  { value: 'week', label: 'This week', icon: 'calendar' },
+  { value: 'all', label: 'All days', icon: 'calendar' },
 ];
 
 /** The status chip's sheet — overdue is an option, never a status. The
  * words come from the filters module's `STATUS_LABELS`, the same map the
- * chip's resting label reads: this file used to keep its own copy. */
+ * chip's resting label reads: this file used to keep its own copy. Each
+ * option carries the status's own colour as a dot, so the sheet teaches
+ * the colours the rows use. */
 export const JOB_LOGS_STATUS_OPTIONS: readonly JobLogsOption<JobLogsStatusFilter>[] = [
-  { value: 'any', label: STATUS_LABELS.any },
-  { value: 'overdue', label: STATUS_LABELS.overdue },
-  ...JOB_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] })),
+  { value: 'any', label: STATUS_LABELS.any, dot: SEMANTIC.text.secondary },
+  { value: 'overdue', label: STATUS_LABELS.overdue, dot: SEMANTIC.feedback.danger },
+  ...JOB_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dot: statusPillOf(s).color })),
 ];
 
 function optionTestId(label: string): string {
@@ -342,6 +349,7 @@ type ChipKey = 'date' | 'tech' | 'status';
  */
 function FilterChip({
   label,
+  icon,
   active,
   disabled,
   floor,
@@ -349,6 +357,8 @@ function FilterChip({
   testID,
 }: {
   label: string;
+  /** The chip's own object: a day, a person, a state. */
+  icon: IconName;
   active: boolean;
   disabled: boolean;
   /** The density's touch floor — 44 on the console, 52 in the field. */
@@ -381,6 +391,7 @@ function FilterChip({
         pressed ? (active ? null : styles.chipPressed) : null,
       ]}
     >
+      <Icon name={icon} size={ICON.sm} color={active ? FRAME.text : SEMANTIC.text.secondary} />
       <Text style={active ? styles.chipLabelActive : styles.chipLabel}>{label}</Text>
       <Icon name="chevronDown" size={ICON.sm} color={active ? FRAME.text : SEMANTIC.text.secondary} />
     </Pressable>
@@ -425,7 +436,16 @@ export function FilterBar({
   );
 
   const techOptions: readonly JobLogsOption<string>[] = useMemo(
-    () => [{ value: 'anyone', label: 'Anyone' }, ...technicians.map((t) => ({ value: t.employeeId, label: t.name }))],
+    () => [
+      { value: 'anyone', label: 'Anyone', icon: 'people' },
+      // "Nobody holds it" is the server's `unassigned` STATUS, so this
+      // option writes the status filter rather than inventing a
+      // technicianId the api would answer with an empty page (Yashas,
+      // 2026-09-17: "add unassigned to the filter"). Both chips then read
+      // Unassigned, because it is one fact.
+      { value: 'unassigned', label: 'Unassigned', icon: 'people' },
+      ...technicians.map((t) => ({ value: t.employeeId, label: t.name, icon: 'people' as const })),
+    ],
     [technicians],
   );
 
@@ -436,13 +456,20 @@ export function FilterBar({
     if (open === 'date') onChange({ ...filters, date: option.value as JobLogsDateFilter });
     else if (open === 'status') onChange({ ...filters, status: option.value as JobLogsStatusFilter });
     else if (open === 'tech') {
-      onChange({
-        ...filters,
-        tech:
-          option.value === 'anyone'
-            ? { kind: 'anyone' }
-            : { kind: 'tech', technicianId: option.value as string, name: option.label },
-      });
+      if (option.value === 'unassigned') {
+        onChange({ ...filters, tech: { kind: 'anyone' }, status: 'unassigned' });
+      } else {
+        onChange({
+          ...filters,
+          // A job someone holds is not unassigned: picking a person drops
+          // the status view that said it was.
+          status: filters.status === 'unassigned' ? 'any' : filters.status,
+          tech:
+            option.value === 'anyone'
+              ? { kind: 'anyone' }
+              : { kind: 'tech', technicianId: option.value as string, name: option.label },
+        });
+      }
     }
     setOpen(null);
   };
@@ -450,13 +477,17 @@ export function FilterBar({
   const isActive = (key: ChipKey): boolean => {
     if (key === 'date') return filters.date !== 'today';
     if (key === 'status') return filters.status !== 'any';
-    return filters.tech.kind !== 'anyone';
+    return filters.tech.kind !== 'anyone' || filters.status === 'unassigned';
   };
 
   const isOptionSelected = (option: JobLogsOption<unknown>): boolean => {
     if (open === 'date') return filters.date === option.value;
     if (open === 'status') return filters.status === option.value;
-    if (open === 'tech') return filters.tech.kind === 'tech' && filters.tech.technicianId === option.value;
+    if (open === 'tech') {
+      if (option.value === 'unassigned') return filters.status === 'unassigned';
+      if (option.value === 'anyone') return filters.tech.kind === 'anyone' && filters.status !== 'unassigned';
+      return filters.tech.kind === 'tech' && filters.tech.technicianId === option.value;
+    }
     return false;
   };
 
@@ -465,7 +496,12 @@ export function FilterBar({
   // sheet is a phone idiom, and on the owner's desk it read as unfinished
   // and behaved like nothing at all. The phone keeps its chips below.
   if (desk) {
-    const techValue = filters.tech.kind === 'anyone' ? 'anyone' : filters.tech.technicianId;
+    const techValue =
+      filters.status === 'unassigned'
+        ? 'unassigned'
+        : filters.tech.kind === 'anyone'
+          ? 'anyone'
+          : filters.tech.technicianId;
     return (
       <View style={styles.deskBar} testID="job-logs-filter-bar">
         <View style={styles.deskField}>
@@ -483,15 +519,22 @@ export function FilterBar({
             label="Technician"
             value={techValue}
             options={techOptions.map((o) => ({ value: String(o.value), label: o.label }))}
-            onSelect={(value) =>
+            onSelect={(value) => {
+              // The same alias the chips use, and the same rule that keeps
+              // the two filters from contradicting each other.
+              if (value === 'unassigned') {
+                onChange({ ...filters, tech: { kind: 'anyone' }, status: 'unassigned' });
+                return;
+              }
               onChange({
                 ...filters,
+                status: filters.status === 'unassigned' ? 'any' : filters.status,
                 tech:
                   value === 'anyone'
                     ? { kind: 'anyone' }
                     : { kind: 'tech', technicianId: value, name: nameOf(value) ?? '' },
-              })
-            }
+              });
+            }}
             disabled={offline}
             testID="job-logs-filter-tech"
           />
@@ -521,6 +564,7 @@ export function FilterBar({
             key={key}
             testID={`job-logs-chip-${key}`}
             label={jobLogsChipLabel(key, filters, nameOf)}
+            icon={CHIP_ICONS[key]}
             active={isActive(key)}
             disabled={offline}
             floor={floor}
@@ -561,7 +605,23 @@ export function FilterBar({
                   onPress={() => applyOption(option)}
                   style={[styles.optionRow, { minHeight: floor }, selected ? styles.optionRowSelected : null]}
                 >
-                  <Text style={selected ? styles.optionLabelSelected : styles.optionLabel}>{option.label}</Text>
+                  {/* The leading mark is the option's own object: a glyph
+                      for a day or a person, the status colour as a dot for
+                      a state. */}
+                  <View style={styles.optionLead}>
+                    {option.dot === undefined ? (
+                      <Icon
+                        name={option.icon ?? 'list'}
+                        size={ICON.sm}
+                        color={selected ? FRAME.text : SEMANTIC.text.secondary}
+                      />
+                    ) : (
+                      <View style={[styles.optionDot, { backgroundColor: option.dot }]} />
+                    )}
+                  </View>
+                  <Text style={[selected ? styles.optionLabelSelected : styles.optionLabel, styles.optionText]}>
+                    {option.label}
+                  </Text>
                   {selected ? <Icon name="check" size={ICON.sm} color={FRAME.text} /> : null}
                 </Pressable>
               );
@@ -572,6 +632,13 @@ export function FilterBar({
     </View>
   );
 }
+
+/** Each chip wears its own object: a day, a person, a state. */
+const CHIP_ICONS: Record<ChipKey, IconName> = {
+  date: 'calendar',
+  tech: 'people',
+  status: 'list',
+};
 
 const SHEET_TITLES: Record<ChipKey, string> = {
   date: 'Which day',
@@ -919,13 +986,17 @@ const styles = StyleSheet.create({
   optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: SPACE[2],
+    gap: SPACE[3],
     paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
     borderRadius: RADII.control,
     backgroundColor: SEMANTIC.bg.raised,
   },
   optionRowSelected: { backgroundColor: SEMANTIC.bg.dark },
+  /** A fixed leading slot, so every label starts on the same x. */
+  optionLead: { width: ICON.lg, alignItems: 'center', justifyContent: 'center' },
+  optionDot: { width: 8, height: 8, borderRadius: 4 },
+  optionText: { flex: 1 },
   optionLabel: { ...textStyle('body'), color: SEMANTIC.text.primary },
   optionLabelSelected: { ...textStyle('bodyStrong'), color: SEMANTIC.text.onDark },
   /** The sheet's options as a spaced stack, not a hairline-separated list. */
@@ -944,18 +1015,30 @@ const styles = StyleSheet.create({
   skeletonRow: {
     flexDirection: 'row',
     height: ROW_HEIGHT,
+    marginBottom: SPACE[2],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
     alignItems: 'center',
+    overflow: 'hidden',
   },
+  // A card per row, not a ruled line (Yashas, 2026-09-17: "add proper
+  // spacing between the job cards"): the same 56pt tap target, plus air
+  // between rows, a hairline all round and a corner the rail turns with
+  // (`overflow: hidden` is what clips the rail to the radius).
   row: {
     flexDirection: 'row',
     height: ROW_HEIGHT, // the row itself is the tap target, at 56pt
+    marginBottom: SPACE[2],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
+    overflow: 'hidden',
   },
   rowPressed: { backgroundColor: SEMANTIC.bg.pressed }, // 90ms press state
-  rowSelected: { borderWidth: 1, borderColor: SEMANTIC.line.focus },
+  rowSelected: { borderColor: SEMANTIC.line.focus, backgroundColor: SEMANTIC.bg.pressed },
   /** The real status rail, four points — the same weight as the card's. */
   rail: { width: RAIL_WIDTH },
   body: {

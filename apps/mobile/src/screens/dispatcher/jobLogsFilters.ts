@@ -192,6 +192,10 @@ export function jobLogsChipLabel(
 ): string {
   if (key === 'date') return DATE_LABELS[filters.date];
   if (key === 'tech') {
+    // "Unassigned" is reachable from the person chip as well as the status
+    // one (2026-09-17) — both describe the same fact, so the chip reads
+    // the status rather than keeping a second copy of it.
+    if (filters.status === 'unassigned') return 'Unassigned';
     if (filters.tech.kind === 'anyone') return 'Anyone';
     return technicianNameOf(filters.tech.technicianId) ?? 'Technician';
   }

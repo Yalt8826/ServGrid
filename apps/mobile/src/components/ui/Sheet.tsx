@@ -181,23 +181,32 @@ export function Sheet({
           >
             {children}
           </ScrollView>
-          <View
-            style={{
-              minHeight: TAP.thumbBar,
-              flexShrink: 0,
-              borderTopWidth: 1,
-              borderTopColor: SEMANTIC.line.default,
-              paddingHorizontal: SPACE[4],
-              paddingVertical: SPACE[3],
-              justifyContent: 'center',
-            }}
-          >
-            {actions}
-          </View>
+          {/* The action bar exists only when there IS an action (2026-09-17).
+              It rendered unconditionally, so every sheet without `actions` —
+              the dispatcher's filter pickers, the reassign picker — wore an
+              empty 72pt bar under a hairline, which reads as a white band
+              below the last option. */}
+          {actions === undefined ? null : (
+            <View
+              style={{
+                minHeight: TAP.thumbBar,
+                flexShrink: 0,
+                borderTopWidth: 1,
+                borderTopColor: SEMANTIC.line.default,
+                paddingHorizontal: SPACE[4],
+                paddingVertical: SPACE[3],
+                justifyContent: 'center',
+              }}
+            >
+              {actions}
+            </View>
+          )}
         </View>
-        <Text style={[captionStyle.caption, { paddingHorizontal: SPACE[4], paddingTop: 4 }]} testID={testID ? `${testID}-unsaved` : undefined}>
-          {hasUnsavedInput ? 'Unsaved changes — confirm to close' : ''}
-        </Text>
+        {hasUnsavedInput ? (
+          <Text style={[captionStyle.caption, { paddingHorizontal: SPACE[4], paddingTop: 4 }]} testID={testID ? `${testID}-unsaved` : undefined}>
+            Unsaved changes — confirm to close
+          </Text>
+        ) : null}
       </View>
     </Modal>
   );

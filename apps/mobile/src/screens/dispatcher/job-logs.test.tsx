@@ -238,6 +238,37 @@ describe('JobLogsScreen (§D2)', () => {
     expect(textOf(remounted, 'job-logs-chip-tech')).toContain('Ravi Kumar');
   });
 
+  it('“Unassigned” is a choice under the person filter, and the two views of it cannot contradict', async () => {
+    // Yashas, 2026-09-17: "add unassigned to the filter". It was only
+    // under Status; the person chip — where a dispatcher looks for "nobody
+    // holds it" — now offers it too. Both write the ONE fact the api has
+    // (`status=unassigned`), so the chips can never disagree.
+    const onFiltersChange = vi.fn();
+    const renderer = await create(<JobLogsScreen {...baseDeps({ onFiltersChange })} />);
+    press(findID(renderer, 'job-logs-chip-tech')!);
+    press(findID(renderer, 'filter-option-unassigned')!);
+    expect(onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_JOB_LOGS_FILTERS, status: 'unassigned' });
+
+    // With the status applied, the person chip reads the same word.
+    const unassignedFilters: JobLogsFilters = { ...DEFAULT_JOB_LOGS_FILTERS, status: 'unassigned' };
+    const unassigned = await create(<JobLogsScreen {...baseDeps({ filters: unassignedFilters })} />);
+    expect(textOf(unassigned, 'job-logs-chip-tech')).toContain('Unassigned');
+
+    // …and naming a technician — who by definition does hold it — takes
+    // the unassigned status back off rather than leaving the two chips
+    // asserting different things.
+    const onPick = vi.fn();
+    const holding = await create(
+      <JobLogsScreen {...baseDeps({ filters: unassignedFilters, onFiltersChange: onPick })} />,
+    );
+    press(findID(holding, 'job-logs-chip-tech')!);
+    press(findID(holding, 'filter-option-ravi-kumar')!);
+    expect(onPick).toHaveBeenCalledWith({
+      ...DEFAULT_JOB_LOGS_FILTERS,
+      tech: { kind: 'tech', technicianId: TECH_A, name: 'Ravi Kumar' },
+    });
+  });
+
   it('result count updates with the filter and includes the overdue sub-count', async () => {
     const renderer = await create(<JobLogsScreen {...baseDeps()} />);
 
