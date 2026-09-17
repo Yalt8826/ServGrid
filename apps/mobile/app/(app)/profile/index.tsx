@@ -141,7 +141,7 @@ function TechnicianProfileRoute(): React.ReactNode {
           void target;
           router.push('/ladder');
         }}
-        changePassword={() => router.push('/change-password')}
+        changePassword={() => router.push('/profile/password')}
         subscribeForeground={(listener) => {
           const subscription = AppState.addEventListener('change', (state) => {
             if (state === 'active') listener();
@@ -182,7 +182,7 @@ function DispatcherProfileRoute(): React.ReactNode {
         fullName={fullName}
         username={actor.username}
         appVersion={Constants.expoConfig?.version ?? 'dev'}
-        changePassword={() => router.push('/change-password')}
+        changePassword={() => router.push('/profile/password')}
         logout={() => {
           // §D6: IMMEDIATE — no gate (nothing is queued), no confirmation
           // (nothing to lose). Same session end as every role.
@@ -218,7 +218,7 @@ function OwnerProfileRoute(): React.ReactNode {
         username={actor.username}
         appVersion={Constants.expoConfig?.version ?? 'dev'}
         otherOwners={others}
-        changePassword={() => router.push('/change-password')}
+        changePassword={() => router.push('/profile/password')}
         logout={() => {
           // Immediate, like the dispatcher's: the owner is online-only,
           // there is nothing queued to lose.

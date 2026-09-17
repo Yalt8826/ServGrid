@@ -162,6 +162,14 @@ export const ROUTE_GUARDS: Record<string, RouteGuard> = {
   // own gate, which no technician or rep holds at all).
   '/calls': { kind: 'matrix', resource: 'job', action: 'read', landing: ['all'] },
 
+  // The profile-initiated password change (§T7/§D6/§O9): every signed-in
+  // role may change its own password, and the screen reads nothing else —
+  // so it is `open`, not a matrix cell. It sits under `/profile` because
+  // that is the tab it belongs to (the navmap's own rule: a pushed route
+  // hangs off the section that reaches it). The FORCED change keeps its
+  // separate, non-dismissible route in the (auth) group.
+  '/profile/password': { kind: 'open' },
+
   '/contracts': { kind: 'matrix', resource: 'contract', action: 'read', landing: ['all'] },
   '/contracts/new': { kind: 'matrix', resource: 'contract', action: 'create', landing: ['all'] },
 
@@ -307,6 +315,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/cash': 'Cash queue',
   '/cash/handover': 'Cash handover',
   '/profile': 'Profile',
+  '/profile/password': 'Change password',
   '/profile/tracking': 'Tracking',
   '/profile/settings': 'Settings',
 };
