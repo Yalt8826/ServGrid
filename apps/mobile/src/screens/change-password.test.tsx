@@ -100,3 +100,48 @@ describe('ChangePasswordScreen (§X2)', () => {
     expect(hapticsStub.__fired()).toContain('notification:notificationSuccess');
   });
 });
+
+/**
+ * The voluntary shape (2026-09-17): a profile's "Change password" used to
+ * push the FORCED route, which — with no temporary password in the session
+ * — redirects to `/login`, so the button signed the user out. The profile
+ * now has its own route; this is the screen it renders: it asks for the
+ * current password (nobody holds it here), offers a way back, and posts
+ * what was typed.
+ */
+describe('ChangePasswordScreen — from a profile', () => {
+  it('asks for the current password, and posts what was typed with the new one', async () => {
+    const onDone = vi.fn();
+    const { api, calls } = fakeApi();
+    const r = await create(<ChangePasswordScreen api={api} onComplete={onDone} onCancel={() => {}} />);
+
+    // A field nobody had to fill in the forced flow.
+    expect(findByTestID(rendererJson(r), 'change-password-current')).toBeTruthy();
+    expect(allText(rendererJson(r)).join(' ')).not.toContain('temporary');
+
+    await typeInto(r, 'change-password-new', 'a-real-new-password');
+    await typeInto(r, 'change-password-confirm', 'a-real-new-password');
+    await press(r, 'change-password-submit');
+
+    // The current password is required, not assumed: nothing was posted.
+    expect(calls).toHaveLength(0);
+    expect(findByTestID(rendererJson(r), 'change-password-current-error')).toBeTruthy();
+
+    await typeInto(r, 'change-password-current', 'the-one-i-use');
+    await press(r, 'change-password-submit');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.opts?.body).toEqual({
+      currentPassword: 'the-one-i-use',
+      newPassword: 'a-real-new-password',
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('can be walked away from — the way back is a button, not a gesture', async () => {
+    const onCancel = vi.fn();
+    const { api } = fakeApi();
+    const r = await create(<ChangePasswordScreen api={api} onComplete={() => {}} onCancel={onCancel} />);
+    await press(r, 'change-password-cancel');
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
