@@ -49,13 +49,14 @@
  * (03-COMPONENTS.md), and the two things the server cannot raise a card
  * without (customer, service) are refused with a sentence, not a shake.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { alpha, COLORS, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
-import { Banner, Button, CalendarGrid, DatePicker, Sheet, TextField } from '../../components/ui';
+import { Banner, Button, CalendarGrid, DatePicker, EmptyState, SectionHeader, Sheet, TextField, useDensity } from '../../components/ui';
+import { Icon, type IconName } from '../../components/ui/icons';
 import { haptic } from '../../components/ui/haptics';
 import { useArrival } from '../../components/ui/motion';
 import { textStyle } from '../../fonts/textStyle';
@@ -139,36 +140,52 @@ export function TechnicianPicker({
   disabled: boolean;
   onChoose(choice: AssignmentChoice): void;
 }): React.ReactNode {
+  const density = useDensity();
+  const body = useMemo(() => textStyle('body', density), [density]);
   const sorted = sortTechniciansByLoad(technicians);
   const busiestLoad = sorted.length === 0 ? 0 : Math.max(...sorted.map((technician) => technician.openTotal));
   return (
-    <View testID="dispatch-assign-picker">
-      {sorted.map((technician, index) => {
-        const selected = choice.kind === 'tech' && choice.id === technician.employeeId;
-        return (
-          <Pressable
-            key={technician.employeeId}
-            testID={`dispatch-assign-${technician.employeeId}`}
-            accessibilityRole="button"
-            accessibilityState={{ selected, disabled }}
-            disabled={disabled}
-            hitSlop={hitSlop}
-            onPress={() => {
-              haptic('pickerSelect');
-              onChoose({ kind: 'tech', id: technician.employeeId });
-            }}
-            style={[styles.assignRow, selected ? styles.assignRowSelected : null]}
-          >
-            <TechnicianLoadRow
-              name={technician.name}
-              load={technician.openTotal}
-              maxLoad={busiestLoad}
-              index={index}
-              testID={`dispatch-assign-load-${technician.employeeId}`}
-            />
-          </Pressable>
-        );
-      })}
+    <View testID="dispatch-assign-picker" style={styles.assignPanel}>
+      {sorted.length === 0 ? (
+        // The roster read has not answered yet (or nobody is on it). The
+        // screen showed a lone "Leave unassigned" with no sign the crew
+        // was still coming; the console's other pickers say so.
+        <EmptyState message="No technicians on the roster." testID="dispatch-roster-empty" />
+      ) : (
+        sorted.map((technician, index) => {
+          const selected = choice.kind === 'tech' && choice.id === technician.employeeId;
+          return (
+            <Pressable
+              key={technician.employeeId}
+              testID={`dispatch-assign-${technician.employeeId}`}
+              accessibilityRole="button"
+              accessibilityState={{ selected, disabled }}
+              disabled={disabled}
+              hitSlop={hitSlop}
+              onPress={() => {
+                haptic('pickerSelect');
+                onChoose({ kind: 'tech', id: technician.employeeId });
+              }}
+              style={[
+                styles.assignRow,
+                index === 0 ? null : styles.assignRowNext,
+                selected ? styles.assignRowSelected : null,
+              ]}
+            >
+              <View style={styles.assignLoad}>
+                <TechnicianLoadRow
+                  name={technician.name}
+                  load={technician.openTotal}
+                  maxLoad={busiestLoad}
+                  index={index}
+                  testID={`dispatch-assign-load-${technician.employeeId}`}
+                />
+              </View>
+              {selected ? <Icon name="check" size={ICON.sm} color={SEMANTIC.text.primary} /> : null}
+            </Pressable>
+          );
+        })
+      )}
       {(() => {
         const selected = choice.kind === 'unassigned';
         return (
@@ -182,15 +199,98 @@ export function TechnicianPicker({
               haptic('pickerSelect');
               onChoose({ kind: 'unassigned' });
             }}
-            style={[styles.assignRow, styles.assignUnassigned, selected ? styles.assignRowSelected : null]}
+            style={[
+              styles.assignRow,
+              styles.assignUnassigned,
+              sorted.length === 0 ? null : styles.assignRowNext,
+              selected ? styles.assignRowSelected : null,
+            ]}
           >
-            <Text style={selected ? styles.assignUnassignedLabelSelected : styles.assignUnassignedLabel}>
+            <Icon name="people" size={ICON.sm} color={SEMANTIC.text.secondary} />
+            <Text style={[selected ? styles.assignUnassignedLabelSelected : styles.assignUnassignedLabel, body]}>
               Leave unassigned
             </Text>
+            {selected ? <Icon name="check" size={ICON.sm} color={SEMANTIC.text.primary} /> : null}
           </Pressable>
         );
       })()}
     </View>
+  );
+}
+
+// ── a section of the form ────────────────────────────────────────────────
+
+/**
+ * One block of the form under its marker (§D3's anatomy, 2026-09-17).
+ *
+ * The screen used to be one undivided column of white fields: a dozen
+ * identical 12pt gaps with a grey word here and there, so the dispatcher
+ * reading it back down the phone had nothing to navigate by. Each block
+ * now names itself the way every other console screen does — glyph, word,
+ * rule — and the fields inside it take a shared gap rather than each
+ * carrying its own margin.
+ */
+function Section({
+  label,
+  icon,
+  tint,
+  first = false,
+  children,
+}: {
+  label: string;
+  icon: IconName;
+  /** The accent, on the one section that carries the screen's decision. */
+  tint?: string;
+  /** The first block sits under the banners without the section gap. */
+  first?: boolean;
+  children: React.ReactNode;
+}): React.ReactNode {
+  return (
+    <View style={[styles.section, first ? styles.sectionFirst : null]}>
+      <SectionHeader label={label} icon={icon} {...(tint === undefined ? {} : { tint })} />
+      <View style={styles.sectionBody}>{children}</View>
+    </View>
+  );
+}
+
+// ── one option row of a picker sheet ─────────────────────────────────────
+
+/**
+ * A picker option: leading glyph, word, and a tick when it is the one the
+ * dispatcher holds. Keeping the testID and the selected state on this
+ * Pressable is what the D3 tests read.
+ *
+ * `label` is rendered verbatim — a unit's `UPS 850VA · SN LM8842219` is
+ * asserted by exact text, so nothing decorative goes inside the word.
+ */
+function SheetOption({
+  testID,
+  label,
+  selected,
+  icon,
+  onPress,
+}: {
+  testID: string;
+  label: string;
+  selected: boolean;
+  icon: IconName;
+  onPress(): void;
+}): React.ReactNode {
+  // Its own density read: this helper is not inside the screen component.
+  const density = useDensity();
+  const body = useMemo(() => textStyle('body', density), [density]);
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.optionRow, selected ? styles.optionRowSelected : null]}
+    >
+      <Icon name={icon} size={ICON.sm} color={selected ? FRAME.text : SEMANTIC.text.secondary} />
+      <Text style={[selected ? styles.optionLabelSelected : styles.optionLabel, body, styles.optionText]}>{label}</Text>
+      {selected ? <Icon name="check" size={ICON.sm} color={FRAME.text} /> : null}
+    </Pressable>
   );
 }
 
@@ -245,6 +345,12 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
   const [assignment, setAssignment] = useState<AssignmentChoice>({ kind: 'unset' });
   const [attempted, setAttempted] = useState(false);
 
+  // Body type follows the density ramp: this screen runs at console (15)
+  // for a dispatcher and at desk (14) for the owner, and the module-level
+  // `StyleSheet` cannot read the provider (2026-09-17).
+  const density = useDensity();
+  const body = useMemo(() => textStyle('body', density), [density]);
+
   // Contact prefills from the customer the dispatcher just picked — the
   // anatomy's "(prefilled from customer)". Only fills blanks: a number
   // the dispatcher already typed is never overwritten by a re-pick.
@@ -290,6 +396,8 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
   };
 
   const searching = !hasCustomer && deps.customers !== null && deps.customers.length > 0;
+  /** The read is still in flight — the results line is not "no match" yet. */
+  const searchInFlight = !hasCustomer && deps.customers === null && deps.customerQuery.trim() !== '';
   const noMatch =
     !hasCustomer && deps.customers !== null && deps.customers.length === 0 && deps.customerQuery.trim() !== '';
 
@@ -303,13 +411,20 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
 
   return (
     <View style={styles.screen} testID="dispatch-screen">
+      {/* The navy frame the rest of the console wears: what the screen is
+          for, above the form it asks for. The route paints the same navy
+          behind the status bar. */}
+      <View style={styles.frame}>
+        <Text style={styles.frameTitle} testID="dispatch-form-title">
+          Dispatch Job
+        </Text>
+        <Text style={styles.frameCaption}>Raise a job and name a technician, while the caller is on the phone.</Text>
+      </View>
       {/* No stray whitespace on this line: a same-line gap between the
           ScrollView's opening tag and its first child renders as a string
           child of a View — RN's "Text strings must be rendered within a
           <Text> component" (found on device, 2026-09-17). */}
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Dispatch Job</Text>
-
         {deps.offline ? (
           <Banner tone="danger" message={DISPATCH_OFFLINE_MESSAGE} testID="dispatch-offline-banner" />
         ) : null}
@@ -323,9 +438,10 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
           />
         ) : null}
         {deps.submitError !== null ? (
-          <Banner tone="danger" message={deps.submitError} testID="dispatch-submit-error" />
+          <Banner tone="danger" message={deps.submitError} onDismiss={deps.onDismissToast} testID="dispatch-submit-error" />
         ) : null}
 
+        <Section label="Customer" icon="business" first>
         {hasCustomer ? (
           <>
             {/* The collapsed line: one row, name · phone, and a way back. */}
@@ -354,11 +470,13 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
                 style={styles.selectedClear}
               >
                 <Text style={styles.selectedClearLabel}>Change</Text>
+                <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
               </Pressable>
             </View>
             {/* The AMC offer sits between the chosen customer and the
             unit reveal: it is about THIS customer, read before the work
-            is specified (decision 2). No accent — a checkbox, not a CTA. */}
+            is specified (decision 2). A real tick, not a ☑ character —
+            the app's other checkboxes are icons. */}
             {deps.amc !== null ? (
               <Pressable
                 accessibilityRole="checkbox"
@@ -368,33 +486,14 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
                 style={styles.amcRow}
                 testID="dispatch-amc-option"
               >
-                <Text style={styles.amcBox}>{deps.amcTicked ? '☑' : '☐'}</Text>
-                <Text style={styles.amcLabel}>{deps.amc.label}</Text>
+                <Icon
+                  name={deps.amcTicked ? 'checkFilled' : 'check'}
+                  size={ICON.md}
+                  color={deps.amcTicked ? SEMANTIC.feedback.success : SEMANTIC.text.placeholder}
+                />
+                <Text style={[styles.amcLabel, body]}>{deps.amc.label}</Text>
               </Pressable>
             ) : null}
-            {/* The one progressive-disclosure moment (220ms, opacity/translate). */}
-            <Animated.View style={reveal} testID="dispatch-unit-reveal">
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>The unit</Text>
-                <Pressable
-                  testID="dispatch-unit-trigger"
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: deps.submitting }}
-                  disabled={deps.submitting}
-                  hitSlop={hitSlop}
-                  onPress={() => {
-                    haptic('pickerSelect');
-                    setSheet('unit');
-                  }}
-                  style={styles.trigger}
-                >
-                  <Text numberOfLines={1} style={selectedUnitLabel === null ? styles.triggerPlaceholderLabel : styles.triggerLabel}>
-                    {selectedUnitLabel ?? (deps.stack === null ? 'Loading…' : 'Optional — skip if the caller does not know')}
-                  </Text>
-                  <Text style={styles.triggerChevron}> ▾</Text>
-                </Pressable>
-              </View>
-            </Animated.View>
           </>
         ) : (
           <>
@@ -419,6 +518,11 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
                 testIDPrefix="dispatch-customer-result"
               />
             ) : null}
+            {searchInFlight ? (
+              <Text style={styles.sheetNote} testID="dispatch-customer-searching">
+                Searching…
+              </Text>
+            ) : null}
             {noMatch ? (
               <Pressable
                 testID="dispatch-new-customer"
@@ -430,7 +534,8 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
                 }}
                 style={styles.newCustomerRow}
               >
-                <Text style={styles.newCustomerLabel}>+ New customer</Text>
+                <Icon name="plus" size={ICON.sm} color={SEMANTIC.text.primary} />
+                <Text style={[styles.newCustomerLabel, body]}>+ New customer</Text>
               </Pressable>
             ) : null}
             {attempted && problems.customer !== undefined ? (
@@ -440,6 +545,46 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
             ) : null}
           </>
         )}
+        </Section>
+
+        {/* The unit rides in when the customer is chosen — §D3's one
+            progressive-disclosure moment (220ms, opacity/translate; under
+            reduced motion it just is). It belongs to the WORK, not to the
+            customer record, so it opens this section rather than closing
+            the last one (2026-09-17). */}
+        <Section label="The work" icon="wrench">
+        {hasCustomer ? (
+          <Animated.View style={reveal} testID="dispatch-unit-reveal">
+            <View style={styles.fieldWrap}>
+              <Text style={styles.fieldLabel}>The unit</Text>
+              <Pressable
+                testID="dispatch-unit-trigger"
+                accessibilityRole="button"
+                accessibilityState={{ disabled: deps.submitting }}
+                disabled={deps.submitting}
+                hitSlop={hitSlop}
+                onPress={() => {
+                  haptic('pickerSelect');
+                  setSheet('unit');
+                }}
+                style={styles.trigger}
+              >
+                <Icon name="cube" size={ICON.sm} color={SEMANTIC.text.secondary} />
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    selectedUnitLabel === null ? styles.triggerPlaceholderLabel : styles.triggerLabel,
+                    body,
+                    styles.triggerValue,
+                  ]}
+                >
+                  {selectedUnitLabel ?? (deps.stack === null ? 'Loading…' : 'Optional — skip if the caller does not know')}
+                </Text>
+                <Icon name="chevronDown" size={ICON.sm} color={SEMANTIC.text.secondary} />
+              </Pressable>
+            </View>
+          </Animated.View>
+        ) : null}
 
         <View style={styles.fieldWrap}>
           <Text style={styles.fieldLabel}>Service</Text>
@@ -455,10 +600,11 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
             }}
             style={styles.trigger}
           >
-            <Text style={selectedService === null ? styles.triggerPlaceholderLabel : styles.triggerLabel}>
+            <Icon name="wrench" size={ICON.sm} color={SEMANTIC.text.secondary} />
+            <Text style={[selectedService === null ? styles.triggerPlaceholderLabel : styles.triggerLabel, body, styles.triggerValue]}>
               {selectedService ?? 'Select'}
             </Text>
-            <Text style={styles.triggerChevron}> ▾</Text>
+            <Icon name="chevronDown" size={ICON.sm} color={SEMANTIC.text.secondary} />
           </Pressable>
           {attempted && problems.service !== undefined ? (
             <Text style={styles.fieldError} testID="dispatch-service-error">
@@ -482,14 +628,17 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
             ))}
           </View>
           {priority === 'urgent' ? (
-            <Text style={styles.urgentNote} testID="dispatch-priority-note">
-              {URGENT_SUPPRESSION_NOTE}
-            </Text>
+            <View style={styles.urgentStrip}>
+              <Icon name="bell" size={ICON.sm} color={SEMANTIC.feedback.warning} />
+              <Text style={styles.urgentNote} testID="dispatch-priority-note">
+                {URGENT_SUPPRESSION_NOTE}
+              </Text>
+            </View>
           ) : null}
         </View>
+        </Section>
 
-        <View style={styles.fieldWrap}>
-          <Text style={styles.fieldLabel}>Schedule</Text>
+        <Section label="Schedule" icon="calendar">
           <View style={styles.scheduleRow}>
             <View style={styles.scheduleDate}>
               {/* `DatePicker` is a field with a trigger and no choosing UI
@@ -511,88 +660,111 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
                 }}
                 style={styles.trigger}
               >
-                <Text style={time === null ? styles.triggerPlaceholderLabel : styles.triggerLabel}>
+                <Icon name="clock" size={ICON.sm} color={SEMANTIC.text.secondary} />
+                <Text style={[time === null ? styles.triggerPlaceholderLabel : styles.triggerLabel, body, styles.triggerValue]}>
                   {time ?? 'No time'}
                 </Text>
-                <Text style={styles.triggerChevron}> ▾</Text>
+                <Icon name="chevronDown" size={ICON.sm} color={SEMANTIC.text.secondary} />
               </Pressable>
             </View>
           </View>
-        </View>
+        </Section>
 
-        <View style={styles.fieldWrap}>
-          <TextField label="Contact name" value={contactName} onChangeText={setContactName} testID="dispatch-contact-name" />
-        </View>
-        <View style={styles.fieldWrap}>
-          <TextField label="Contact phone" value={contactPhone} onChangeText={setContactPhone} testID="dispatch-contact-phone" />
-        </View>
-        <View style={styles.fieldWrap}>
-          <TextField label="Notes" value={notes} onChangeText={setNotes} multiline rows={3} testID="dispatch-notes" />
-        </View>
+        <Section label="Contact" icon="phone">
+          <View style={styles.fieldWrap}>
+            <TextField label="Contact name" value={contactName} onChangeText={setContactName} testID="dispatch-contact-name" />
+          </View>
+          <View style={styles.fieldWrap}>
+            <TextField label="Contact phone" value={contactPhone} onChangeText={setContactPhone} testID="dispatch-contact-phone" />
+          </View>
+        </Section>
 
-        <Text style={styles.assignHeading}>Assign to</Text>
-        <Text style={styles.assignHint}>Lightest load first — the comparison is the decision.</Text>
-        {attempted && problems.assignment !== undefined ? (
-          <Text style={styles.fieldError} testID="dispatch-assign-error">
-            {problems.assignment}
-          </Text>
-        ) : null}
-        <TechnicianPicker technicians={deps.technicians} choice={assignment} disabled={deps.submitting} onChoose={setAssignment} />
+        <Section label="Notes" icon="document">
+          <View style={styles.fieldWrap}>
+            <TextField label="Notes" value={notes} onChangeText={setNotes} multiline rows={3} testID="dispatch-notes" />
+          </View>
+        </Section>
+
+        {/* The decision the screen exists to make — the one accent marker:
+            "the comparison is the decision" (§D3). */}
+        <Section label="Assign to" icon="people" tint={COLORS.accent}>
+          <Text style={styles.assignHint}>Lightest load first — the comparison is the decision.</Text>
+          {attempted && problems.assignment !== undefined ? (
+            <Text style={styles.fieldError} testID="dispatch-assign-error">
+              {problems.assignment}
+            </Text>
+          ) : null}
+          <TechnicianPicker technicians={deps.technicians} choice={assignment} disabled={deps.submitting} onChoose={setAssignment} />
+        </Section>
 
         <View style={styles.submitWrap}>
-          <Button label="Create and assign" loading={deps.submitting} onPress={submit} fullwidth testID="dispatch-submit" />
+          <Button
+            label="Create and assign"
+            icon="send"
+            loading={deps.submitting}
+            onPress={submit}
+            fullwidth
+            testID="dispatch-submit"
+          />
         </View>
       </ScrollView>
 
       {/* One option sheet open at a time; choosing applies and closes. */}
       {sheet === 'unit' ? (
         <Sheet visible title="Which unit" onDismiss={() => setSheet(null)} testID="dispatch-unit-sheet">
-          <Pressable
-            testID="unit-option-none"
-            accessibilityRole="button"
-            accessibilityState={{ selected: unitId === null }}
-            onPress={() => {
-              setUnitId(null);
-              setSheet(null);
-            }}
-            style={styles.optionRow}
-          >
-            <Text style={styles.optionLabel}>No specific unit</Text>
-          </Pressable>
-          {(deps.stack ?? []).map((unit) => (
-            <Pressable
-              key={unit.id}
-              testID={`unit-option-${unit.id}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: unitId === unit.id }}
+          <View style={styles.options}>
+            {deps.stack === null ? (
+              <Text style={styles.sheetNote} testID="dispatch-unit-loading">
+                Reading this site's units…
+              </Text>
+            ) : null}
+            <SheetOption
+              testID="unit-option-none"
+              label="No specific unit"
+              selected={unitId === null}
+              icon="cube"
               onPress={() => {
-                setUnitId(unit.id);
+                setUnitId(null);
                 setSheet(null);
               }}
-              style={styles.optionRow}
-            >
-              <Text style={unitId === unit.id ? styles.optionLabelSelected : styles.optionLabel}>{unit.label}</Text>
-            </Pressable>
-          ))}
+            />
+            {(deps.stack ?? []).map((unit) => (
+              <SheetOption
+                key={unit.id}
+                testID={`unit-option-${unit.id}`}
+                label={unit.label}
+                selected={unitId === unit.id}
+                icon="cube"
+                onPress={() => {
+                  setUnitId(unit.id);
+                  setSheet(null);
+                }}
+              />
+            ))}
+          </View>
         </Sheet>
       ) : null}
       {sheet === 'service' ? (
         <Sheet visible title="What is the work" onDismiss={() => setSheet(null)} testID="dispatch-service-sheet">
-          {deps.services.map((service) => (
-            <Pressable
-              key={service.id}
-              testID={`service-option-${service.id}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: serviceId === service.id }}
-              onPress={() => {
-                setServiceId(service.id);
-                setSheet(null);
-              }}
-              style={styles.optionRow}
-            >
-              <Text style={serviceId === service.id ? styles.optionLabelSelected : styles.optionLabel}>{service.name}</Text>
-            </Pressable>
-          ))}
+          {deps.services.length === 0 ? (
+            <EmptyState message="No services in the catalogue." testID="dispatch-service-empty" />
+          ) : (
+            <View style={styles.options}>
+              {deps.services.map((service) => (
+                <SheetOption
+                  key={service.id}
+                  testID={`service-option-${service.id}`}
+                  label={service.name}
+                  selected={serviceId === service.id}
+                  icon="wrench"
+                  onPress={() => {
+                    setServiceId(service.id);
+                    setSheet(null);
+                  }}
+                />
+              ))}
+            </View>
+          )}
         </Sheet>
       ) : null}
       {sheet === 'date' ? (
@@ -610,39 +782,37 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
             }}
             testID="dispatch-date-calendar"
           />
-          <Pressable
+          <SheetOption
             testID="date-option-none"
-            accessibilityRole="button"
-            accessibilityState={{ selected: scheduledDate === null }}
+            label="No day"
+            selected={scheduledDate === null}
+            icon="calendar"
             onPress={() => {
               haptic('pickerSelect');
               setScheduledDate(null);
               setSheet(null);
             }}
-            style={styles.optionRow}
-          >
-            <Text style={scheduledDate === null ? styles.optionLabelSelected : styles.optionLabel}>No day</Text>
-          </Pressable>
+          />
         </Sheet>
       ) : null}
 
       {sheet === 'time' ? (
         <Sheet visible title="When" onDismiss={() => setSheet(null)} testID="dispatch-time-sheet">
-          {TIME_SLOTS.map((slot) => (
-            <Pressable
-              key={slot}
-              testID={`time-option-${slot}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: time === slot }}
-              onPress={() => {
-                setTime(slot);
-                setSheet(null);
-              }}
-              style={styles.optionRow}
-            >
-              <Text style={time === slot ? styles.optionLabelSelected : styles.optionLabel}>{slot}</Text>
-            </Pressable>
-          ))}
+          <View style={styles.options}>
+            {TIME_SLOTS.map((slot) => (
+              <SheetOption
+                key={slot}
+                testID={`time-option-${slot}`}
+                label={slot}
+                selected={time === slot}
+                icon="clock"
+                onPress={() => {
+                  setTime(slot);
+                  setSheet(null);
+                }}
+              />
+            ))}
+          </View>
         </Sheet>
       ) : null}
     </View>
@@ -651,6 +821,20 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
+  // The frame (2026-09-17): what the screen is for, on the console's navy.
+  frame: {
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[3],
+    paddingBottom: SPACE[3],
+    gap: 2,
+  },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  // One block per section: the marker, then its fields on a shared gap.
+  section: { marginTop: SPACE[5] },
+  sectionFirst: { marginTop: SPACE[3] },
+  sectionBody: { alignSelf: 'stretch', gap: SPACE[3], marginTop: SPACE[3] },
   // The form is a sentence: capped at a readable measure and centred on
   // the desk instead of stretching a text field across 1160px (a phone
   // never reaches the cap, so the field layout is unchanged there).
@@ -678,8 +862,10 @@ const styles = StyleSheet.create({
   selectedMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   selectedClear: { paddingHorizontal: SPACE[2], minHeight: TAP.min, justifyContent: 'center' },
   selectedClearLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
-  fieldWrap: { marginTop: SPACE[3] },
+  fieldWrap: { alignSelf: 'stretch' },
   fieldLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 6 },
+  /** A sheet's line of prose — a state the sheet is in, not an error. */
+  sheetNote: { ...textStyle('caption'), color: SEMANTIC.text.secondary, paddingVertical: SPACE[2] },
   fieldError: { ...textStyle('caption'), color: SEMANTIC.feedback.danger, marginTop: 4 },
   // The AMC checkbox row — box/label copied from CompleteSheet's
   // "Customer confirmed" row; at least TAP tall; no accent anywhere.
@@ -690,33 +876,34 @@ const styles = StyleSheet.create({
     minHeight: TAP.console,
     paddingVertical: SPACE[1],
   },
-  amcBox: { ...textStyle('body'), color: SEMANTIC.text.primary },
-  amcLabel: { ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 },
+  amcLabel: { color: SEMANTIC.text.primary, flex: 1 },
   newCustomerRow: {
-    minHeight: TAP.min,
-    justifyContent: 'center',
+    minHeight: TAP.console,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
     paddingHorizontal: SPACE[3],
-    marginTop: SPACE[1],
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
-    borderRadius: 4,
+    borderRadius: RADII.control,
     backgroundColor: SEMANTIC.bg.raised,
   },
-  newCustomerLabel: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
+  newCustomerLabel: { color: SEMANTIC.text.primary, fontWeight: '600' },
   trigger: {
-    minHeight: 44,
-    borderRadius: 4,
+    minHeight: TAP.console,
+    borderRadius: RADII.control,
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
-    paddingHorizontal: 12,
+    paddingHorizontal: SPACE[3],
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: SPACE[2],
   },
-  triggerLabel: { ...textStyle('body'), color: SEMANTIC.text.primary, flexShrink: 1 },
-  triggerPlaceholderLabel: { ...textStyle('body'), color: SEMANTIC.text.placeholder, flexShrink: 1 },
-  triggerChevron: { ...textStyle('body'), color: SEMANTIC.text.secondary },
+  /** The value owns the middle of the row, between its glyph and caret. */
+  triggerValue: { flex: 1 },
+  triggerLabel: { color: SEMANTIC.text.primary },
+  triggerPlaceholderLabel: { color: SEMANTIC.text.placeholder },
   segmentRow: { flexDirection: 'row', gap: SPACE[1] },
   segment: {
     flex: 1,
@@ -728,37 +915,69 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  segmentActive: { backgroundColor: SEMANTIC.bg.dense, borderColor: SEMANTIC.text.primary },
+  // The app's one "this is on" fill: navy, with the label in light ink —
+  // the same selected state the complete sheet's segments wear.
+  segmentActive: { backgroundColor: SEMANTIC.bg.dark, borderColor: SEMANTIC.bg.dark },
   segmentPressed: { backgroundColor: SEMANTIC.bg.pressed },
   segmentLabel: { ...textStyle('label'), color: SEMANTIC.text.primary },
-  segmentLabelActive: { ...textStyle('label'), color: SEMANTIC.text.primary, fontWeight: '600' },
-  urgentNote: { ...textStyle('caption'), color: SEMANTIC.feedback.warning, marginTop: 4 },
+  segmentLabelActive: { ...textStyle('label'), color: SEMANTIC.text.onDark },
+  /** Urgent is a state worth a strip, not a line of small amber print. */
+  urgentStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: alpha(SEMANTIC.feedback.warning, TINT.chipLine),
+    backgroundColor: alpha(SEMANTIC.feedback.warning, TINT.chip),
+  },
+  urgentNote: { ...textStyle('caption'), color: SEMANTIC.text.primary, flex: 1 },
   scheduleRow: { flexDirection: 'row', gap: SPACE[2] },
   scheduleDate: { flex: 1 },
   scheduleTime: { width: 128 },
-  assignHeading: { ...textStyle('h2'), color: SEMANTIC.text.primary, marginTop: SPACE[5] },
-  assignHint: { ...textStyle('caption'), color: SEMANTIC.text.secondary, marginTop: 2, marginBottom: SPACE[2] },
-  assignRow: {
+  assignHint: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  // The crew is one panel of hairline rows — the console's own roster
+  // shape (the dashboard's load panel, the job detail's picker), not a
+  // stack of separate boxes.
+  assignPanel: {
     alignSelf: 'stretch',
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
-    borderRadius: 4,
+    borderRadius: RADII.control,
     backgroundColor: SEMANTIC.bg.raised,
-    paddingHorizontal: SPACE[2],
-    marginBottom: SPACE[1],
+    overflow: 'hidden',
   },
-  assignRowSelected: { borderColor: SEMANTIC.line.focus },
-  assignUnassigned: { minHeight: TAP.console, justifyContent: 'center' },
-  assignUnassignedLabel: { ...textStyle('body'), color: SEMANTIC.text.secondary },
-  assignUnassignedLabelSelected: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
+  assignRow: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    paddingHorizontal: SPACE[2],
+  },
+  /** The load row owns the width; the tick rides the trailing edge. */
+  assignLoad: { flex: 1 },
+  assignRowNext: { borderTopWidth: 1, borderTopColor: SEMANTIC.line.default },
+  assignRowSelected: { backgroundColor: alpha(COLORS.accent, TINT.band) },
+  assignUnassigned: { minHeight: TAP.console, flexDirection: 'row', alignItems: 'center', gap: SPACE[2] },
+  assignUnassignedLabel: { color: SEMANTIC.text.secondary, flex: 1 },
+  assignUnassignedLabelSelected: { color: SEMANTIC.text.primary, fontWeight: '600', flex: 1 },
+  /** A sheet of options: a spaced stack, the chosen one navy with a tick. */
+  options: { alignSelf: 'stretch', gap: SPACE[1] },
   optionRow: {
-    minHeight: TAP.min,
-    justifyContent: 'center',
-    paddingHorizontal: SPACE[2],
-    borderTopWidth: 1,
-    borderTopColor: SEMANTIC.line.default,
+    minHeight: TAP.console,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
   },
-  optionLabel: { ...textStyle('body'), color: SEMANTIC.text.primary },
-  optionLabelSelected: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
+  optionRowSelected: { backgroundColor: SEMANTIC.bg.dark },
+  optionText: { flex: 1 },
+  optionLabel: { color: SEMANTIC.text.primary },
+  optionLabelSelected: { color: SEMANTIC.text.onDark, fontWeight: '600' },
   submitWrap: { marginTop: SPACE[5] },
 });

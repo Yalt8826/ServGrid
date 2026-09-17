@@ -18,7 +18,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME } from '@servgrid/shared';
 import { DispatchJobScreen } from '../../../src/screens/dispatcher/dispatch';
 import { useDispatchForm } from '../../../src/screens/dispatcher/useDispatchForm';
 import { useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
@@ -48,7 +48,9 @@ export default function Screen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset belongs to the
+    // tab bar (the console's other routes, 2026-09-17).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <DispatchJobScreen {...deps} />
     </SafeAreaView>
   );
