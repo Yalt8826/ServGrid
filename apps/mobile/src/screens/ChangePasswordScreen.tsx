@@ -169,13 +169,20 @@ export function ChangePasswordScreen({
         testID="change-password-confirm"
       />
 
-      <Button
-        label="Save new password"
-        onPress={() => void submit()}
-        loading={pending}
-        fullwidth
-        testID="change-password-submit"
-      />
+      {/* The submit is a step away from the last field, not welded to it:
+          the forms in this app separate the button that commits from the
+          fields above it (`SPACE[5]`, the dispatch form's own rhythm). The
+          confirm box and "Save new password" had 8pt between them
+          (reported on the handset, 2026-09-17). */}
+      <View style={styles.submitWrap}>
+        <Button
+          label="Save new password"
+          onPress={() => void submit()}
+          loading={pending}
+          fullwidth
+          testID="change-password-submit"
+        />
+      </View>
       {onCancel === undefined ? null : (
         <View style={styles.cancelWrap}>
           <Button
@@ -212,5 +219,6 @@ const styles = StyleSheet.create({
     marginBottom: SPACE[5],
   },
   gap: { height: SPACE[3] },
-  cancelWrap: { marginTop: SPACE[2] },
+  submitWrap: { marginTop: SPACE[5] },
+  cancelWrap: { marginTop: SPACE[3] },
 });
