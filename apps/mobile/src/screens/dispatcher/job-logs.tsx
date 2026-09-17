@@ -285,7 +285,13 @@ const JobLogsRow = memo(function JobLogsRow({
         {/* Named outside the `job-logs-row-` namespace on purpose: that
             prefix is what the tests read as "the ids of the rows", so a
             `-status` suffix on it would read as one more row. */}
-        <StatusPill status={job.status} testID={`job-logs-status-${job.id}`} />
+        {/* `style` is not decoration here: `StatusPill` sets
+            `alignSelf: 'flex-start'` so it hugs inside a column, and
+            `alignSelf` beats the parent's `alignItems` — in this row that
+            means the TOP edge, which is why the pills rode high in the
+            card (Yashas, 2026-09-17). Centring has to be said on the pill
+            itself. */}
+        <StatusPill status={job.status} style={styles.rowPill} testID={`job-logs-status-${job.id}`} />
       </View>
     </Pressable>
   );
@@ -1041,6 +1047,8 @@ const styles = StyleSheet.create({
   rowSelected: { borderColor: SEMANTIC.line.focus, backgroundColor: SEMANTIC.bg.pressed },
   /** The real status rail, four points — the same weight as the card's. */
   rail: { width: RAIL_WIDTH },
+  /** The pill centres on the row's axis — see the note at the call site. */
+  rowPill: { alignSelf: 'center' },
   body: {
     flex: 1,
     flexDirection: 'row',

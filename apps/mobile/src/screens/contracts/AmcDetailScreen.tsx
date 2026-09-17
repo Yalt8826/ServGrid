@@ -141,7 +141,11 @@ export function AmcDetailScreen(props: AmcDetailScreenProps): React.ReactNode {
                         {job.assignedToName === null ? '' : ` · ${job.assignedToName}`}
                       </Text>
                     </View>
-                    <StatusPill status={job.status} testID={`amc-detail-job-status-${job.id}`} />
+                    {/* `alignSelf` is said on the pill, not from this row:
+                        the pill hugs itself with `flex-start`, which in a
+                        row parent is the TOP edge — it rode high over the
+                        two-line job block (2026-09-17). */}
+                    <StatusPill status={job.status} style={styles.jobPill} testID={`amc-detail-job-status-${job.id}`} />
                   </Pressable>
                 ))}
               </View>
@@ -234,6 +238,8 @@ const styles = StyleSheet.create({
     gap: SPACE[3],
   },
   jobMain: { flex: 1, gap: 2 },
+  /** The pill centres on the row's axis — see the note at the call site. */
+  jobPill: { alignSelf: 'center' },
   jobTitle: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
   jobMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   actions: {
