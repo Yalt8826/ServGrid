@@ -93,7 +93,11 @@ export function JobsScreen(deps: JobsDeps): React.ReactNode {
   const [active, setActive] = useState<JobsTab>('today');
   const [query, setQuery] = useState('');
   const { width } = useWindowDimensions();
-  const tabWidth = width / TABS.length;
+  // The row of tabs spans the frame's CONTENT box, not the window: the
+  // frame pads `SPACE[4]` either side, so `width / tabs` overflowed the
+  // right edge and the last label sat off-centre (reported on the handset,
+  // 2026-09-17).
+  const tabWidth = (width - SPACE[4] * 2) / TABS.length;
 
   openJobRef.current = deps.onOpenJob;
 

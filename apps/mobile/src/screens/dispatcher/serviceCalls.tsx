@@ -199,7 +199,11 @@ export function ServiceCallsScreen(props: ServiceCallsScreenProps): React.ReactN
   // The accent underline slides between tabs (the Jobs screen's own
   // motion): `base` 220ms, instant under reduced motion.
   const { width } = useWindowDimensions();
-  const tabWidth = width / TABS.length;
+  // The row of tabs spans the frame's CONTENT box, not the window: the
+  // frame pads `SPACE[4]` either side, so `width / tabs` overflowed the
+  // right edge and the last label sat off-centre (reported on the handset,
+  // 2026-09-17).
+  const tabWidth = (width - SPACE[4] * 2) / TABS.length;
   const reducedMotion = useReducedMotion();
   const underline = useSharedValue(0);
   useEffect(() => {
