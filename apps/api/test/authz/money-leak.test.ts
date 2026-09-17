@@ -174,6 +174,12 @@ const DISPATCHER_MANIFEST: ReadonlyArray<{
   { method: 'POST', url: '/v1/contracts', allow: ['contract_value'] },
   { method: 'PATCH', url: '/v1/contracts/:id', allow: ['contract_value'] },
   { method: 'POST', url: '/v1/contracts/:id/cancel', allow: ['contract_value'] },
+  // DIS.6 (2026-09-17): the service-call page — customers, dates and a
+  // phone number, and no figure of any kind in the payload. Registered
+  // after the contracts module in server.ts, and the discovery walks the
+  // server's own registration order.
+  { method: 'GET', url: '/v1/service-calls' },
+  { method: 'POST', url: '/v1/customers/:id/follow-ups' },
   // T2.7: the roster health warning — registered after the customers
   // module (server.ts), so discovery lists it last.
   { method: 'GET', url: '/v1/location/health' },

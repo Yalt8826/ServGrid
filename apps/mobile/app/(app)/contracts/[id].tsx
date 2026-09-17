@@ -10,7 +10,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME } from '@servgrid/shared';
 import { AmcDetailScreen } from '../../../src/screens/contracts/AmcDetailScreen';
 import { useContractDetail, useSaveContract } from '../../../src/screens/contracts/useContracts';
 import { WriteNotSaved } from '../../../src/lib/intentWrite';
@@ -40,12 +40,15 @@ function AmcDetailRoute({ contractId }: { contractId: string }): React.ReactNode
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset belongs to the
+    // tab bar (the console's other routes, 2026-09-17).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <AmcDetailScreen
         detail={detail}
         loading={loading}
         error={error}
         onRetry={refetch}
+        onBack={() => router.back()}
         onEdit={() => router.push(`/contracts/new?editId=${contractId}`)}
         onRenew={() => router.push(`/contracts/new?renewOf=${contractId}`)}
         onOpenJob={(jobId) => router.push(`/jobs/${jobId}`)}

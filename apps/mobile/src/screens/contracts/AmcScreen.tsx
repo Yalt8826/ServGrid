@@ -12,17 +12,17 @@
  * this screen is none — Dispatch and Renew are secondary, + New is
  * secondary, because the tab's job is looking, not pressing.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
+import { alpha, formatMoneyEnIN, FRAME, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
 import type { Contract } from '@servgrid/shared';
-import { Banner, Button, EmptyState, TextField, useDensity } from '../../components/ui';
+import { Banner, Button, EmptyState, SectionHeader, TextField, useDensity } from '../../components/ui';
 import { Skeleton, useSkeleton } from '../../components/ui/Skeleton';
 import { formatDateEnIN, formatDateWithYear } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { DeskTable, type SortState } from '../owner/deskTable';
-import { dueLine, endingLine, stateLabel } from './model';
+import { contractStateTone, dueLine, endingLine } from './model';
 
 export interface AmcScreenProps {
   role: 'dispatcher' | 'owner';
@@ -58,6 +58,11 @@ function SectionSkeleton({ testID }: { testID: string }): React.ReactNode {
 export function AmcScreen(props: AmcScreenProps): React.ReactNode {
   const density = useDensity();
   const desk = density === 'desk';
+  // This screen is shared: console for the dispatcher, field for the owner's
+  // phone, desk for the owner's web table. Its body type follows the density
+  // it is actually rendered in (2026-09-17).
+  const bodyText = useMemo(() => textStyle('body', density), [density]);
+  const bodyStrongText = useMemo(() => textStyle('bodyStrong', density), [density]);
   const [sort, setSort] = useState<SortState>({ key: 'endDate', dir: 'asc' });
   const dueSkeleton = useSkeleton(props.due === null);
   const endingSkeleton = useSkeleton(props.ending === null);
@@ -68,15 +73,20 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
 
   return (
     <View style={styles.screen} testID={props.testID ?? 'amc-screen'}>
+      {/* The frame (2026-09-17): the tab's name and its one action, on the
+          navy the route paints behind the status bar. */}
+      <View style={styles.frame}>
+        <Text style={styles.frameTitle}>AMC</Text>
+        <Button label="New" icon="plus" variant="secondary" onPress={props.onNew} testID="amc-new" />
+      </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>AMC</Text>
-          <Button label="+ New" variant="secondary" onPress={props.onNew} testID="amc-new" />
-        </View>
-
         {/* ── DUE FOR A VISIT ─────────────────────────────────────────── */}
-        <View testID="amc-due">
-          <Text style={styles.sectionLabel}>DUE FOR A VISIT</Text>
+        <View testID="amc-due" style={styles.sectionFirst}>
+          <SectionHeader
+            label="Due for a visit"
+            icon="alert"
+            {...(props.due === null ? {} : { count: props.due.length })}
+          />
           {props.dueError !== null ? (
             <Banner
               tone="danger"
@@ -91,21 +101,25 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
           ) : (
             props.due.map((c) => (
               <View key={c.id} style={styles.row} testID={`amc-due-${c.id}`}>
+                {/* The rail says "this one wants attention" before the line
+                    under it is read — the console's row language. */}
+                <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.warning }]} />
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => props.onOpen(c.id)}
                   style={styles.rowBody}
                   testID={`amc-due-open-${c.id}`}
                 >
-                  <Text numberOfLines={1} style={styles.rowTitle}>
+                  <Text numberOfLines={1} style={[styles.rowTitle, bodyStrongText]}>
                     {c.customerName}
                   </Text>
-                  <Text numberOfLines={1} style={styles.rowMeta}>
+                  <Text numberOfLines={1} style={[styles.rowMeta, bodyText]}>
                     {dueLine(c)}
                   </Text>
                 </Pressable>
                 <Button
                   label="Dispatch"
+                  icon="send"
                   variant="secondary"
                   onPress={() => props.onDispatch(c.customerId)}
                   testID={`amc-dispatch-${c.id}`}
@@ -116,8 +130,12 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
         </View>
 
         {/* ── ENDING WITHIN 7 DAYS ────────────────────────────────────── */}
-        <View testID="amc-ending">
-          <Text style={styles.sectionLabel}>ENDING WITHIN 7 DAYS</Text>
+        <View testID="amc-ending" style={styles.section}>
+          <SectionHeader
+            label="Ending within 7 days"
+            icon="clock"
+            {...(props.ending === null ? {} : { count: props.ending.length })}
+          />
           {props.endingError !== null ? (
             <Banner
               tone="danger"
@@ -132,23 +150,29 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
           ) : (
             props.ending.map((c) => (
               <View key={c.id} style={styles.row} testID={`amc-ending-${c.id}`}>
+                <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.warning }]} />
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => props.onOpen(c.id)}
                   style={styles.rowBody}
                   testID={`amc-ending-open-${c.id}`}
                 >
-                  <Text numberOfLines={1} style={styles.rowTitle}>
+                  <Text numberOfLines={1} style={[styles.rowTitle, bodyStrongText]}>
                     {c.customerName}
                     <Text style={styles.mono}>{` · ${c.contractNumber}`}</Text>
                   </Text>
-                  <Text numberOfLines={1} style={styles.rowMeta}>
-                    {endingLine(c)}
-                  </Text>
-                  <Text style={styles.money}>{`₹${formatMoneyEnIN(c.contractValue)}`}</Text>
+                  {/* Urgency and money on one line: the deadline in the
+                      warning's own tint, the price in tabular mono. */}
+                  <View style={styles.rowLine}>
+                    <View style={styles.endingChip}>
+                      <Text style={styles.endingChipWord}>{endingLine(c)}</Text>
+                    </View>
+                    <Text style={styles.money}>{`₹${formatMoneyEnIN(c.contractValue)}`}</Text>
+                  </View>
                 </Pressable>
                 <Button
                   label="Renew"
+                  icon="forward"
                   variant="secondary"
                   onPress={() => props.onRenew(c.id)}
                   testID={`amc-renew-${c.id}`}
@@ -159,8 +183,8 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
         </View>
 
         {/* ── ALL AMCs ────────────────────────────────────────────────── */}
-        <View testID="amc-all">
-          <Text style={styles.sectionLabel}>ALL AMCs</Text>
+        <View testID="amc-all" style={styles.section}>
+          <SectionHeader label="All AMCs" icon="list" />
           <View style={styles.searchWrap}>
             <TextField
               label="Search"
@@ -182,13 +206,15 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
           ) : props.all.length === 0 ? (
             searchEmpty ? (
               <View testID="amc-all-empty-search">
-                <EmptyState message="No AMC matches." testID="amc-all-empty" />
-                <Button
-                  label="Clear search"
-                  variant="secondary"
-                  onPress={() => props.onQueryChange('')}
-                  testID="amc-clear-search"
+                {/* The action belongs to the empty state (the app's own
+                    idiom), not to a button floating beside it. */}
+                <EmptyState
+                  message="No AMC matches."
+                  actionLabel="Clear search"
+                  onAction={() => props.onQueryChange('')}
+                  testID="amc-all-empty"
                 />
+                <Button label="Clear search" variant="secondary" onPress={() => props.onQueryChange('')} testID="amc-clear-search" />
               </View>
             ) : (
               <EmptyState message="No AMCs recorded yet." testID="amc-all-empty" />
@@ -251,8 +277,12 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
                   key: 'state',
                   label: 'State',
                   width: 100,
-                  render: (c) => <Text numberOfLines={1} style={styles.cell}>{stateLabel(c.state)}</Text>,
-                  sortValue: (c) => stateLabel(c.state),
+                  render: (c) => (
+                    <Text numberOfLines={1} style={styles.cell} testID={`amc-state-${c.id}`}>
+                      {contractStateTone(c.state).label}
+                    </Text>
+                  ),
+                  sortValue: (c) => contractStateTone(c.state).label,
                 },
                 {
                   key: 'nextVisitDue',
@@ -268,24 +298,36 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
               ]}
             />
           ) : (
-            props.all.map((c) => (
-              <Pressable
-                key={c.id}
-                accessibilityRole="button"
-                onPress={() => props.onOpen(c.id)}
-                style={styles.allRow}
-                testID={`amc-all-${c.id}`}
-              >
-                <Text numberOfLines={1} style={styles.rowTitle}>
-                  <Text style={styles.mono}>{c.contractNumber}</Text>
-                  {` · ${c.customerName}`}
-                </Text>
-                <Text numberOfLines={1} style={styles.rowMeta}>
-                  {`until ${formatDateWithYear(c.endDate)} · ${stateLabel(c.state)}`}
-                  {c.state === 'active' ? ` · next due ${formatDateWithYear(c.nextVisitDue)}` : ''}
-                </Text>
-              </Pressable>
-            ))
+            props.all.map((c) => {
+              const tone = contractStateTone(c.state);
+              return (
+                <Pressable
+                  key={c.id}
+                  accessibilityRole="button"
+                  onPress={() => props.onOpen(c.id)}
+                  style={styles.allRow}
+                  testID={`amc-all-${c.id}`}
+                >
+                  <View style={styles.allMain}>
+                    <Text numberOfLines={1} style={[styles.rowTitle, bodyStrongText]}>
+                      <Text style={styles.mono}>{c.contractNumber}</Text>
+                      {` · ${c.customerName}`}
+                    </Text>
+                    <Text numberOfLines={1} style={[styles.rowMeta, bodyText]}>
+                      {`until ${formatDateWithYear(c.endDate)}`}
+                      {c.state === 'active' ? ` · next due ${formatDateWithYear(c.nextVisitDue)}` : ''}
+                    </Text>
+                  </View>
+                  {/* The state as the app's chip: dot, word, ground tinted
+                      from the state's own colour — the word is still the
+                      fact, the colour only carries it. */}
+                  <View style={styles.stateChip}>
+                    <View style={[styles.stateDot, { backgroundColor: tone.color }]} />
+                    <Text style={styles.stateWord}>{tone.label}</Text>
+                  </View>
+                </Pressable>
+              );
+            })
           )}
         </View>
       </ScrollView>
@@ -295,33 +337,71 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
-  content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8] },
-  headerRow: {
+  /** The frame: what the tab is, and its one action (2026-09-17). */
+  frame: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
     paddingTop: SPACE[3],
-    paddingBottom: SPACE[2],
+    paddingBottom: SPACE[3],
   },
-  title: { ...textStyle('h1'), color: SEMANTIC.text.primary },
-  sectionLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
-    marginTop: SPACE[4],
-    marginBottom: SPACE[1],
-  },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8], paddingTop: SPACE[2] },
+  /** A section's air above its marker — the markers were flush against the
+   * card above them (reported on the handset, 2026-09-17). */
+  section: { marginTop: SPACE[5] },
+  sectionFirst: { marginTop: SPACE[3] },
+  /** A card per row: air between them, a hairline round, the rail on the left. */
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
+    gap: SPACE[3],
+    minHeight: TAP.console,
+    marginTop: SPACE[2],
+    paddingRight: SPACE[3],
     paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
-    gap: SPACE[2],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
   },
+  /** The 4pt status rail, the same weight every console row carries. */
+  rail: { alignSelf: 'stretch', width: 4 },
+  /** Urgency and money share a line under the name. */
+  rowLine: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] },
+  endingChip: {
+    paddingHorizontal: SPACE[2],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: alpha(SEMANTIC.feedback.warning, TINT.chipLine),
+    backgroundColor: alpha(SEMANTIC.feedback.warning, TINT.chip),
+  },
+  endingChipWord: { ...textStyle('caption'), color: SEMANTIC.text.primary },
+  /** The contract state, in the app's chip language. */
+  stateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 3,
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    backgroundColor: SEMANTIC.bg.app,
+  },
+  stateDot: { width: 8, height: 8, borderRadius: 4 },
+  stateWord: { ...textStyle('label'), color: SEMANTIC.text.primary },
+  allMain: { flex: 1, gap: 2 },
   rowBody: { flex: 1, gap: 2 },
   rowTitle: { ...textStyle('h2'), color: SEMANTIC.text.primary },
   rowMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  // The body/bodyStrong ink follows the density (console 15, field 16,
+  // desk 14): a module-level StyleSheet cannot read the provider.
+  bodyText: { color: SEMANTIC.text.secondary },
+  bodyStrongText: { color: SEMANTIC.text.primary },
   money: {
     ...textStyle('mono'),
     color: SEMANTIC.text.primary,
@@ -330,14 +410,19 @@ const styles = StyleSheet.create({
   mono: { ...textStyle('mono'), color: SEMANTIC.text.primary },
   // A search field is a sentence, not a paragraph — the full 1160px
   // measure read as an unstyled input on the desk (2026-09-16 walk).
-  searchWrap: { marginTop: SPACE[1], maxWidth: 420 },
+  searchWrap: { marginTop: SPACE[3], maxWidth: 420 },
   allRow: {
-    minHeight: 56,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    minHeight: TAP.console,
+    marginTop: SPACE[2],
+    paddingHorizontal: SPACE[3],
     paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
-    gap: 2,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
   },
   cell: {
     ...textStyle('body', 'desk'),

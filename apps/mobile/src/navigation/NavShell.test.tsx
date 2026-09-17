@@ -82,7 +82,7 @@ describe('density resolves from role and platform', () => {
 describe('NavTabBar renders the role group map', () => {
   const LABELS: Record<string, string[]> = {
     technician: ['Dashboard', 'Jobs', 'Cash', 'Profile'],
-    dispatcher: ['Dashboard', 'Operations', 'AMC', 'Profile'],
+    dispatcher: ['Dashboard', 'Operations', 'Calls', 'AMC', 'Profile'],
     sales_rep: ['Dashboard', 'Sales', 'Companies', 'Cash', 'Profile'],
     owner: ['Dashboard', 'Operations', 'Sales', 'People', 'Catalogue', 'Profile'],
   };

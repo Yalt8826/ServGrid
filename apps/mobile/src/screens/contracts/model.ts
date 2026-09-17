@@ -15,8 +15,8 @@
  * routing a plain date through `new Date('2026-09-15')` hands it to the
  * device's zone, and a UTC-negative phone reads the day before.
  */
+import { CONTRACT_TERM_MONTHS, STATUS } from '@servgrid/shared';
 import type { Contract } from '@servgrid/shared';
-import { CONTRACT_TERM_MONTHS } from '@servgrid/shared';
 import { formatDateEnIN, formatDateWithYear } from '../../components/ui';
 
 /** `2026-09-15` + 1 → `2026-09-16`; −1 walks back across month and year. */
@@ -148,6 +148,26 @@ export function validateAmcDraft(d: AmcDraft): AmcFormProblems {
 // ── the tab's and the detail's line copy ───────────────────────────────────
 
 /** The state word the owner reads: `Active` | `Starts later` | `Ended` | `Cancelled`. */
+/**
+ * The contract states in the app's chip language (2026-09-17): the same
+ * word `stateLabel` gives, with a tone to carry it. The list, the desk
+ * table and the detail all read the same word in the same colour, and the
+ * ramp is the status ramp — a state is a state, and inventing a second
+ * palette for contracts would make two greens mean different things.
+ */
+export function contractStateTone(state: Contract['state']): { label: string; color: string } {
+  switch (state) {
+    case 'active':
+      return { label: stateLabel(state), color: STATUS.completed };
+    case 'upcoming':
+      return { label: stateLabel(state), color: STATUS.en_route };
+    case 'expired':
+      return { label: stateLabel(state), color: STATUS.unassigned };
+    case 'cancelled':
+      return { label: stateLabel(state), color: STATUS.cancelled };
+  }
+}
+
 export function stateLabel(state: Contract['state']): string {
   switch (state) {
     case 'active':
@@ -176,6 +196,19 @@ export function endingLine(c: Contract): string {
   if (c.daysToEnd <= 0) return 'ends today';
   if (c.daysToEnd === 1) return 'ends tomorrow';
   return `ends in ${c.daysToEnd} days`;
+}
+
+/** The date alone, for the detail's `Last service` row: the row's label
+ * already says the words, and the sentence form (`dueLine`) would print
+ * them twice ("Last service | last service 11 Sep 2026", seen on the
+ * handset 2026-09-17). */
+export function lastServiceDateLabel(c: Contract): string {
+  return c.lastServiceDate === null ? 'no completed job yet' : formatDateWithYear(c.lastServiceDate);
+}
+
+/** The date alone, for the detail's `Next visit due` row — see above. */
+export function nextVisitDueDateLabel(c: Contract): string {
+  return formatDateWithYear(c.nextVisitDue);
 }
 
 /** `JC-2627-00044 booked for 12 Oct` while the customer still waits on

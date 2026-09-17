@@ -153,8 +153,12 @@ describe('AmcDetailScreen (§D5)', () => {
     expect(factTexts).toContain('15 Sep 2026 – 14 Sep 2027');
     expect(factTexts).toContain('₹18,000');
     expect(factTexts).toContain('Active');
-    expect(factTexts).toContain('last service 3 May 2026');
-    expect(factTexts).toContain('next visit due 3 Sep 2026');
+    // The label carries the words once; the value is the date (the row
+    // used to read "Last service | last service 3 May 2026").
+    expect(factTexts).toContain('Last service');
+    expect(allText(findID(renderer, 'amc-detail-service')!).join(' ')).toBe('3 May 2026');
+    expect(factTexts).toContain('Next visit due');
+    expect(allText(findID(renderer, 'amc-detail-next-due')!).join(' ')).toBe('3 Sep 2026');
     expect(factTexts).toContain('JC-2627-00044 booked for 12 Oct');
     expect(factTexts).toContain('Gate code 4412');
 

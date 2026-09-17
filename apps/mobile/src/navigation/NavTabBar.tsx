@@ -65,6 +65,7 @@ const TAB_ICON: Partial<Record<NavGroupKey, IconName>> = {
   cash: 'cash',
   profile: 'profile',
   operations: 'wrench',
+  calls: 'phone',
   amc: 'document',
   sales: 'trending',
   companies: 'business',
