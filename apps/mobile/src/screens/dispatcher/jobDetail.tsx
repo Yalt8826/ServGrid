@@ -15,6 +15,7 @@
  * what, when), the assignment (who has it), the site (how to reach the
  * customer), then the trail.
  */
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { JobCardDispatcher, JobTimelineEvent } from '@servgrid/shared';
@@ -30,11 +31,26 @@ import {
   slotLabelOf,
   statusToneOf,
 } from './jobDetailModel';
+import {
+  CancelJobSheet,
+  ReassignSheet,
+  RescheduleSheet,
+  type ReassignCandidate,
+} from './jobActions';
 
 /** What the screen needs, all injected — the route owns the reads. */
 export interface DispatcherJobDetailDeps {
   /** The job, or null while it loads (and after a failed load). */
   card: JobCardDispatcher | null;
+  /** The roster for the reassign picker — id, name, his open total. */
+  candidates: readonly ReassignCandidate[];
+  /** True while any of the three actions is in flight. */
+  actionBusy: boolean;
+  /** The server's sentence when an action was refused. */
+  actionError: string | null;
+  onReassign: (technicianId: string) => void;
+  onReschedule: (scheduledFor: string) => void;
+  onCancelJob: (body: { reasonCode: string; reasonNote?: string; rescheduleTo?: string }) => void;
   /** The site, for the reach-the-customer panel. */
   contact: { name: string; phone: string; addressLabel: string | null } | null;
   /** The roster, so the assignee reads as a name rather than a uuid. */
@@ -54,6 +70,9 @@ export interface DispatcherJobDetailDeps {
 
 export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.ReactNode {
   const card = deps.card;
+  // Which of the three doors is open. UI state, so it lives here; the
+  // writes themselves are the route's.
+  const [openSheet, setOpenSheet] = useState<'none' | 'reassign' | 'reschedule' | 'cancel'>('none');
 
   return (
     <View style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} testID="dispatch-job-screen">
@@ -217,6 +236,46 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
               </View>
 
               <View style={styles.section}>
+                <SectionHeader label="Actions" icon="edit" />
+                <View style={styles.panel}>
+                  <View style={styles.panelPad}>
+                    <Button
+                      label="Reassign"
+                      icon="people"
+                      variant="secondary"
+                      fullwidth
+                      disabled={deps.actionBusy}
+                      onPress={() => setOpenSheet('reassign')}
+                      testID="dispatch-job-reassign"
+                    />
+                    <Button
+                      label="Reschedule"
+                      icon="calendar"
+                      variant="secondary"
+                      fullwidth
+                      disabled={deps.actionBusy}
+                      onPress={() => setOpenSheet('reschedule')}
+                      testID="dispatch-job-reschedule"
+                    />
+                    <Button
+                      label="Cancel this job"
+                      icon="close"
+                      variant="danger"
+                      fullwidth
+                      disabled={deps.actionBusy}
+                      onPress={() => setOpenSheet('cancel')}
+                      testID="dispatch-job-cancel"
+                    />
+                    {deps.actionError === null || openSheet !== 'none' ? null : (
+                      <Text testID="dispatch-job-action-error" style={{ ...textStyle('caption'), color: SEMANTIC.feedback.danger }}>
+                        {deps.actionError}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.section}>
                 <SectionHeader label="Timeline" icon="clock" />
                 <View style={styles.panel}>
                   {deps.events === null ? (
@@ -254,6 +313,47 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
           )}
         </View>
       </ScrollView>
+
+      {/* The three doors, each a sheet with one question. They unmount
+          with the screen and their state resets, so a re-opened sheet
+          starts from the job as it now stands. */}
+      <ReassignSheet
+        visible={openSheet === 'reassign'}
+        jobNumber={card?.jobNumber ?? ''}
+        currentTechnicianId={card?.assignedTo ?? null}
+        candidates={deps.candidates}
+        busy={deps.actionBusy}
+        error={deps.actionError}
+        onConfirm={(technicianId) => {
+          deps.onReassign(technicianId);
+          setOpenSheet('none');
+        }}
+        onDismiss={() => setOpenSheet('none')}
+      />
+      <RescheduleSheet
+        visible={openSheet === 'reschedule'}
+        jobNumber={card?.jobNumber ?? ''}
+        currentDate={card?.scheduledFor === null || card === null ? null : card.scheduledFor.slice(0, 10)}
+        currentTime={card?.scheduledFor === null || card === null ? null : card.scheduledFor.slice(11, 16)}
+        busy={deps.actionBusy}
+        error={deps.actionError}
+        onConfirm={(scheduledFor) => {
+          deps.onReschedule(scheduledFor);
+          setOpenSheet('none');
+        }}
+        onDismiss={() => setOpenSheet('none')}
+      />
+      <CancelJobSheet
+        visible={openSheet === 'cancel'}
+        jobNumber={card?.jobNumber ?? ''}
+        busy={deps.actionBusy}
+        error={deps.actionError}
+        onConfirm={(body) => {
+          deps.onCancelJob(body);
+          setOpenSheet('none');
+        }}
+        onDismiss={() => setOpenSheet('none')}
+      />
     </View>
   );
 }

@@ -15,8 +15,9 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+import { act } from 'react';
 import type { JobCardDispatcher, JobTimelineEvent } from '@servgrid/shared';
-import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
+import { allText, create, findAll, findByTestID, toJson, type Node, type ReactTestRenderer } from '../../components/ui/testing';
 import { DispatcherJobDetailScreen, type DispatcherJobDetailDeps } from './jobDetail';
 import {
   assigneeNameOf,
@@ -66,6 +67,12 @@ function baseDeps(overrides: Partial<DispatcherJobDetailDeps> = {}): DispatcherJ
     card: cardOf(),
     contact: { name: 'Lotus Paying Guest', phone: '9840000001', addressLabel: '14, Gandhi Bazaar, Bengaluru' },
     roster: [{ employeeId: TECH_ID, name: 'Tech One' }],
+    candidates: [{ employeeId: TECH_ID, name: 'Tech One', openTotal: 3 }],
+    actionBusy: false,
+    actionError: null,
+    onReassign: vi.fn(),
+    onReschedule: vi.fn(),
+    onCancelJob: vi.fn(),
     events: [eventOf()],
     loading: false,
     error: null,
@@ -77,6 +84,27 @@ function baseDeps(overrides: Partial<DispatcherJobDetailDeps> = {}): DispatcherJ
     ...overrides,
   };
 }
+
+async function press(tree: Node | string | null, testID: string): Promise<void> {
+  const node = findByTestID(tree, testID);
+  if (node === undefined) throw new Error(`Nothing rendered for ${testID}`);
+  const hit = findAll(node, (candidate) => typeof candidate.props.onPress === 'function')[0];
+  if (hit === undefined) throw new Error(`No pressable under ${testID}`);
+  await act(async () => {
+    hit.props.onPress?.();
+  });
+}
+
+async function typeInto(tree: Node | string | null, testID: string, text: string): Promise<void> {
+  const field = findByTestID(tree, testID);
+  const input = findAll(field ?? null, (candidate) => typeof candidate.props.onChangeText === 'function')[0];
+  if (input === undefined) throw new Error(`No input under ${testID}`);
+  await act(async () => {
+    input.props.onChangeText?.(text);
+  });
+}
+
+void (null as unknown as ReactTestRenderer);
 
 describe('DispatcherJobDetailScreen — the console’s view of one job', () => {
   it('renders the job, its assignee and its trail', async () => {
@@ -188,5 +216,101 @@ describe('the job detail’s pure decisions', () => {
     expect(assigneeNameOf(TECH_ID, [{ employeeId: TECH_ID, name: 'Tech One' }])).toBe('Tech One');
     expect(assigneeNameOf(null, [])).toBeNull();
     expect(assigneeNameOf('01890a5e-3000-7000-8000-000000000099', [])).toBeNull();
+  });
+});
+
+/**
+ * The three doors (2026-09-17, Yashas: "a reassign icon … and also a
+ * reschedule button, cancel button at the end"). Each is a sheet with one
+ * question; what is held here is that each asks its question, refuses to
+ * send an incomplete answer, and hands the answer to its own dep — never
+ * to a neighbour's.
+ */
+describe('DispatcherJobDetailScreen — reassign, reschedule, cancel', () => {
+  it('reassign picks a technician and never offers the one already on it', async () => {
+    const onReassign = vi.fn();
+    const OTHER = '01890a5e-3000-7000-8000-000000000002';
+    const renderer = await create(
+      <DispatcherJobDetailScreen
+        {...baseDeps({
+          onReassign,
+          candidates: [
+            { employeeId: TECH_ID, name: 'Tech One', openTotal: 3 },
+            { employeeId: OTHER, name: 'Ravi Kumar', openTotal: 9 },
+          ],
+        })}
+      />,
+    );
+    let tree = toJson(renderer);
+    expect(findByTestID(tree, 'dispatch-reassign-sheet')).toBeUndefined(); // closed until asked
+
+    await press(tree, 'dispatch-job-reassign');
+    tree = toJson(renderer);
+    // The current holder is marked and cannot be re-picked.
+    expect(allText(findByTestID(tree, `dispatch-reassign-${TECH_ID}-current`)!).join(' ')).toBe('On it');
+    const current = findAll(findByTestID(tree, `dispatch-reassign-${TECH_ID}`)!, (n) => typeof n.props.onPress === 'function')[0]!;
+    expect((current.props.accessibilityState as { disabled?: boolean } | undefined)?.disabled ?? false).toBeTruthy();
+
+    await press(tree, `dispatch-reassign-${OTHER}`);
+    expect(onReassign).toHaveBeenCalledWith(OTHER);
+  });
+
+  it('reschedule asks for a day and a time, and sends the IST instant', async () => {
+    const onReschedule = vi.fn();
+    const renderer = await create(<DispatcherJobDetailScreen {...baseDeps({ onReschedule })} />);
+    let tree = toJson(renderer);
+
+    await press(tree, 'dispatch-job-reschedule');
+    tree = toJson(renderer);
+    // Seeded from the slot the job already carries: 2026-09-17 · 16:30.
+    expect(allText(findByTestID(tree, 'dispatch-reschedule-line')!).join(' ')).toBe('Visit moves to 2026-09-17 · 16:30');
+
+    await press(tree, 'dispatch-reschedule-confirm');
+    expect(onReschedule).toHaveBeenCalledWith('2026-09-17T16:30:00+05:30');
+  });
+
+  it('cancel refuses an incomplete answer — a reason, and a note when it is Other', async () => {
+    const onCancelJob = vi.fn();
+    const renderer = await create(<DispatcherJobDetailScreen {...baseDeps({ onCancelJob })} />);
+    let tree = toJson(renderer);
+
+    await press(tree, 'dispatch-job-cancel');
+    tree = toJson(renderer);
+    const confirm = () => findAll(findByTestID(toJson(renderer), 'dispatch-cancel-confirm')!, (n) => n.props.accessibilityRole === 'button')[0]!;
+    expect(allText(findByTestID(tree, 'dispatch-cancel-confirm')!).join(' ')).toContain('Pick the reason');
+
+    await press(tree, 'dispatch-cancel-reason-other');
+    tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'dispatch-cancel-confirm')!).join(' ')).toContain('Other needs a note');
+    expect((confirm().props.accessibilityState as { disabled: boolean }).disabled).toBe(true);
+
+    await typeInto(tree, 'dispatch-cancel-note', 'The customer called it off.');
+    tree = toJson(renderer);
+    expect((confirm().props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    await press(tree, 'dispatch-cancel-confirm');
+    expect(onCancelJob).toHaveBeenCalledWith({ reasonCode: 'other', reasonNote: 'The customer called it off.' });
+  });
+
+  it('a plain reason needs no note, and carries only what was chosen', async () => {
+    const onCancelJob = vi.fn();
+    const renderer = await create(<DispatcherJobDetailScreen {...baseDeps({ onCancelJob })} />);
+    await press(toJson(renderer), 'dispatch-job-cancel');
+    await press(toJson(renderer), 'dispatch-cancel-reason-no_access');
+    await press(toJson(renderer), 'dispatch-cancel-confirm');
+    expect(onCancelJob).toHaveBeenCalledWith({ reasonCode: 'no_access' });
+  });
+
+  it('a refused write keeps the sheet open and says what the server said', async () => {
+    const renderer = await create(
+      <DispatcherJobDetailScreen
+        {...baseDeps({ actionError: 'This job was reassigned by the office a moment ago.' })}
+      />,
+    );
+    await press(toJson(renderer), 'dispatch-job-reassign');
+    const tree = toJson(renderer);
+    expect(findByTestID(tree, 'dispatch-reassign-sheet')).toBeDefined();
+    expect(allText(findByTestID(tree, 'dispatch-reassign-error')!).join(' ')).toBe(
+      'This job was reassigned by the office a moment ago.',
+    );
   });
 });

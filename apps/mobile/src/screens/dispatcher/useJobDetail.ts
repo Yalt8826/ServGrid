@@ -19,7 +19,7 @@
  * *Call* without the job card carrying a phone number it deliberately
  * does not have.
  */
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Linking } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 
@@ -50,6 +50,47 @@ function addressLabelOf(customer: CustomerDetailDispatcher): string | null {
     customer.pincode,
   ].filter((part): part is string => part !== null && part.trim() !== '');
   return parts.length === 0 ? null : parts.join(', ');
+}
+
+/**
+ * The three writes, each under the precondition the API demands.
+ *
+ * `If-Match` is not ceremony here: three dispatchers work the same queue
+ * every morning, so the version the operator was looking at rides the
+ * request and a lost race comes back as a conflict rather than an
+ * overwrite. The version comes from the card this screen rendered — the
+ * one the dispatcher actually saw.
+ *
+ * A refusal is a sentence and nothing else: the sheet stays open with the
+ * choice intact, and the card is re-read so the next attempt carries the
+ * version the server now holds.
+ */
+function useJobActions(version: number | null, onWritten: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(
+    async (call: (ifMatch: string) => Promise<unknown>) => {
+      if (version === null) {
+        setError('This job is still loading — try again in a moment.');
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      try {
+        await call(String(version));
+        onWritten();
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : 'That change did not go through.');
+        onWritten(); // the world may have moved; read it again
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onWritten, version],
+  );
+
+  return { busy, error, run, clearError: () => setError(null) };
 }
 
 export function useDispatcherJobDetail(jobId: string, onBack: () => void): DispatcherJobDetailDeps {
@@ -85,6 +126,27 @@ export function useDispatcherJobDetail(jobId: string, onBack: () => void): Dispa
 
   const addressLabel = customer.data === undefined ? null : addressLabelOf(customer.data);
 
+  // A written job changes the card and its trail: both are re-read, and
+  // the roster too (a reassignment moves two technicians' loads).
+  const reloadAll = useCallback(() => {
+    void card.refetch();
+    void events.refetch();
+    void roster.refetch();
+  }, [card, events, roster]);
+  const actions = useJobActions(card.data?.version ?? null, reloadAll);
+
+  /** PATCH/POST that throws the server's sentence — the screens render it verbatim. */
+  const write = useCallback(
+    async (method: 'POST' | 'PATCH', path: string, body: unknown, ifMatch: string) => {
+      const res = await api.request(method, path, { body, headers: { 'If-Match': ifMatch } });
+      if (!res.ok || res.data === null) {
+        throw new Error(res.error?.message ?? 'That change did not go through.');
+      }
+      return res.data;
+    },
+    [],
+  );
+
   return {
     card: card.data ?? null,
     contact:
@@ -112,5 +174,19 @@ export function useDispatcherJobDetail(jobId: string, onBack: () => void): Dispa
       }
     },
     now: new Date(),
+    candidates: (roster.data ?? [])
+      .map((row) => ({ employeeId: row.employeeId, name: row.technicianName, openTotal: row.openTotal }))
+      .sort((a, b) => a.openTotal - b.openTotal),
+    actionBusy: actions.busy,
+    actionError: actions.error,
+    onReassign: (technicianId) => {
+      void actions.run((ifMatch) => write('POST', `/v1/jobs/${jobId}/assign`, { technicianId }, ifMatch));
+    },
+    onReschedule: (scheduledFor) => {
+      void actions.run((ifMatch) => write('PATCH', `/v1/jobs/${jobId}`, { scheduledFor }, ifMatch));
+    },
+    onCancelJob: (body) => {
+      void actions.run((ifMatch) => write('POST', `/v1/jobs/${jobId}/cancel`, body, ifMatch));
+    },
   };
 }
