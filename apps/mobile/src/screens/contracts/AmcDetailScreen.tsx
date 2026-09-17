@@ -154,7 +154,9 @@ export function AmcDetailScreen(props: AmcDetailScreenProps): React.ReactNode {
         {c !== null ? (
           <>
             <View testID="amc-detail-facts">
-              <SectionHeader label="Contract" icon="document" />
+              <View style={styles.markerFirst}>
+                <SectionHeader label="Contract" icon="document" />
+              </View>
               {/* One panel, one fact per row — label left, value right —
                   where the record used to be nine grey lines in a column. */}
               <View style={styles.panel}>
@@ -190,7 +192,9 @@ export function AmcDetailScreen(props: AmcDetailScreenProps): React.ReactNode {
               ) : null}
               {c.notes === null ? null : (
                 <>
-                  <SectionHeader label="Notes" icon="edit" />
+                  <View style={styles.marker}>
+                    <SectionHeader label="Notes" icon="edit" />
+                  </View>
                   <View style={styles.panel}>
                     <Text style={styles.notes} testID="amc-detail-notes">
                       {c.notes}
@@ -200,17 +204,18 @@ export function AmcDetailScreen(props: AmcDetailScreenProps): React.ReactNode {
               )}
             </View>
 
-            <SectionHeader
-              label="Jobs under this AMC"
-              icon="list"
-              count={jobs.length}
-            />
+            <View style={styles.marker}>
+              <SectionHeader label="Jobs under this AMC" icon="list" count={jobs.length} />
+            </View>
             {jobs.length === 0 ? (
-              <Text style={[styles.emptyLine, textStyle('body', density)]} testID="amc-detail-jobs-empty">
+              <Text
+                style={[styles.emptyLine, styles.underMarker, textStyle('body', density)]}
+                testID="amc-detail-jobs-empty"
+              >
                 No job has been linked to this AMC yet.
               </Text>
             ) : (
-              <View testID="amc-detail-jobs">
+              <View testID="amc-detail-jobs" style={styles.underMarker}>
                 {jobs.map((job) => (
                   <Pressable
                     key={job.id}
@@ -246,7 +251,9 @@ export function AmcDetailScreen(props: AmcDetailScreenProps): React.ReactNode {
                 marker goes with the buttons it names. */}
             {cancelled ? null : (
               <>
-                <SectionHeader label="Actions" icon="edit" tint={COLORS.accent} />
+                <View style={styles.marker}>
+                  <SectionHeader label="Actions" icon="edit" tint={COLORS.accent} />
+                </View>
                 <View style={styles.actions} testID="amc-detail-actions">
                   <Button label="Edit" icon="edit" variant="secondary" onPress={props.onEdit} testID="amc-detail-edit" />
                   <Button label="Renew" icon="forward" variant="secondary" onPress={props.onRenew} testID="amc-detail-renew" />
@@ -323,6 +330,10 @@ const styles = StyleSheet.create({
   frameTitle: { ...textStyle('h2'), color: FRAME.text, fontVariant: ['tabular-nums'] },
   frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
   content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8], paddingTop: SPACE[2] },
+  /** A marker's own air, above it — the markers sat flush against the
+   * block above them (reported on the handset, 2026-09-17). */
+  marker: { marginTop: SPACE[5] },
+  markerFirst: { marginTop: SPACE[3] },
   /** One panel, one fact per row — the console's record shape. */
   panel: {
     marginTop: SPACE[3],
@@ -372,6 +383,8 @@ const styles = StyleSheet.create({
   },
   notes: { ...textStyle('body'), color: SEMANTIC.text.primary, paddingHorizontal: SPACE[3], paddingVertical: SPACE[3] },
   meta: { ...textStyle('body'), color: SEMANTIC.text.secondary, flex: 1 },
+  /** Content directly under a marker takes the same gap the panels do. */
+  underMarker: { marginTop: SPACE[3] },
   emptyLine: {
     ...textStyle('body'),
     color: SEMANTIC.text.secondary,
@@ -395,6 +408,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACE[2],
-    marginTop: SPACE[5],
+    marginTop: SPACE[3],
   },
 });

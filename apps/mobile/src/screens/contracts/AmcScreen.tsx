@@ -81,7 +81,7 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
       </View>
       <ScrollView contentContainerStyle={styles.content}>
         {/* ── DUE FOR A VISIT ─────────────────────────────────────────── */}
-        <View testID="amc-due">
+        <View testID="amc-due" style={styles.sectionFirst}>
           <SectionHeader
             label="Due for a visit"
             icon="alert"
@@ -130,7 +130,7 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
         </View>
 
         {/* ── ENDING WITHIN 7 DAYS ────────────────────────────────────── */}
-        <View testID="amc-ending">
+        <View testID="amc-ending" style={styles.section}>
           <SectionHeader
             label="Ending within 7 days"
             icon="clock"
@@ -183,7 +183,7 @@ export function AmcScreen(props: AmcScreenProps): React.ReactNode {
         </View>
 
         {/* ── ALL AMCs ────────────────────────────────────────────────── */}
-        <View testID="amc-all">
+        <View testID="amc-all" style={styles.section}>
           <SectionHeader label="All AMCs" icon="list" />
           <View style={styles.searchWrap}>
             <TextField
@@ -349,6 +349,10 @@ const styles = StyleSheet.create({
   },
   frameTitle: { ...textStyle('h1'), color: FRAME.text },
   content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8], paddingTop: SPACE[2] },
+  /** A section's air above its marker — the markers were flush against the
+   * card above them (reported on the handset, 2026-09-17). */
+  section: { marginTop: SPACE[5] },
+  sectionFirst: { marginTop: SPACE[3] },
   /** A card per row: air between them, a hairline round, the rail on the left. */
   row: {
     flexDirection: 'row',
@@ -406,7 +410,7 @@ const styles = StyleSheet.create({
   mono: { ...textStyle('mono'), color: SEMANTIC.text.primary },
   // A search field is a sentence, not a paragraph — the full 1160px
   // measure read as an unstyled input on the desk (2026-09-16 walk).
-  searchWrap: { marginTop: SPACE[1], maxWidth: 420 },
+  searchWrap: { marginTop: SPACE[3], maxWidth: 420 },
   allRow: {
     flexDirection: 'row',
     alignItems: 'center',
