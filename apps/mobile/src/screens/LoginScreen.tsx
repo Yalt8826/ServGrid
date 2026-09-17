@@ -14,7 +14,7 @@
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 
-import { LAYOUT, SEMANTIC, SPACE } from '@servgrid/shared';
+import { COLORS, LAYOUT, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button, TextField } from '../components/ui';
 import { textStyle } from '../fonts/textStyle';
 import type { ApiResult, LoginResponse } from '../lib/apiClient';
@@ -128,7 +128,13 @@ export function LoginScreen({
       keyboardShouldPersistTaps="handled"
       testID="login-screen"
     >
-      <Text style={styles.wordmark}>ServGrid</Text>
+      {/* The wordmark: the product's name in the accent, on the app's own
+          ground — the one brand gesture the login makes. */}
+      <Text style={styles.wordmark} testID="login-wordmark">
+        Serv
+        <Text style={styles.wordmarkAccent}>Grid</Text>
+      </Text>
+      <Text style={styles.tagline}>The field service console.</Text>
 
       {banner !== null ? <Banner tone="danger" message={banner} testID="login-banner" /> : null}
 
@@ -187,6 +193,14 @@ const styles = StyleSheet.create({
   wordmark: {
     ...textStyle('h1'),
     color: SEMANTIC.text.primary,
+    textAlign: 'center',
+    marginBottom: SPACE[1],
+  },
+  /** "Grid" carries the accent — the only colour on the screen. */
+  wordmarkAccent: { color: COLORS.accent },
+  tagline: {
+    ...textStyle('caption'),
+    color: SEMANTIC.text.secondary,
     textAlign: 'center',
     marginBottom: SPACE[7],
   },

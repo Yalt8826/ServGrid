@@ -21,8 +21,9 @@
 import { BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useState } from 'react';
 
-import { SEMANTIC, SPACE } from '@servgrid/shared';
+import { COLORS, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { Banner, Button } from '../components/ui';
+import { Icon } from '../components/ui/icons';
 import { textStyle } from '../fonts/textStyle';
 import type { ApiClient } from '../lib/apiClient';
 
@@ -98,15 +99,31 @@ export function ConsentScreen({ api, version, onAccepted }: ConsentScreenProps):
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID="consent-screen">
-      <Text style={styles.heading}>Location tracking</Text>
-
-      {LIMITS.map((limit) => (
-        <View key={limit} style={styles.limit}>
-          <View style={styles.dot} />
-          <Text style={styles.limitText}>{limit}</Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      testID="consent-screen"
+    >
+      {/* The frame (2026-09-17): the shield names the subject — location —
+          before any of the five promises is read. */}
+      <View style={styles.frame}>
+        <View style={styles.frameMark}>
+          <Icon name="shield" size={ICON.md} color={FRAME.text} />
         </View>
-      ))}
+        <View style={styles.frameBody}>
+          <Text style={styles.frameTitle}>Location tracking</Text>
+          <Text style={styles.frameCaption}>What ServGrid does — and does not do</Text>
+        </View>
+      </View>
+
+      <View style={styles.limits}>
+        {LIMITS.map((limit, index) => (
+          <View key={limit} style={[styles.limit, index === 0 ? null : styles.limitNext]}>
+            <Icon name="shield" size={ICON.sm} color={SEMANTIC.feedback.success} />
+            <Text style={styles.limitText}>{limit}</Text>
+          </View>
+        ))}
+      </View>
 
       <Text style={styles.capability}>{CAPABILITY}</Text>
       <Text style={styles.lastSentence}>{LAST_SENTENCE}</Text>
@@ -128,29 +145,57 @@ export function ConsentScreen({ api, version, onAccepted }: ConsentScreenProps):
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself (2026-09-16's stripe
+   * lesson): the five promises are short, and the ground must not change
+   * where they end. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
-    padding: SPACE[4],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
+    paddingBottom: SPACE[6],
   },
-  heading: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
+  /** The frame: what is being agreed to, under the shield — consent is
+   * about location, and the mark says so before the words. */
+  frame: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    backgroundColor: FRAME.bg,
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[4],
+    paddingVertical: SPACE[4],
     marginBottom: SPACE[4],
+  },
+  frameMark: {
+    width: 44,
+    height: 44,
+    borderRadius: RADII.control,
+    backgroundColor: FRAME.bgSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  frameBody: { flex: 1 },
+  frameTitle: { ...textStyle('h2'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** What tracking will NOT do: a panel of shield-checked lines, so the
+   * promises read as the list they are. */
+  limits: {
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
   },
   limit: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: SPACE[2],
+    alignItems: 'center',
+    gap: SPACE[3],
+    minHeight: TAP.min - 8,
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: SEMANTIC.text.placeholder,
-    marginTop: 7,
-    marginRight: SPACE[3],
-  },
+  limitNext: { borderTopWidth: 1, borderTopColor: SEMANTIC.line.default },
   limitText: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
@@ -162,11 +207,16 @@ const styles = StyleSheet.create({
     marginTop: SPACE[4],
     marginBottom: SPACE[3],
   },
+  /** The one sentence that must survive a skim: the accent rail, the way
+   * the console marks the rows it needs acted on. */
   lastSentence: {
-    ...textStyle('body'),
-    fontWeight: '600',
-    color: SEMANTIC.text.primary,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.accent,
+    paddingLeft: SPACE[3],
+    paddingVertical: SPACE[2],
     marginBottom: SPACE[6],
+    ...textStyle('bodyStrong'),
+    color: SEMANTIC.text.primary,
   },
   footer: {
     ...textStyle('caption'),
