@@ -111,10 +111,13 @@ describe('cross-check, direction B — every permitted destination has a tab', (
   }
 });
 
-describe('tab counts — technician 4 · dispatcher 4 · sales rep 5 · owner 6', () => {
+describe('tab counts — technician 4 · dispatcher 5 · sales rep 5 · owner 6', () => {
   const EXPECTED: Record<Role, number> = {
     technician: 4,
-    dispatcher: 4,
+    // DIS.6 (2026-09-17): the service-call page got its own tab — "the ups
+    // and batteries need to be serviced every 6 months", so the dispatcher
+    // keeps that list one tap away.
+    dispatcher: 5,
     sales_rep: 5,
     owner: 6,
   };

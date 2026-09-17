@@ -74,6 +74,20 @@ export const BackHandler = {
 export const ScaledSheet = { create: StyleSheet.create };
 
 /**
+ * `Linking` (2026-09-17): dialling and maps. Composed once here rather than
+ * inline, because `openURL` leaves the process — the service-call row dials
+ * a customer, the job detail navigates, and both are worth asserting on
+ * what was opened rather than on a callback prop invented for the test.
+ */
+export const openedUrls: string[] = [];
+export const Linking = {
+  openURL: async (url: string): Promise<void> => {
+    openedUrls.push(url);
+  },
+  openSettings: async (): Promise<void> => {},
+};
+
+/**
  * A phone-sized viewport (T0.13): NavTabBar divides it across the role's
  * tabs for the sliding underline. Constant — width-driven behaviour is
  * NavShell's branch, which tests read as source, not as render.

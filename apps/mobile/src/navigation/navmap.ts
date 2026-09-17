@@ -36,6 +36,7 @@ export type NavGroupKey =
   | 'dashboard'
   | 'jobs'
   | 'operations'
+  | 'calls'
   | 'amc'
   | 'sales'
   | 'companies'
@@ -70,6 +71,11 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
   dispatcher: [
     { key: 'dashboard', label: 'Dashboard', routes: ['/dashboard'] },
     { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers'] },
+    // The service cycle's own tab (2026-09-17, Yashas): "the ups and
+    // batteries need to be serviced every 6 months ... the dispatcher is
+    // reminded of that customer 6 months later". It sits beside Operations
+    // because it is the other half of the same job — the work already done.
+    { key: 'calls', label: 'Calls', routes: ['/calls'] },
     { key: 'amc', label: 'AMC', routes: ['/contracts', '/contracts/new'] },
     { key: 'profile', label: 'Profile', routes: ['/profile'] },
   ],
@@ -90,7 +96,7 @@ export const NAV_GROUPS: Record<Role, NavGroup[]> = {
   ],
   owner: [
     { key: 'dashboard', label: 'Dashboard', routes: ['/dashboard'] },
-    { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts'] },
+    { key: 'operations', label: 'Operations', routes: ['/jobs', '/jobs/new', '/customers', '/contracts', '/calls'] },
     { key: 'sales', label: 'Sales', routes: ['/sales', '/payments', '/companies'] },
     { key: 'people', label: 'People', routes: ['/employees', '/location', '/cash'] },
     // The catalogue is its own section: under PROFILE it read as if the
@@ -150,6 +156,11 @@ export const ROUTE_GUARDS: Record<string, RouteGuard> = {
 
   '/companies': { kind: 'matrix', resource: 'company', action: 'read', landing: ['all', 'own'] },
   '/companies/new': { kind: 'matrix', resource: 'company', action: 'create', landing: ['all', 'own'] },
+
+  // The service-call page: the dispatcher's and the owner's, built on the
+  // jobs they can already read. Its writes ride `job.assign` (the API's
+  // own gate, which no technician or rep holds at all).
+  '/calls': { kind: 'matrix', resource: 'job', action: 'read', landing: ['all'] },
 
   '/contracts': { kind: 'matrix', resource: 'contract', action: 'read', landing: ['all'] },
   '/contracts/new': { kind: 'matrix', resource: 'contract', action: 'create', landing: ['all'] },
@@ -285,6 +296,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/companies/new': 'New account',
   '/contracts': 'AMC',
   '/contracts/new': 'New AMC',
+  '/calls': 'Calls',
   '/products': 'Products',
   '/products/new': 'New product',
   '/services': 'Services',

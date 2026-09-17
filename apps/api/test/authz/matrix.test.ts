@@ -192,6 +192,27 @@ async function seedJobAssignedToTechnician(): Promise<string> {
   return r.rows[0]!.id;
 }
 
+/**
+ * A site whose last job is finished — the service-call probes' target
+ * (DIS.6). The follow-up endpoint refuses a customer nobody has served, so
+ * the probe needs a completed job behind it: written straight to the table
+ * because the completion path (assignment, events, notifications) is not
+ * what this row is testing.
+ */
+async function seedServedCustomer(): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO customers (name, phone) VALUES ($1, $2) RETURNING id`,
+    ['Matrix served site', `9845${randomBytes(4).toString('hex')}`.slice(0, 12)],
+  );
+  const served = r.rows[0]!.id;
+  await db.query(
+    `INSERT INTO job_cards (job_number, customer_id, service_id, title, status, assigned_to, assigned_at, closed_at)
+     VALUES ($1, $2, $3, 'Matrix finished job', 'completed', $4, now() - interval '7 months', now() - interval '7 months')`,
+    [`JC-T10-${randomBytes(4).toString('hex')}`, served, serviceId, selfIds.technician],
+  );
+  return served;
+}
+
 /** A fresh UNASSIGNED job at version 1 — the assign probes' target (T2.3). */
 async function seedJobUnassigned(): Promise<string> {
   const r = await db.query<{ id: string }>(
@@ -348,6 +369,8 @@ const STACK_WRITERS = { owner: OK, dispatcher: FORBIDDEN, technician: OK, sales_
  * none of the cell). `contracts.manage` gates every caller and rides enabled for the two
  * office roles (seeded below). */
 const CONTRACT_ACTORS = { owner: OK, dispatcher: OK, technician: FORBIDDEN, sales_rep: FORBIDDEN, anon: UNAUTHENTICATED } as const;
+/** DIS.6: the service-call page is the office's, on the same cells the AMC tab uses. */
+const CALL_ACTORS = CONTRACT_ACTORS;
 /** §6.4: the catalogue (products, services) is read by everyone — the completion form and the sales picker both need it. */
 const CATALOG_READERS = { ...ALL_ROLES_OK, anon: UNAUTHENTICATED } as const;
 
@@ -1632,6 +1655,40 @@ const ENDPOINTS: EndpointRow[] = [
     expect: COMPANY_ACTORS,
     assertOk: (actor, res) => {
       if (actor === 'sales_rep') expect(res.json<{ companyId: string }>().companyId).toBe(matrixCompanyId);
+    },
+  },
+  {
+    name: 'GET /v1/service-calls',
+    method: 'GET',
+    url: '/v1/service-calls',
+    // DIS.6 (2026-09-17): the service cycle's page. `requireAll` on the
+    // jobs the actor can already read — the dispatcher and the owner; a
+    // technician's row-scoped read and a rep's none never reach it.
+    probe: (actor) => app.inject({ method: 'GET', url: '/v1/service-calls', headers: bearer(actor) }),
+    expect: CALL_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(Array.isArray(res.json<{ due: unknown[] }>().due)).toBe(true);
+    },
+  },
+  {
+    name: 'POST /v1/customers/:id/follow-ups',
+    method: 'POST',
+    url: '/v1/customers/:id/follow-ups',
+    // The write rides `job.assign` — only the office is ever asked who
+    // visits. Each allowed probe records a call at its own site, so the
+    // history the row creates is its own.
+    probe: async (actor) => {
+      const served = await seedServedCustomer();
+      return app.inject({
+        method: 'POST',
+        url: `/v1/customers/${served}/follow-ups`,
+        headers: bearer(actor),
+        payload: { outcome: 'called', note: 'Matrix probe call', nextCallOn: istDate(90) },
+      });
+    },
+    expect: CALL_ACTORS,
+    assertOk: (_actor, res) => {
+      expect(res.json<{ customerId: string }>().customerId).toBeTruthy();
     },
   },
   {

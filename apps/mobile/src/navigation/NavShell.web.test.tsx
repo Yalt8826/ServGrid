@@ -67,7 +67,7 @@ const OWNER_RAIL_TEXTS = [
   'ServGrid',
   'Owner',
   'Dashboard',
-  'Operations', 'Jobs', 'Dispatch', 'Customers', 'AMC',
+  'Operations', 'Jobs', 'Dispatch', 'Customers', 'AMC', 'Calls',
   'Sales', 'Sales', 'Payments', 'Companies',
   'People', 'Employees', 'Location', 'Cash queue',
   'Catalogue', 'Products', 'Services',
@@ -124,9 +124,11 @@ describe('NavShell desk branch — the 240px rail at ≥1024px', () => {
     const tree = toJson(renderer);
     expect(findByTestID(tree, 'desk-rail')).toBeTruthy();
     expect(allText(tree)).toEqual(OWNER_RAIL_TEXTS);
-    // 14 individual routes: 1 + 4 + 3 + 3 + 2 + 1. The catalogue is its
-    // own section — under PROFILE the lists read as profile settings.
-    expect(railLinks(tree)).toHaveLength(14);
+    // 15 individual routes: 1 + 5 + 3 + 3 + 2 + 1. The service-call page
+    // (DIS.6) joins the Operations section the AMC tab already lives in,
+    // and the catalogue stays its own section — under PROFILE the lists
+    // read as profile settings.
+    expect(railLinks(tree)).toHaveLength(15);
     // The phone presentation is gone on this branch.
     expect(findByTestID(tree, 'nav-underline')).toBeUndefined();
     expect(findAll(tree, (n) => n.props.accessibilityRole === 'tab')).toEqual([]);
@@ -206,11 +208,12 @@ describe('the rail collapses and expands (owner, 2026-09-17)', () => {
     const renderer = await mountShell();
     const rail = findByTestID(toJson(renderer), 'desk-rail');
     const pressables = findAll(rail ?? null, (n) => n.type === 'Pressable');
-    // 14 route links plus the collapse control — and the control is a
-    // button, never a link: it navigates nowhere.
-    expect(pressables).toHaveLength(15);
+    // 15 route links (DIS.6 added the service-call page to Operations)
+    // plus the collapse control — and the control is a button, never a
+    // link: it navigates nowhere.
+    expect(pressables).toHaveLength(16);
     const links = pressables.filter((n) => n.props.accessibilityRole === 'link');
-    expect(links).toHaveLength(14);
+    expect(links).toHaveLength(15);
     const control = pressables.filter((n) => n.props.accessibilityRole === 'button');
     expect(control).toHaveLength(1);
     expect(control[0]!.props.testID).toBe('desk-rail-collapse');

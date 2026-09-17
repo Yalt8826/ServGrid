@@ -30,6 +30,7 @@ import { jobsRoutes } from './modules/jobs/routes.js';
 import { locationRoutes } from './modules/location/routes.js';
 import { paymentsRoutes } from './modules/payments/routes.js';
 import { salesRoutes } from './modules/sales/routes.js';
+import { serviceCallsRoutes } from './modules/serviceCalls/routes.js';
 import { technicianRoutes } from './modules/technician/routes.js';
 
 /**
@@ -139,6 +140,7 @@ export function buildServer(config: Config, options: ServerOptions = {}): Fastif
   app.register(customersRoutes);
   app.register(companiesRoutes);
   app.register(contractsRoutes);
+  app.register(serviceCallsRoutes);
   app.register(catalogRoutes);
   app.register(devicesRoutes);
   app.register(locationRoutes, { workWindow: config.workWindow });
