@@ -175,10 +175,9 @@ function DispatcherProfileRoute(): React.ReactNode {
   }
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
-      edges={['top', 'left', 'right', 'bottom']}
-    >
+    // The frame reaches the status bar; the bottom inset belongs to the
+    // tab bar (the console's other routes, 2026-09-17).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <DispatcherProfileScreen
         fullName={fullName}
         username={actor.username}
