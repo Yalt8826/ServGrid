@@ -35,8 +35,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { SEMANTIC, SPACE } from '@servgrid/shared';
+import { FRAME, ICON, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button } from '../components/ui';
+import { Icon, type IconName } from '../components/ui/icons';
 import { textStyle } from '../fonts/textStyle';
 import { matchAutostartVendor, type AutostartVendor } from './autostart';
 
@@ -100,6 +101,17 @@ type StepIndex = 1 | 2 | 3 | 4;
 type Phase = { kind: 'loading' } | { kind: 'step'; step: StepIndex } | { kind: 'notifications' } | { kind: 'done' };
 
 const STEPS: readonly StepIndex[] = [1, 2, 3, 4];
+
+/** Each step's glyph — `icons.tsx` added these four for this screen and
+ * the restyle finally hangs them up (2026-09-17). The mark names WHAT the
+ * step is about before a word is read: shield = location permission,
+ * battery = the exemption, rocket = autostart, bell = job alerts. */
+const STEP_ICONS: Record<StepIndex, IconName> = {
+  1: 'shield',
+  2: 'shield',
+  3: 'battery',
+  4: 'rocket',
+};
 
 /** Shown when the immediate `/v1/devices` post fails: the step still
  * counts — OS truth survives — and the server learns on a later
@@ -325,22 +337,29 @@ export function LadderScreen(deps: LadderDeps): React.ReactNode {
 
   const vendor = deps.vendor;
 
+  const phaseIcon: IconName = phase.kind === 'notifications' ? 'bell' : STEP_ICONS[phase.step];
+  const phaseHeading = phase.kind === 'notifications' ? 'New job assignments' : STEP_TITLES[phase.step];
+  const phaseLabel = phase.kind === 'notifications' ? 'Job alerts' : stepTitleOf(phase.step);
+
   return (
-    <ScrollView contentContainerStyle={styles.content} testID="ladder-screen">
-      {phase.kind === 'step' ? (
-        <Text style={styles.stepTitle} testID="ladder-step-title">
-          {stepTitleOf(phase.step)}
-        </Text>
-      ) : (
-        <Text style={styles.stepTitle} testID="ladder-step-title">
-          Job alerts
-        </Text>
-      )}
-      {phase.kind === 'step' ? (
-        <Text style={styles.heading}>{STEP_TITLES[phase.step]}</Text>
-      ) : (
-        <Text style={styles.heading}>New job assignments</Text>
-      )}
+    // The app's ground on the ScrollView itself, not only the route's
+    // wrapper: the steps vary in length, and where short content ends the
+    // ground must still be the page's own (2026-09-16's stripe lesson).
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID="ladder-screen">
+      {/* The frame (2026-09-17): the glyph names the step, the counter
+          says where in the ladder we are, and the title says what it asks.
+          The counter keeps its testID on the single Text the tests read. */}
+      <View style={styles.frame}>
+        <View style={styles.frameMark}>
+          <Icon name={phaseIcon} size={ICON.md} color={FRAME.text} />
+        </View>
+        <View style={styles.frameBody}>
+          <Text style={styles.stepTitle} testID="ladder-step-title">
+            {phaseLabel}
+          </Text>
+          <Text style={styles.heading}>{phaseHeading}</Text>
+        </View>
+      </View>
 
       {banner !== null ? <Banner tone="danger" message={banner} testID="ladder-banner" /> : null}
 
@@ -368,17 +387,22 @@ export function LadderScreen(deps: LadderDeps): React.ReactNode {
           <Text style={styles.body}>
             Android does not let the app ask for this directly, so the Settings app opens. There:
           </Text>
-          <Text style={styles.quote}>
-            {STEP2_PATH_PARTS.map((part, i) =>
-              part.bold ? (
-                <Text key={i} style={styles.quoteBold}>
-                  {part.text}
-                </Text>
-              ) : (
-                <Text key={i}>{part.text}</Text>
-              ),
-            )}
-          </Text>
+          <View style={styles.quote}>
+            <Text style={styles.quoteText}>
+              {STEP2_PATH_PARTS.map((part, i) =>
+                part.bold ? (
+                  <Text key={i} style={styles.quoteBold}>
+                    {part.text}
+                  </Text>
+                ) : (
+                  <Text key={i}>{part.text}</Text>
+                ),
+              )}
+            </Text>
+            {/* The words are Android's, so the frame is Android's: this is
+                a quotation, not a ServGrid instruction. */}
+            <Text style={styles.quoteSource}>— the Android Settings screen</Text>
+          </View>
           <Button
             label="Open settings"
             onPress={() => void deps.actions.openSettings()}
@@ -414,7 +438,11 @@ export function LadderScreen(deps: LadderDeps): React.ReactNode {
           </Text>
           {(vendor !== null ? vendor : GENERIC_VENDOR).steps.map((step, i) => (
             <View key={`${i}-${step}`} style={styles.walkthroughStep}>
-              <View style={styles.dot} />
+              {/* A number, not a dot: the steps are a procedure, and the
+                  order is the content (2026-09-17). */}
+              <View style={styles.walkthroughDot}>
+                <Text style={styles.walkthroughNum}>{i + 1}</Text>
+              </View>
               <View style={styles.walkthroughText}>
                 <Text style={styles.body}>{step}</Text>
                 <Screenshot image={(vendor !== null ? vendor : GENERIC_VENDOR).screenshots[i] ?? null} />
@@ -455,16 +483,22 @@ export function LadderScreen(deps: LadderDeps): React.ReactNode {
         </>
       ) : null}
 
-      <Button
-        label="Finish later"
-        variant="ghost"
-        onPress={() => {
-          setPhase({ kind: 'done' });
-          deps.onDone();
-        }}
-        testID="ladder-defer"
-      />
-      <Text style={styles.footer}>You can finish this later from Profile → Tracking.</Text>
+      {/* Sealed off from the step above by the app's own hairline: the
+          escape is a decision, and it reads as one. */}
+      <View style={styles.deferWrap}>
+        <Button
+          label="Finish later"
+          icon="forward"
+          variant="ghost"
+          onPress={() => {
+            setPhase({ kind: 'done' });
+            deps.onDone();
+          }}
+          fullwidth
+          testID="ladder-defer"
+        />
+        <Text style={styles.footer}>You can finish this later from Profile → Tracking.</Text>
+      </View>
     </ScrollView>
   );
 }
@@ -494,33 +528,73 @@ const GENERIC_VENDOR: AutostartVendor = {
 export { matchAutostartVendor };
 
 const styles = StyleSheet.create({
+  /** The page's own ground, on the scroll itself (2026-09-16's stripe
+   * lesson): steps vary in length, and short content must not leave a
+   * stripe of something else below it. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
+  // Top-aligned: step 4 carries three walkthrough rows plus screenshots,
+  // and a vertically-centred column of that length reads as broken.
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
-    padding: SPACE[4],
+    paddingTop: SPACE[2],
+    paddingBottom: SPACE[6],
+    paddingHorizontal: SPACE[4],
   },
+  /** The frame: the step's glyph, its place in the ladder, and the ask. */
+  frame: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    backgroundColor: FRAME.bg,
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[4],
+    paddingVertical: SPACE[4],
+    marginBottom: SPACE[4],
+  },
+  frameMark: {
+    width: 44,
+    height: 44,
+    borderRadius: RADII.control,
+    backgroundColor: FRAME.bgSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  frameBody: { flex: 1, gap: 2 },
   stepTitle: {
     ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
-    marginBottom: SPACE[1],
+    color: FRAME.textMuted,
   },
   heading: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
-    marginBottom: SPACE[4],
+    ...textStyle('h2'),
+    color: FRAME.text,
   },
   body: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
     marginBottom: SPACE[3],
   },
+  /** Step 2's quotation of the Android Settings screen — quoted matter
+   * gets a ground, not just italics. */
   quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: SEMANTIC.line.strong,
+    paddingLeft: SPACE[3],
+    paddingVertical: SPACE[2],
+    marginBottom: SPACE[4],
+    backgroundColor: SEMANTIC.bg.raised,
+    borderRadius: RADII.control,
+  },
+  quoteText: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
-    marginBottom: SPACE[4],
   },
   quoteBold: {
     fontWeight: '700',
+  },
+  quoteSource: {
+    ...textStyle('caption'),
+    color: SEMANTIC.text.secondary,
+    marginTop: SPACE[1],
   },
   hint: {
     ...textStyle('caption'),
@@ -530,31 +604,44 @@ const styles = StyleSheet.create({
   walkthroughStep: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: SPACE[2],
+    marginBottom: SPACE[3],
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: SEMANTIC.text.placeholder,
-    marginTop: 7,
+  /** The procedure's number: order is the content of a walkthrough. */
+  walkthroughDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: SEMANTIC.bg.dark,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: SPACE[3],
   },
+  walkthroughNum: { ...textStyle('caption'), color: SEMANTIC.text.onDark },
   walkthroughText: {
     flex: 1,
   },
+  /** The vendor screenshot's bounded box: `require()` numbers and
+   * `resizeMode="contain"` are load-bearing (the only Image in the app
+   * with a numeric source), and a 3:4 phone photo needs the height floor. */
   screenshot: {
     width: '100%',
     height: 220,
     marginTop: SPACE[2],
     marginBottom: SPACE[2],
-    borderRadius: 4,
+    borderRadius: RADII.control,
     backgroundColor: SEMANTIC.bg.raised,
+  },
+  deferWrap: {
+    borderTopWidth: 1,
+    borderTopColor: SEMANTIC.line.default,
+    marginTop: SPACE[5],
+    paddingTop: SPACE[2],
   },
   footer: {
     ...textStyle('caption'),
     color: SEMANTIC.text.secondary,
     textAlign: 'center',
     marginTop: SPACE[4],
+    marginBottom: SPACE[2],
   },
 });
