@@ -54,17 +54,37 @@ export function priorityLabelOf(priority: JobCardDispatcher['priority']): string
   return null; // `normal` is the resting state — a chip for it is noise
 }
 
-/** The line under the title: the slot in the dispatcher's own words. */
-export function slotLabelOf(card: JobCardDispatcher, now: Date): string {
-  if (card.scheduledFor === null) return 'No date set';
-  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(card.scheduledFor));
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(now);
-  const time = new Intl.DateTimeFormat('en-GB', {
+/**
+ * An instant's IST calendar day (`YYYY-MM-DD`) and wall clock (`HH:MM`).
+ *
+ * These exist because the API answers instants in UTC (`…Z`): slicing a
+ * date or a time out of the raw string reads the WRONG day and the wrong
+ * hour for an IST user — a 19:30 IST visit is `14:00Z`, and the
+ * reschedule sheet seeded itself with 14:00 until this existed (found on
+ * the device by rescheduling a job and reading the row back, 2026-09-17).
+ * Every date and time this screen shows comes through here.
+ */
+export function istDayOf(instant: string | Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(
+    typeof instant === 'string' ? new Date(instant) : instant,
+  );
+}
+
+export function istClockOf(instant: string | Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(new Date(card.scheduledFor));
+  }).format(typeof instant === 'string' ? new Date(instant) : instant);
+}
+
+/** The line under the title: the slot in the dispatcher's own words. */
+export function slotLabelOf(card: JobCardDispatcher, now: Date): string {
+  if (card.scheduledFor === null) return 'No date set';
+  const day = istDayOf(card.scheduledFor);
+  const today = istDayOf(now);
+  const time = istClockOf(card.scheduledFor);
   if (card.isOverdue) return `was due ${day} · ${time}`;
   if (day === today) return `today · ${time}`;
   return `${day} · ${time}`;
@@ -80,6 +100,18 @@ export function eventStampOf(occurredAt: string): string {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(occurredAt));
+}
+
+/** The window the reschedule and cancel sheets offer, from today. */
+export function rescheduleDaysFrom(todayIso: string, count = 14): string[] {
+  const [y = 1970, m = 1, d = 1] = todayIso.split('-').map(Number);
+  const days: string[] = [];
+  for (let ahead = 0; ahead < count; ahead += 1) {
+    const shifted = new Date(Date.UTC(y, m - 1, d));
+    shifted.setUTCDate(shifted.getUTCDate() + ahead);
+    days.push(shifted.toISOString().slice(0, 10));
+  }
+  return days;
 }
 
 /**

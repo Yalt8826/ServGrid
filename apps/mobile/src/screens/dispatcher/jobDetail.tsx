@@ -27,6 +27,8 @@ import {
   assigneeNameOf,
   eventLabelOf,
   eventStampOf,
+  istClockOf,
+  istDayOf,
   priorityLabelOf,
   slotLabelOf,
   statusToneOf,
@@ -66,6 +68,8 @@ export interface DispatcherJobDetailDeps {
   onNavigate: () => void;
   /** Injectable clock — the slot line and overdue are judged by it. */
   now: Date;
+  /** Today in IST — the reschedule list's first day. */
+  todayIso: string;
 }
 
 export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.ReactNode {
@@ -314,11 +318,15 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
         </View>
       </ScrollView>
 
-      {/* The three doors, each a sheet with one question. They unmount
-          with the screen and their state resets, so a re-opened sheet
-          starts from the job as it now stands. */}
+      {/* The three doors, each a sheet with one question — and each
+          MOUNTED ONLY WHILE OPEN: a sheet's own state (the day, the time,
+          the picked technician) seeds from the job, and an always-mounted
+          sheet seeded from the card while it was still loading and never
+          caught up (found on the device: the reschedule sheet opened
+          blank against a job that had a slot). */}
+      {openSheet !== 'reassign' ? null : (
       <ReassignSheet
-        visible={openSheet === 'reassign'}
+        visible
         jobNumber={card?.jobNumber ?? ''}
         currentTechnicianId={card?.assignedTo ?? null}
         candidates={deps.candidates}
@@ -330,11 +338,15 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
         }}
         onDismiss={() => setOpenSheet('none')}
       />
+      )}
+      {openSheet !== 'reschedule' ? null : (
       <RescheduleSheet
-        visible={openSheet === 'reschedule'}
+        visible
         jobNumber={card?.jobNumber ?? ''}
-        currentDate={card?.scheduledFor === null || card === null ? null : card.scheduledFor.slice(0, 10)}
-        currentTime={card?.scheduledFor === null || card === null ? null : card.scheduledFor.slice(11, 16)}
+        todayIso={deps.todayIso}
+        // IST, never a slice of the UTC string the API sends.
+        currentDate={card === null || card.scheduledFor === null ? null : istDayOf(card.scheduledFor)}
+        currentTime={card === null || card.scheduledFor === null ? null : istClockOf(card.scheduledFor)}
         busy={deps.actionBusy}
         error={deps.actionError}
         onConfirm={(scheduledFor) => {
@@ -343,8 +355,10 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
         }}
         onDismiss={() => setOpenSheet('none')}
       />
+      )}
+      {openSheet !== 'cancel' ? null : (
       <CancelJobSheet
-        visible={openSheet === 'cancel'}
+        visible
         jobNumber={card?.jobNumber ?? ''}
         busy={deps.actionBusy}
         error={deps.actionError}
@@ -354,6 +368,7 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
         }}
         onDismiss={() => setOpenSheet('none')}
       />
+      )}
     </View>
   );
 }

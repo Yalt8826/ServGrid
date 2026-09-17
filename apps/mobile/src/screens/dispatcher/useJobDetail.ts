@@ -30,6 +30,7 @@ import type {
 } from '@servgrid/shared';
 import { jobTimelineDispatcherResponseSchema } from '@servgrid/shared';
 import { api } from '../../lib/api';
+import { istBusinessDate } from '../technician/HandoverScreen';
 import type { DispatcherJobDetailDeps } from './jobDetail';
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -173,6 +174,7 @@ export function useDispatcherJobDetail(jobId: string, onBack: () => void): Dispa
         void Linking.openURL(`google.navigation:q=${lat},${lng}`);
       }
     },
+    todayIso: istBusinessDate(new Date()),
     now: new Date(),
     candidates: (roster.data ?? [])
       .map((row) => ({ employeeId: row.employeeId, name: row.technicianName, openTotal: row.openTotal }))

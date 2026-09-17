@@ -108,6 +108,27 @@ export const TIME_SLOTS: readonly string[] = [
   '17:00', '17:30', '18:00', '18:30',
 ];
 
+/** The days the pickers offer, today first, `count` of them.
+ *
+ * `DatePicker` is a field with a trigger and no choosing UI of its own
+ * (its tap sets a placeholder), so the day is chosen from a list — the
+ * same idiom the technician's cancel sheet uses. Calendar arithmetic on
+ * plain ISO dates via UTC, because `YYYY-MM-DD` carries no timezone for
+ * a local Date to misread. (The technician side has its own copies of
+ * this shift; a shared date module is the real fix the day a third role
+ * needs one.)
+ */
+export function dayOptionsFrom(todayIso: string, count = 14): string[] {
+  const [y = 1970, m = 1, d = 1] = todayIso.split('-').map(Number);
+  const days: string[] = [];
+  for (let ahead = 0; ahead < count; ahead += 1) {
+    const shifted = new Date(Date.UTC(y, m - 1, d));
+    shifted.setUTCDate(shifted.getUTCDate() + ahead);
+    days.push(shifted.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
 /**
  * `2026-09-13` + `14:30` → an IST instant — the card's `scheduled_for`
  * carries the offset so the server's `business_date` lands on the day

@@ -28,11 +28,11 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { alpha, COLORS, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
-import { Button, DatePicker, SectionHeader, Select, Sheet } from '../../components/ui';
+import { Button, DatePicker, SectionHeader, Select, Sheet, formatDateEnIN } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
 import { textStyle } from '../../fonts/textStyle';
-import { TIME_SLOTS, scheduledForOf } from './dispatchForm';
+import { TIME_SLOTS, dayOptionsFrom, scheduledForOf } from './dispatchForm';
 
 /** One roster row, as the reassign picker needs it. */
 export interface ReassignCandidate {
@@ -126,14 +126,25 @@ export interface RescheduleSheetProps extends SheetChrome {
   currentDate: string | null;
   /** The current time as `HH:MM`, or null. */
   currentTime: string | null;
+  /** Today in IST — the first day the list offers. */
+  todayIso: string;
   onConfirm: (scheduledFor: string) => void;
 }
 
 export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
   const [date, setDate] = useState<string | null>(props.currentDate);
   const [time, setTime] = useState<string | null>(props.currentTime);
+  const [daysOpen, setDaysOpen] = useState(false);
 
   const ready = date !== null && time !== null;
+  const days = dayOptionsFrom(props.todayIso);
+  // The slot list is the work window (09:00–18:30); a job seeded outside
+  // it keeps its own time as a choice, or the field would open empty on a
+  // real slot and the confirm would appear to have nothing to send.
+  const timeOptions =
+    props.currentTime === null || TIME_SLOTS.includes(props.currentTime)
+      ? TIME_SLOTS
+      : [props.currentTime, ...TIME_SLOTS];
   return (
     <Sheet
       visible={props.visible}
@@ -157,20 +168,52 @@ export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
       }
     >
       <SectionHeader label="New slot" icon="calendar" tint={COLORS.accent} />
-      <View style={styles.scheduleRow}>
-        <View style={{ flex: 1 }}>
-          <DatePicker
-            label="Day"
-            value={date}
-            onChange={setDate}
-            testID="dispatch-reschedule-date"
-          />
+      {/* The field shows the choice; the list below makes it. `DatePicker`
+          is a trigger with no choosing UI (its tap sets a placeholder),
+          so the day is picked from days — today first, every one legal. */}
+      <DatePicker
+        label="Day"
+        value={date}
+        onChange={() => setDaysOpen(true)}
+        testID="dispatch-reschedule-date"
+      />
+      <Button
+        label={date === null ? 'Choose a day' : 'Change day'}
+        icon="calendar"
+        variant="secondary"
+        fullwidth
+        onPress={() => setDaysOpen(!daysOpen)}
+        testID="dispatch-reschedule-days"
+      />
+      {daysOpen ? (
+        <View testID="dispatch-reschedule-day-list" style={styles.dayList}>
+          {days.map((iso) => {
+            const chosen = iso === date;
+            return (
+              <Pressable
+                key={iso}
+                accessibilityRole="button"
+                accessibilityState={{ selected: chosen }}
+                onPress={() => setDate(iso)}
+                style={[styles.dayRow, chosen ? styles.dayRowChosen : null]}
+                testID={`dispatch-reschedule-day-${iso}`}
+              >
+                <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 }}>
+                  {iso === props.todayIso ? 'Today' : formatDateEnIN(iso, Number(iso.slice(0, 4)))}
+                </Text>
+                {chosen ? <Icon name="check" size={ICON.sm} color={SEMANTIC.text.primary} /> : null}
+                <Text style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] }}>{iso}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+      ) : null}
+      <View style={styles.scheduleRow}>
         <View style={{ width: 128 }}>
           <Select
             label="Time"
             value={time ?? ''}
-            options={TIME_SLOTS.map((slot) => ({ value: slot, label: slot }))}
+            options={timeOptions.map((slot) => ({ value: slot, label: slot }))}
             placeholder="No time"
             onSelect={setTime}
             testID="dispatch-reschedule-time"
@@ -343,6 +386,28 @@ const styles = StyleSheet.create({
   },
   currentChip: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   scheduleRow: { flexDirection: 'row', gap: SPACE[3], alignItems: 'flex-start' },
+  dayList: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    padding: SPACE[2],
+    gap: SPACE[1],
+  },
+  dayRow: {
+    minHeight: TAP.min,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    paddingHorizontal: SPACE[3],
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: RADII.control,
+  },
+  dayRowChosen: {
+    borderColor: alpha(COLORS.accent, TINT.chipLine),
+    backgroundColor: alpha(COLORS.accent, TINT.chip),
+  },
   confirmLine: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary, marginTop: SPACE[2] },
   reasons: { alignSelf: 'stretch', gap: SPACE[2] },
   reasonRow: {
