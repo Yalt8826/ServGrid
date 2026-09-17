@@ -313,6 +313,36 @@ describe('DispatcherJobDetailScreen — reassign, reschedule, cancel', () => {
     expect(onCancelJob).toHaveBeenCalledWith({ reasonCode: 'no_access' });
   });
 
+  it('the successor day is picked on the calendar, and can be taken back', async () => {
+    const onCancelJob = vi.fn();
+    const renderer = await create(<DispatcherJobDetailScreen {...baseDeps({ onCancelJob })} />);
+    await press(toJson(renderer), 'dispatch-job-cancel');
+    await press(toJson(renderer), 'dispatch-cancel-reason-parts_unavailable');
+
+    let tree = toJson(renderer);
+    // Nothing picked yet: the sheet says it is skippable and offers no way to clear.
+    expect(allText(findByTestID(tree, 'dispatch-cancel-successor-line')!).join(' ')).toContain('Skippable');
+    expect(findByTestID(tree, 'dispatch-cancel-clear-day')).toBeUndefined();
+
+    await press(tree, 'dispatch-cancel-calendar-day-2026-09-24');
+    tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'dispatch-cancel-successor-line')!).join(' ')).toBe('Booked again for 2026-09-24.');
+
+    await press(tree, 'dispatch-cancel-confirm');
+    expect(onCancelJob).toHaveBeenCalledWith({ reasonCode: 'parts_unavailable', rescheduleTo: '2026-09-24' });
+
+    // …and the day can be let go again, which sends no successor at all.
+    onCancelJob.mockClear();
+    await press(toJson(renderer), 'dispatch-job-cancel');
+    await press(toJson(renderer), 'dispatch-cancel-reason-parts_unavailable');
+    await press(toJson(renderer), 'dispatch-cancel-calendar-day-2026-09-24');
+    await press(toJson(renderer), 'dispatch-cancel-clear-day');
+    tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'dispatch-cancel-successor-line')!).join(' ')).toContain('Skippable');
+    await press(tree, 'dispatch-cancel-confirm');
+    expect(onCancelJob).toHaveBeenCalledWith({ reasonCode: 'parts_unavailable' });
+  });
+
   it('a refused write keeps the sheet open and says what the server said', async () => {
     const renderer = await create(
       <DispatcherJobDetailScreen
@@ -329,39 +359,46 @@ describe('DispatcherJobDetailScreen — reassign, reschedule, cancel', () => {
 });
 
 /**
- * The day is CHOSEN, not typed at a stub (2026-09-17). `DatePicker` is a
- * field with a trigger and no picking UI of its own — its tap sets a
+ * The day is CHOSEN on a calendar (2026-09-17). `DatePicker` is a field
+ * with a trigger and no picking UI of its own — its tap sets a
  * placeholder date — so a screen that renders it bare cannot be used.
- * Yashas hit exactly that in the reschedule sheet; the day list below is
- * the fix, and the same fix went into the dispatch form's Day field.
+ * Yashas hit exactly that in the reschedule sheet; the month calendar
+ * below is the fix, and the dispatch form's Day field got the same one.
  */
-describe('the reschedule sheet’s day list', () => {
-  it('offers today first and offers every day in the window', async () => {
+describe('the reschedule sheet’s calendar', () => {
+  it('opens on the job’s month, marks today, and blocks the past', async () => {
     const renderer = await create(<DispatcherJobDetailScreen {...baseDeps()} />);
     await press(toJson(renderer), 'dispatch-job-reschedule');
-    await press(toJson(renderer), 'dispatch-reschedule-days');
     const tree = toJson(renderer);
 
-    const list = findByTestID(tree, 'dispatch-reschedule-day-list');
-    expect(list).toBeDefined();
-    expect(findByTestID(tree, 'dispatch-reschedule-day-2026-09-17')).toBeDefined(); // today
-    expect(findByTestID(tree, 'dispatch-reschedule-day-2026-09-18')).toBeDefined(); // tomorrow
-    expect(findByTestID(tree, 'dispatch-reschedule-day-2026-09-30')).toBeDefined(); // day 14
-    expect(findByTestID(tree, 'dispatch-reschedule-day-2026-10-01')).toBeUndefined(); // past the window
+    expect(findByTestID(tree, 'dispatch-reschedule-calendar')).toBeDefined();
+    expect(allText(findByTestID(tree, 'dispatch-reschedule-calendar-month')!).join(' ')).toBe('September 2026');
+    // Today (17 Sep) is selectable; a day before the floor is not.
+    const dayState = (iso: string) =>
+      findByTestID(tree, `dispatch-reschedule-calendar-day-${iso}`)!.props.accessibilityState as { disabled: boolean };
+    expect(dayState('2026-09-17').disabled).toBe(false);
+    expect(dayState('2026-09-10').disabled).toBe(true); // before the floor
+    // And the month before today's month cannot be walked to at all.
+    expect(
+      findByTestID(tree, 'dispatch-reschedule-calendar-prev')!.props.accessibilityState as { disabled: boolean },
+    ).toMatchObject({ disabled: true });
   });
 
-  it('choosing a day writes it into the sentence and into the instant', async () => {
+  it('walks to the next month and picks a day there', async () => {
     const onReschedule = vi.fn();
     const renderer = await create(<DispatcherJobDetailScreen {...baseDeps({ onReschedule })} />);
     await press(toJson(renderer), 'dispatch-job-reschedule');
-    await press(toJson(renderer), 'dispatch-reschedule-days');
-    await press(toJson(renderer), 'dispatch-reschedule-day-2026-09-19');
+    await press(toJson(renderer), 'dispatch-reschedule-calendar-next');
 
-    const tree = toJson(renderer);
-    expect(allText(findByTestID(tree, 'dispatch-reschedule-line')!).join(' ')).toBe('Visit moves to 2026-09-19 · 16:30');
+    let tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'dispatch-reschedule-calendar-month')!).join(' ')).toBe('October 2026');
+
+    await press(tree, 'dispatch-reschedule-calendar-day-2026-10-03');
+    tree = toJson(renderer);
+    expect(allText(findByTestID(tree, 'dispatch-reschedule-line')!).join(' ')).toBe('Visit moves to 2026-10-03 · 16:30');
 
     await press(tree, 'dispatch-reschedule-confirm');
-    expect(onReschedule).toHaveBeenCalledWith('2026-09-19T16:30:00+05:30');
+    expect(onReschedule).toHaveBeenCalledWith('2026-10-03T16:30:00+05:30');
   });
 
   it('a day with no time picked cannot be sent — both halves are required', async () => {
@@ -374,8 +411,7 @@ describe('the reschedule sheet’s day list', () => {
     expect(allText(findByTestID(tree, 'dispatch-reschedule-line')!).join(' ')).toBe('Pick a day and a time.');
     expect((confirm().props.accessibilityState as { disabled: boolean }).disabled).toBe(true);
 
-    await press(tree, 'dispatch-reschedule-days');
-    await press(toJson(renderer), 'dispatch-reschedule-day-2026-09-20');
+    await press(toJson(renderer), 'dispatch-reschedule-calendar-day-2026-09-20');
     tree = toJson(renderer);
     // A day without a time is still not a slot.
     expect((confirm().props.accessibilityState as { disabled: boolean }).disabled).toBe(true);

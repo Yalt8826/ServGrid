@@ -360,6 +360,7 @@ export function DispatcherJobDetailScreen(deps: DispatcherJobDetailDeps): React.
       <CancelJobSheet
         visible
         jobNumber={card?.jobNumber ?? ''}
+        todayIso={deps.todayIso}
         busy={deps.actionBusy}
         error={deps.actionError}
         onConfirm={(body) => {

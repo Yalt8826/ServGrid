@@ -28,11 +28,12 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { alpha, COLORS, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
-import { Button, DatePicker, SectionHeader, Select, Sheet, formatDateEnIN } from '../../components/ui';
+import { Button, CalendarGrid, SectionHeader, Select, Sheet } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
+import { haptic } from '../../components/ui/haptics';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
 import { textStyle } from '../../fonts/textStyle';
-import { TIME_SLOTS, dayOptionsFrom, scheduledForOf } from './dispatchForm';
+import { TIME_SLOTS, scheduledForOf } from './dispatchForm';
 
 /** One roster row, as the reassign picker needs it. */
 export interface ReassignCandidate {
@@ -134,10 +135,8 @@ export interface RescheduleSheetProps extends SheetChrome {
 export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
   const [date, setDate] = useState<string | null>(props.currentDate);
   const [time, setTime] = useState<string | null>(props.currentTime);
-  const [daysOpen, setDaysOpen] = useState(false);
 
   const ready = date !== null && time !== null;
-  const days = dayOptionsFrom(props.todayIso);
   // The slot list is the work window (09:00–18:30); a job seeded outside
   // it keeps its own time as a choice, or the field would open empty on a
   // real slot and the confirm would appear to have nothing to send.
@@ -168,52 +167,23 @@ export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
       }
     >
       <SectionHeader label="New slot" icon="calendar" tint={COLORS.accent} />
-      {/* The slot's three controls are one block with their own rhythm:
-          the sheet's body stacks children flush, so a day field, the
-          button that changes it and the list it opens would otherwise
-          sit welded together (reported on the handset, 2026-09-17). */}
-      <View style={styles.slotBlock}>
-      {/* The field shows the choice; the list below makes it. `DatePicker`
-          is a trigger with no choosing UI (its tap sets a placeholder),
-          so the day is picked from days — today first, every one legal. */}
-      <DatePicker
-        label="Day"
+      {/* A month calendar, not a list of the next fortnight: a moved visit
+          can land in the next month, and a list cannot say where in a
+          month a day sits. It is always open — the calendar IS the day
+          field, and hiding it behind a "Change day" button meant the one
+          control the sheet exists for was a further tap away (Yashas,
+          2026-09-17). It opens on the visit's own month, marks the visit's
+          day and today, and today is the floor. */}
+      <CalendarGrid
         value={date}
-        onChange={() => setDaysOpen(true)}
-        testID="dispatch-reschedule-date"
+        todayIso={props.todayIso}
+        onSelect={(iso) => {
+          haptic('pickerSelect');
+          setDate(iso);
+        }}
+        testID="dispatch-reschedule-calendar"
       />
-      <Button
-        label={date === null ? 'Choose a day' : 'Change day'}
-        icon="calendar"
-        variant="secondary"
-        fullwidth
-        onPress={() => setDaysOpen(!daysOpen)}
-        testID="dispatch-reschedule-days"
-      />
-      {daysOpen ? (
-        <View testID="dispatch-reschedule-day-list" style={styles.dayList}>
-          {days.map((iso) => {
-            const chosen = iso === date;
-            return (
-              <Pressable
-                key={iso}
-                accessibilityRole="button"
-                accessibilityState={{ selected: chosen }}
-                onPress={() => setDate(iso)}
-                style={[styles.dayRow, chosen ? styles.dayRowChosen : null]}
-                testID={`dispatch-reschedule-day-${iso}`}
-              >
-                <Text style={{ ...textStyle('body'), color: SEMANTIC.text.primary, flex: 1 }}>
-                  {iso === props.todayIso ? 'Today' : formatDateEnIN(iso, Number(iso.slice(0, 4)))}
-                </Text>
-                {chosen ? <Icon name="check" size={ICON.sm} color={SEMANTIC.text.primary} /> : null}
-                <Text style={{ ...textStyle('mono'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] }}>{iso}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-      <View style={styles.scheduleRow}>
+      <View style={styles.slotBlock}>
         <View style={{ width: 128 }}>
           <Select
             label="Time"
@@ -224,7 +194,6 @@ export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
             testID="dispatch-reschedule-time"
           />
         </View>
-      </View>
       </View>
       {/* The sentence the dispatcher reads back to the customer — §T5's
           confirmation, in the console's words. */}
@@ -258,6 +227,8 @@ export const DISPATCH_CANCEL_REASONS: readonly { code: string; label: string }[]
 export interface CancelJobSheetProps extends SheetChrome {
   visible: boolean;
   jobNumber: string;
+  /** Today in IST — the floor for a successor visit, same as the reschedule. */
+  todayIso: string;
   onConfirm: (body: { reasonCode: string; reasonNote?: string; rescheduleTo?: string }) => void;
 }
 
@@ -331,13 +302,37 @@ export function CancelJobSheet(props: CancelJobSheetProps): React.ReactNode {
       />
 
       <SectionHeader label="Successor visit" icon="calendar" tint={COLORS.accent} />
-      <DatePicker
-        label="Move the visit to"
+      {/* The same calendar as the reschedule sheet (2026-09-17). This was
+          the `DatePicker` stub, whose tap writes a placeholder rather than
+          a chosen day — the successor visit could not be picked at all.
+          It is skippable, so a chosen day can also be taken back. */}
+      <CalendarGrid
         value={rescheduleTo}
-        onChange={setRescheduleTo}
-        helperText="Skippable — leave it out when the visit should not happen again."
-        testID="dispatch-cancel-reschedule"
+        todayIso={props.todayIso}
+        onSelect={(iso) => {
+          haptic('pickerSelect');
+          setRescheduleTo(iso);
+        }}
+        testID="dispatch-cancel-calendar"
       />
+      <View style={styles.successor}>
+        <Text style={styles.helper} testID="dispatch-cancel-successor-line">
+          {rescheduleTo === null
+            ? 'Skippable — leave the day unpicked when the visit should not happen again.'
+            : `Booked again for ${rescheduleTo}.`}
+        </Text>
+        {rescheduleTo === null ? null : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: false }}
+            hitSlop={TAP.hitSlop}
+            onPress={() => setRescheduleTo(null)}
+            testID="dispatch-cancel-clear-day"
+          >
+            <Text style={styles.clearChoice}>No successor visit</Text>
+          </Pressable>
+        )}
+      </View>
       {props.error === null ? null : (
         <Text testID="dispatch-cancel-error" style={styles.error}>
           {props.error}
@@ -393,30 +388,11 @@ const styles = StyleSheet.create({
   currentChip: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   /** The slot controls, spaced as one block (see the note at the call site). */
   slotBlock: { alignSelf: 'stretch', gap: SPACE[3] },
-  scheduleRow: { flexDirection: 'row', gap: SPACE[3], alignItems: 'flex-start' },
-  dayList: {
-    alignSelf: 'stretch',
-    borderWidth: 1,
-    borderColor: SEMANTIC.line.default,
-    borderRadius: RADII.control,
-    padding: SPACE[2],
-    gap: SPACE[1],
-  },
-  dayRow: {
-    minHeight: TAP.min,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACE[2],
-    paddingHorizontal: SPACE[3],
-    borderWidth: 1,
-    borderColor: 'transparent',
-    borderRadius: RADII.control,
-  },
-  dayRowChosen: {
-    borderColor: alpha(COLORS.accent, TINT.chipLine),
-    backgroundColor: alpha(COLORS.accent, TINT.chip),
-  },
   confirmLine: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary, marginTop: SPACE[4] },
+  /** What the calendar holds, and the way to let it go. */
+  successor: { alignSelf: 'stretch', gap: SPACE[1] },
+  helper: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  clearChoice: { ...textStyle('body'), color: SEMANTIC.feedback.danger },
   reasons: { alignSelf: 'stretch', gap: SPACE[2] },
   reasonRow: {
     minHeight: TAP.min,

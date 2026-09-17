@@ -55,7 +55,7 @@ import Animated from 'react-native-reanimated';
 
 import { SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
-import { Banner, Button, DatePicker, Sheet, TextField, formatDateEnIN } from '../../components/ui';
+import { Banner, Button, CalendarGrid, DatePicker, Sheet, TextField } from '../../components/ui';
 import { haptic } from '../../components/ui/haptics';
 import { useArrival } from '../../components/ui/motion';
 import { textStyle } from '../../fonts/textStyle';
@@ -64,7 +64,6 @@ import {
   PRIORITY_SEGMENTS,
   TIME_SLOTS,
   URGENT_SUPPRESSION_NOTE,
-  dayOptionsFrom,
   formatSubmitToast,
   sortTechniciansByLoad,
   validateDispatchForm,
@@ -598,24 +597,19 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
       ) : null}
       {sheet === 'date' ? (
         <Sheet visible title="Which day" onDismiss={() => setSheet(null)} testID="dispatch-date-sheet">
-          {dayOptionsFrom(deps.todayIso).map((iso) => (
-            <Pressable
-              key={iso}
-              testID={`date-option-${iso}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: scheduledDate === iso }}
-              onPress={() => {
-                haptic('pickerSelect');
-                setScheduledDate(iso);
-                setSheet(null);
-              }}
-              style={styles.optionRow}
-            >
-              <Text style={scheduledDate === iso ? styles.optionLabelSelected : styles.optionLabel}>
-                {iso === deps.todayIso ? 'Today' : formatDateEnIN(iso, Number(deps.todayIso.slice(0, 4)))}
-              </Text>
-            </Pressable>
-          ))}
+          {/* The same month calendar the reschedule sheet uses — one day
+              picker in the console, not two. Choosing a day closes the
+              sheet; "No day" stays, because a job may be raised undated. */}
+          <CalendarGrid
+            value={scheduledDate}
+            todayIso={deps.todayIso}
+            onSelect={(iso) => {
+              haptic('pickerSelect');
+              setScheduledDate(iso);
+              setSheet(null);
+            }}
+            testID="dispatch-date-calendar"
+          />
           <Pressable
             testID="date-option-none"
             accessibilityRole="button"
