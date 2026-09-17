@@ -18,7 +18,7 @@
  *   both read `/v1/auth/me` like every flag (PLAN-EXECUTION.md §3).
  * - **URL** — expo-router params ARE the filter state (§D2: a filtered
  *   view survives a reload and can be shared): `useLocalSearchParams`
- *   reads, `jobLogsFiltersToParams` writes through `router.setParams`.
+ *   reads, `jobLogsParamsPatch` writes through `router.setParams`.
  * - **bulk** — `POST /v1/jobs/bulk-assign` carries the per-job
  *   `If-Match` (the card version the list showed), and the partial
  *   result is rendered honestly by the screen's outcome banner.
@@ -39,8 +39,8 @@ import { cachedFeatureFlags, setFeatureFlags } from '../../state/featureFlags';
 import { useIsOnline } from './useDispatcherDashboard';
 import {
   jobLogsFiltersFromParams,
-  jobLogsFiltersToParams,
   jobLogsListQuery,
+  jobLogsParamsPatch,
   type JobLogsJob,
   type JobLogsParams,
 } from './jobLogsFilters';
@@ -254,8 +254,10 @@ export function useJobLogs(): JobLogsDeps {
     bulkBusy,
     bulkOutcome,
     bulkError,
-    onFiltersChange: (next) => router.setParams(jobLogsFiltersToParams(next, query)),
-    onQueryChange: (next) => router.setParams(jobLogsFiltersToParams(filters, next)),
+    // `setParams` with the patch, never the bare delta: the merge has to
+    // be able to DELETE a param, or a filter can only ever be added.
+    onFiltersChange: (next) => router.setParams(jobLogsParamsPatch(next, query)),
+    onQueryChange: (next) => router.setParams(jobLogsParamsPatch(filters, next)),
     onOpenJob: (jobId) => router.push(`/jobs/${jobId}`),
     onReassign: (jobIds, technicianId) => void onReassign(jobIds, technicianId),
     onDismissBulk: () => {

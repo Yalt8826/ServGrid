@@ -1,6 +1,6 @@
 /**
  * Jobs route (UI/plan-2/04-TECHNICIAN.md §T2; the owner's copy §O4,
- * T4.11). Role split:
+ * T4.11; the dispatcher's D2, 05-DISPATCHER.md). Role split:
  *
  * - **Technician branch:** `JobsScreen` behind `tech.jobs`, fed by the
  *   server's work read (`useTechnicianWork`, online-only).
@@ -9,6 +9,13 @@
  *   dispatcher's schema never will), the dispatcher's filter bar on the
  *   phone, the desk table and side detail under the NavShell's desk
  *   density.
+ * - **Dispatcher branch (2026-09-17):** D2 itself. `NAV_GROUPS.dispatcher`
+ *   puts `/jobs` under the **Operations** tab, so this path IS the job
+ *   logs — it rendered the bare `Jobs` placeholder until now, which is
+ *   what a dispatcher saw on tapping the tab they use most. `/jobs/logs`
+ *   stays the same screen with its own URL (the dashboard's button and
+ *   the load-row tap link to it); the filter state lives in the query
+ *   string either way.
  */
 import { useState } from 'react';
 import { Text, View, StyleSheet } from 'react-native';
@@ -20,11 +27,33 @@ import { JobsScreen } from '../../../src/screens/technician/JobsScreen';
 import { useTechJobsFlag, useTechnicianWork } from '../../../src/screens/technician/useTechnicianWork';
 import { OwnerJobsScreen } from '../../../src/screens/owner/JobsScreen';
 import { useOwnerJobDetail, useOwnerJobs } from '../../../src/screens/owner/useOwnerJobs';
+import { JobLogsScreen } from '../../../src/screens/dispatcher/job-logs';
+import { useDispatchJobLogsFlags, useJobLogs } from '../../../src/screens/dispatcher/useJobLogs';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
+
+function DispatcherJobLogsRoute(): React.ReactNode {
+  const flags = useDispatchJobLogsFlags();
+  const deps = useJobLogs();
+
+  if (!flags.consoleOn) {
+    // Dark without the flag — the honest placeholder, nothing spinning.
+    return (
+      <View style={styles.root}>
+        <Text>Job Logs</Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
+      <JobLogsScreen {...deps} />
+    </SafeAreaView>
+  );
+}
 
 function OwnerJobsRoute(): React.ReactNode {
   const router = useRouter();
@@ -75,6 +104,10 @@ export default function Screen() {
 
   if (actor !== null && actor.role === 'owner') {
     return <OwnerJobsRoute />;
+  }
+
+  if (actor !== null && actor.role === 'dispatcher') {
+    return <DispatcherJobLogsRoute />;
   }
 
   if (actor === null || actor.role !== 'technician' || !flag.flagOn || deps === null) {

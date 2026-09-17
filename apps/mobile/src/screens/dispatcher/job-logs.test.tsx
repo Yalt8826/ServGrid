@@ -47,6 +47,7 @@ import {
   DEFAULT_JOB_LOGS_FILTERS,
   jobLogsFiltersFromParams,
   jobLogsFiltersToParams,
+  jobLogsParamsPatch,
   type JobLogsFilters,
   type JobLogsJob,
 } from './jobLogsFilters';
@@ -205,6 +206,23 @@ describe('JobLogsScreen (§D2)', () => {
     const decoded = jobLogsFiltersFromParams(params);
     expect(jobLogsFiltersToParams(decoded.filters, decoded.query)).toEqual(params);
 
+    // What the hook WRITES is the delta with every omitted key named
+    // `undefined`: `setParams` merges, so a key left out kept its old
+    // value in the URL and Clear was a dead button (2026-09-17). Naming
+    // the defaults is what makes the merge delete them.
+    expect(jobLogsParamsPatch(set, 'JC-2627-00042')).toEqual({
+      date: 'week',
+      tech: TECH_A,
+      status: 'overdue',
+      q: 'JC-2627-00042',
+    });
+    expect(jobLogsParamsPatch(DEFAULT_JOB_LOGS_FILTERS, '')).toEqual({
+      date: undefined,
+      tech: undefined,
+      status: undefined,
+      q: undefined,
+    });
+
     // A remount with only the URL in hand re-opens the exact view:
     // search mode answers the link's own question, and the chips read
     // back once search is closed — the roster resolves the name.
@@ -218,6 +236,37 @@ describe('JobLogsScreen (§D2)', () => {
     expect(textOf(remounted, 'job-logs-chip-date')).toContain('This week');
     expect(textOf(remounted, 'job-logs-chip-status')).toContain('Overdue');
     expect(textOf(remounted, 'job-logs-chip-tech')).toContain('Ravi Kumar');
+  });
+
+  it('“Unassigned” is a choice under the person filter, and the two views of it cannot contradict', async () => {
+    // Yashas, 2026-09-17: "add unassigned to the filter". It was only
+    // under Status; the person chip — where a dispatcher looks for "nobody
+    // holds it" — now offers it too. Both write the ONE fact the api has
+    // (`status=unassigned`), so the chips can never disagree.
+    const onFiltersChange = vi.fn();
+    const renderer = await create(<JobLogsScreen {...baseDeps({ onFiltersChange })} />);
+    press(findID(renderer, 'job-logs-chip-tech')!);
+    press(findID(renderer, 'filter-option-unassigned')!);
+    expect(onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_JOB_LOGS_FILTERS, status: 'unassigned' });
+
+    // With the status applied, the person chip reads the same word.
+    const unassignedFilters: JobLogsFilters = { ...DEFAULT_JOB_LOGS_FILTERS, status: 'unassigned' };
+    const unassigned = await create(<JobLogsScreen {...baseDeps({ filters: unassignedFilters })} />);
+    expect(textOf(unassigned, 'job-logs-chip-tech')).toContain('Unassigned');
+
+    // …and naming a technician — who by definition does hold it — takes
+    // the unassigned status back off rather than leaving the two chips
+    // asserting different things.
+    const onPick = vi.fn();
+    const holding = await create(
+      <JobLogsScreen {...baseDeps({ filters: unassignedFilters, onFiltersChange: onPick })} />,
+    );
+    press(findID(holding, 'job-logs-chip-tech')!);
+    press(findID(holding, 'filter-option-ravi-kumar')!);
+    expect(onPick).toHaveBeenCalledWith({
+      ...DEFAULT_JOB_LOGS_FILTERS,
+      tech: { kind: 'tech', technicianId: TECH_A, name: 'Ravi Kumar' },
+    });
   });
 
   it('result count updates with the filter and includes the overdue sub-count', async () => {

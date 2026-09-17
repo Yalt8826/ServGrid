@@ -8,18 +8,22 @@
  * uses); `useJobLogs` is the online-only wiring that feeds it and the
  * URL owns the filter state — this component never holds it.
  *
- * Anatomy, exactly: header ("Job Logs", search); the FilterBar sticky
- * under the header — sticky by LAYOUT, a sibling above the FlashList, so
- * it cannot collapse on scroll; the result count always visible above
- * the list ("24 jobs · 3 overdue" — the dispatcher knows whether the
- * filter worked before scrolling); two-line rows at 56pt, not cards —
- * eight jobs per screen where a field card list shows four.
+ * Anatomy, exactly: the navy frame header ("Job Logs", search); the
+ * FilterBar sticky under it — sticky by LAYOUT, a sibling above the
+ * FlashList, so it cannot collapse on scroll; a section marker carrying
+ * the result count always above the list ("24 jobs · 3 overdue" — the
+ * dispatcher knows whether the filter worked before scrolling); two-line
+ * cards at 56pt with 8pt of air between them (2026-09-17) — the console's
+ * density is still the point, and the gap costs a row or so per screen
+ * against the ruled list this used to be.
  *
  * Density (01-FOUNDATIONS.md §3): the ROW is the tap target at 56pt,
  * above the global 52; the 44pt `console` floor applies to the filter
- * chips and header actions, each with 8pt hit slop. The left rail
- * carries status colour and is never alone — the status word rides
- * beside it (§1.6), always.
+ * chips and header actions. The left rail carries status colour and is
+ * never alone — the status word rides beside it in a `StatusPill` (§1.6),
+ * always. The rail and the pill both come from `railColorOf` /
+ * `statusPillOf`, the same pair the technician's JobCard uses, so the two
+ * rows cannot disagree about what `assigned` looks like.
  *
  * Multi-select (§5.4): long-press at the 400ms threshold fires the
  * `Selection` haptic BEFORE the finger lifts, the row scales to 0.97
@@ -39,22 +43,40 @@
  * filter applied to stale data produces a confident wrong answer.
  *
  * Search is a separate mode, not a field competing with the filter bar:
- * the ⌕ swaps the bar for a full-width search over job number, customer
- * and phone (the server's `q`), with results in the same row component.
+ * the search glyph swaps the bar for a full-width search over job number,
+ * customer and phone (the server's `q`), with results in the same row
+ * component.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlashList } from '@shopify/flash-list';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
-import { DENSITY, JOB_STATUSES, SEMANTIC, SPACE, SPRING, STATUS, TAP, type JobStatus } from '@servgrid/shared';
+import {
+  alpha,
+  COLORS,
+  DENSITY,
+  FRAME,
+  ICON,
+  JOB_STATUSES,
+  RADII,
+  SEMANTIC,
+  SPACE,
+  SPRING,
+  TAP,
+  TINT,
+} from '@servgrid/shared';
+import { StatusPill } from '../../components/domain/StatusPill';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
-import { Banner, Button, EmptyState, Select, Sheet, Skeleton, TextField, useDensity } from '../../components/ui';
+import { Banner, Button, EmptyState, SectionHeader, Select, Sheet, Skeleton, TextField, useDensity } from '../../components/ui';
+import { Icon, type IconName } from '../../components/ui/icons';
 import { haptic } from '../../components/ui/haptics';
 import { useSkeleton } from '../../components/ui/Skeleton';
 import { useToggleProgress } from '../../components/ui/motion';
 import { textStyle } from '../../fonts/textStyle';
+import { istTimeLabel, railColorOf, statusPillOf } from '../technician/jobView';
 import {
+  STATUS_LABELS,
   countOverdueRows,
   formatResultCount,
   jobLogsChipLabel,
@@ -66,11 +88,12 @@ import {
   type JobLogsJob,
   type JobLogsStatusFilter,
 } from './jobLogsFilters';
+import { sortTechniciansByLoad } from './dispatchForm';
 
 export const JOB_LOGS_OFFLINE_MESSAGE = 'No connection. This screen is not live.';
 
 const ROW_HEIGHT = DENSITY.console.rowHeight; // 56 — the D2 row, the measurement FlashList v2 converges on
-const RAIL_WIDTH = 3;
+const RAIL_WIDTH = 4;
 /** §5.4: the long-press threshold the `Selection` haptic fires at. */
 export const LONG_PRESS_THRESHOLD_MS = 400;
 
@@ -142,64 +165,51 @@ export interface JobLogsDeps {
 export interface JobLogsOption<T> {
   value: T;
   label: string;
+  /** The leading glyph, for the options a glyph names (a day, a person). */
+  icon?: IconName;
+  /** …or the status dot, for the options that ARE a status colour. */
+  dot?: string;
 }
 
 /** The date chip's sheet, in display order. */
 export const JOB_LOGS_DATE_OPTIONS: readonly JobLogsOption<JobLogsDateFilter>[] = [
-  { value: 'today', label: 'Today' },
-  { value: 'tomorrow', label: 'Tomorrow' },
-  { value: 'week', label: 'This week' },
-  { value: 'all', label: 'All days' },
+  { value: 'today', label: 'Today', icon: 'calendar' },
+  { value: 'tomorrow', label: 'Tomorrow', icon: 'calendar' },
+  { value: 'week', label: 'This week', icon: 'calendar' },
+  { value: 'all', label: 'All days', icon: 'calendar' },
 ];
 
-const STATUS_LABELS: Record<JobLogsStatusFilter, string> = {
-  any: 'Any status',
-  overdue: 'Overdue',
-  unassigned: 'Unassigned',
-  assigned: 'Assigned',
-  en_route: 'En route',
-  in_progress: 'In progress',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-};
-
-/** The status chip's sheet — overdue is an option, never a status. */
+/** The status chip's sheet — overdue is an option, never a status. The
+ * words come from the filters module's `STATUS_LABELS`, the same map the
+ * chip's resting label reads: this file used to keep its own copy. Each
+ * option carries the status's own colour as a dot, so the sheet teaches
+ * the colours the rows use. */
 export const JOB_LOGS_STATUS_OPTIONS: readonly JobLogsOption<JobLogsStatusFilter>[] = [
-  { value: 'any', label: 'Any status' },
-  { value: 'overdue', label: 'Overdue' },
-  ...JOB_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] })),
+  { value: 'any', label: STATUS_LABELS.any, dot: SEMANTIC.text.secondary },
+  { value: 'overdue', label: STATUS_LABELS.overdue, dot: SEMANTIC.feedback.danger },
+  ...JOB_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], dot: statusPillOf(s).color })),
 ];
 
 function optionTestId(label: string): string {
   return `filter-option-${label.toLowerCase().replace(/\s+/g, '-')}`;
 }
 
-/** `assigned` has no dedicated ramp entry — it rides the unassigned
- * slate, exactly as the technician JobCard does (T1.22's resolution). */
-function statusTone(status: JobStatus): { label: string; color: string } {
-  switch (status) {
-    case 'completed':
-      return { label: 'Completed', color: STATUS.completed };
-    case 'en_route':
-      return { label: 'En route', color: STATUS.en_route };
-    case 'in_progress':
-      return { label: 'In progress', color: STATUS.in_progress };
-    case 'cancelled':
-      return { label: 'Cancelled', color: STATUS.cancelled };
-    case 'unassigned':
-      return { label: 'Unassigned', color: STATUS.unassigned };
-    default:
-      return { label: 'Assigned', color: STATUS.unassigned };
-  }
-}
-
 const hitSlop = { top: TAP.hitSlop, bottom: TAP.hitSlop, left: TAP.hitSlop, right: TAP.hitSlop };
+/** A row is 56pt — over the 52 floor — so it carries no hit slop. Slop on
+ * a dense list overlaps the row above and below by 8pt each, which makes
+ * the top half of a row open its neighbour. */
+const NO_SLOP = { top: 0, bottom: 0, left: 0, right: 0 };
 
 // ── the row ──────────────────────────────────────────────────────────────
 
 /**
- * ▌JC-…0042  Kormangala 3rd Blk        → line 1: number + the work
- * ▌Ravi · 14:30            ● In progress → line 2: who · when, status
+ * ▌JC-…0042  Kormangala 3rd Blk        (● In progress)
+ * ▌Ravi · 14:30  [Overdue]
+ *
+ * Line 1 is the job, line 2 is who and when; the status rides the row's
+ * trailing edge as a `StatusPill` (tint + dot + word), vertically centred
+ * because it is the same fact for both lines — and the same pill the
+ * technician's card wears, from the same `statusPillOf` map.
  *
  * Memoised: the row re-renders only when ITS item changes — the screen
  * swaps the whole `data` array on a filter change, and every row that
@@ -219,7 +229,11 @@ const JobLogsRow = memo(function JobLogsRow({
   testID: string;
 }): React.ReactNode {
   const [pressed, setPressed] = useState(false);
-  const tone = statusTone(job.status);
+  const density = useDensity();
+  // Body type follows the density ramp (console 15 here, field 16 on the
+  // owner's phone list, which mounts this same row).
+  const titleStyle = useMemo(() => [styles.rowTitle, textStyle('bodyStrong', density)], [density]);
+  const whoStyle = useMemo(() => [styles.who, textStyle('body', density)], [density]);
 
   // §5.4 long-press pick-up: at the 400ms threshold the row scales to
   // 0.97 (spring.press) over a strengthened border. The animated style
@@ -241,32 +255,43 @@ const JobLogsRow = memo(function JobLogsRow({
       onLongPress={() => onLongPress(job)}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      hitSlop={hitSlop}
+      hitSlop={NO_SLOP}
       style={[
         styles.row,
         pressed ? styles.rowPressed : null,
         selected ? styles.rowSelected : null,
       ]}
     >
-      <View style={[styles.rail, { backgroundColor: STATUS[job.status as keyof typeof STATUS] ?? STATUS.unassigned }]} />
+      <View style={[styles.rail, { backgroundColor: railColorOf(job.status) }]} />
       <View style={styles.body}>
-        <View style={styles.line1}>
-          <Text style={styles.jobNumber}>{shortJobNumber(job.jobNumber)}</Text>
-          <Text numberOfLines={1} style={styles.rowTitle}>
-            {job.title}
-          </Text>
-        </View>
-        <View style={styles.line2}>
-          <Text numberOfLines={1} style={styles.who}>
-            {job.technicianName === null ? 'Unassigned' : `${firstName(job.technicianName)} · ${slotLabel(job.scheduledFor)}`}
-          </Text>
-          {job.overdue ? <Text style={styles.overdueChip}>Overdue</Text> : null}
-          <View style={styles.spacer} />
-          <View style={styles.status}>
-            <View style={[styles.dot, { backgroundColor: tone.color }]} />
-            <Text style={styles.statusLabel}>{tone.label}</Text>
+        <View style={styles.textCol}>
+          <View style={styles.line1}>
+            <Text style={styles.jobNumber}>{shortJobNumber(job.jobNumber)}</Text>
+            <Text numberOfLines={1} style={titleStyle}>
+              {job.title}
+            </Text>
+          </View>
+          <View style={styles.line2}>
+            <Text numberOfLines={1} style={whoStyle}>
+              {job.technicianName === null ? 'Unassigned' : `${firstName(job.technicianName)} · ${slotLabel(job.scheduledFor)}`}
+            </Text>
+            {job.overdue ? (
+              <View style={styles.overdueChip}>
+                <Text style={styles.overdueWord}>Overdue</Text>
+              </View>
+            ) : null}
           </View>
         </View>
+        {/* Named outside the `job-logs-row-` namespace on purpose: that
+            prefix is what the tests read as "the ids of the rows", so a
+            `-status` suffix on it would read as one more row. */}
+        {/* `style` is not decoration here: `StatusPill` sets
+            `alignSelf: 'flex-start'` so it hugs inside a column, and
+            `alignSelf` beats the parent's `alignItems` — in this row that
+            means the TOP edge, which is why the pills rode high in the
+            card (Yashas, 2026-09-17). Centring has to be said on the pill
+            itself. */}
+        <StatusPill status={job.status} style={styles.rowPill} testID={`job-logs-status-${job.id}`} />
       </View>
     </Pressable>
   );
@@ -280,9 +305,15 @@ function firstName(technician: string): string {
   return technician.split(' ')[0] ?? technician;
 }
 
-/** `14:30` — the IST wall clock the api already sends. */
+/**
+ * `14:30` — the IST wall clock, whatever the api sent. It used to slice
+ * `iso.slice(11,16)`, which prints the right slot only while every
+ * instant arrives with a `+05:30` offset; the sort above parses the same
+ * string absolutely, so the two could disagree. Same helper the
+ * technician's card and the job detail use.
+ */
 function slotLabel(scheduledFor: string | null): string {
-  return scheduledFor === null ? 'no date' : scheduledFor.slice(11, 16);
+  return scheduledFor === null ? 'No time' : istTimeLabel(scheduledFor);
 }
 
 // ── hoisted list plumbing — no per-render closures reach a row ───────────
@@ -316,20 +347,28 @@ const keyExtractor = (item: JobLogsListItem): string => item.id;
 type ChipKey = 'date' | 'tech' | 'status';
 
 /**
- * One 44pt console chip — the floor D2 allows here and nowhere else,
- * with hit slop 8 putting the effective target back at 52 (§3). The fill
- * change is the screen's one allowed chip motion (140ms, `quick`).
+ * One console chip — 44pt at `console`, 52 at `field` (the owner's phone
+ * list mounts this bar too, where the floor is the global one). The fill
+ * change is the screen's one allowed chip motion (140ms, `quick`), and an
+ * applied filter fills navy — the app's own "this one is on" fill, the
+ * same one `Chip` uses.
  */
 function FilterChip({
   label,
+  icon,
   active,
   disabled,
+  floor,
   onPress,
   testID,
 }: {
   label: string;
+  /** The chip's own object: a day, a person, a state. */
+  icon: IconName;
   active: boolean;
   disabled: boolean;
+  /** The density's touch floor — 44 on the console, 52 in the field. */
+  floor: number;
   onPress: () => void;
   testID: string;
 }): React.ReactNode {
@@ -340,7 +379,7 @@ function FilterChip({
       accessibilityRole="button"
       accessibilityState={{ selected: active, disabled }}
       disabled={disabled}
-      hitSlop={hitSlop}
+      hitSlop={floor < TAP.min ? hitSlop : NO_SLOP}
       onPress={() => {
         // Belt and braces: the Pressable is disabled offline too — a
         // filter applied to stale data is the confident wrong answer.
@@ -350,9 +389,17 @@ function FilterChip({
       }}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
-      style={[styles.chip, active ? styles.chipActive : null, disabled ? styles.chipDisabled : null, pressed ? styles.chipPressed : null]}
+      style={[
+        styles.chip,
+        { minHeight: floor },
+        active ? styles.chipActive : null,
+        disabled ? styles.chipDisabled : null,
+        pressed ? (active ? null : styles.chipPressed) : null,
+      ]}
     >
-      <Text style={active ? styles.chipLabelActive : styles.chipLabel}>{label} ▾</Text>
+      <Icon name={icon} size={ICON.sm} color={active ? FRAME.text : SEMANTIC.text.secondary} />
+      <Text style={active ? styles.chipLabelActive : styles.chipLabel}>{label}</Text>
+      <Icon name="chevronDown" size={ICON.sm} color={active ? FRAME.text : SEMANTIC.text.secondary} />
     </Pressable>
   );
 }
@@ -383,7 +430,11 @@ export function FilterBar({
   onClear: () => void;
 }): React.ReactNode {
   const [open, setOpen] = useState<ChipKey | null>(null);
-  const desk = useDensity() === 'desk';
+  const density = useDensity();
+  const desk = density === 'desk';
+  /** The row/chip floor: console 44, field 52 (the owner's phone list
+   * mounts this bar at field density). */
+  const floor = density === 'field' ? TAP.min : TAP.console;
 
   const nameOf = useCallback(
     (technicianId: string): string | null => technicians.find((t) => t.employeeId === technicianId)?.name ?? null,
@@ -391,7 +442,16 @@ export function FilterBar({
   );
 
   const techOptions: readonly JobLogsOption<string>[] = useMemo(
-    () => [{ value: 'anyone', label: 'Anyone' }, ...technicians.map((t) => ({ value: t.employeeId, label: t.name }))],
+    () => [
+      { value: 'anyone', label: 'Anyone', icon: 'people' },
+      // "Nobody holds it" is the server's `unassigned` STATUS, so this
+      // option writes the status filter rather than inventing a
+      // technicianId the api would answer with an empty page (Yashas,
+      // 2026-09-17: "add unassigned to the filter"). Both chips then read
+      // Unassigned, because it is one fact.
+      { value: 'unassigned', label: 'Unassigned', icon: 'people' },
+      ...technicians.map((t) => ({ value: t.employeeId, label: t.name, icon: 'people' as const })),
+    ],
     [technicians],
   );
 
@@ -402,13 +462,20 @@ export function FilterBar({
     if (open === 'date') onChange({ ...filters, date: option.value as JobLogsDateFilter });
     else if (open === 'status') onChange({ ...filters, status: option.value as JobLogsStatusFilter });
     else if (open === 'tech') {
-      onChange({
-        ...filters,
-        tech:
-          option.value === 'anyone'
-            ? { kind: 'anyone' }
-            : { kind: 'tech', technicianId: option.value as string, name: option.label },
-      });
+      if (option.value === 'unassigned') {
+        onChange({ ...filters, tech: { kind: 'anyone' }, status: 'unassigned' });
+      } else {
+        onChange({
+          ...filters,
+          // A job someone holds is not unassigned: picking a person drops
+          // the status view that said it was.
+          status: filters.status === 'unassigned' ? 'any' : filters.status,
+          tech:
+            option.value === 'anyone'
+              ? { kind: 'anyone' }
+              : { kind: 'tech', technicianId: option.value as string, name: option.label },
+        });
+      }
     }
     setOpen(null);
   };
@@ -416,13 +483,17 @@ export function FilterBar({
   const isActive = (key: ChipKey): boolean => {
     if (key === 'date') return filters.date !== 'today';
     if (key === 'status') return filters.status !== 'any';
-    return filters.tech.kind !== 'anyone';
+    return filters.tech.kind !== 'anyone' || filters.status === 'unassigned';
   };
 
   const isOptionSelected = (option: JobLogsOption<unknown>): boolean => {
     if (open === 'date') return filters.date === option.value;
     if (open === 'status') return filters.status === option.value;
-    if (open === 'tech') return filters.tech.kind === 'tech' && filters.tech.technicianId === option.value;
+    if (open === 'tech') {
+      if (option.value === 'unassigned') return filters.status === 'unassigned';
+      if (option.value === 'anyone') return filters.tech.kind === 'anyone' && filters.status !== 'unassigned';
+      return filters.tech.kind === 'tech' && filters.tech.technicianId === option.value;
+    }
     return false;
   };
 
@@ -431,7 +502,12 @@ export function FilterBar({
   // sheet is a phone idiom, and on the owner's desk it read as unfinished
   // and behaved like nothing at all. The phone keeps its chips below.
   if (desk) {
-    const techValue = filters.tech.kind === 'anyone' ? 'anyone' : filters.tech.technicianId;
+    const techValue =
+      filters.status === 'unassigned'
+        ? 'unassigned'
+        : filters.tech.kind === 'anyone'
+          ? 'anyone'
+          : filters.tech.technicianId;
     return (
       <View style={styles.deskBar} testID="job-logs-filter-bar">
         <View style={styles.deskField}>
@@ -449,15 +525,22 @@ export function FilterBar({
             label="Technician"
             value={techValue}
             options={techOptions.map((o) => ({ value: String(o.value), label: o.label }))}
-            onSelect={(value) =>
+            onSelect={(value) => {
+              // The same alias the chips use, and the same rule that keeps
+              // the two filters from contradicting each other.
+              if (value === 'unassigned') {
+                onChange({ ...filters, tech: { kind: 'anyone' }, status: 'unassigned' });
+                return;
+              }
               onChange({
                 ...filters,
+                status: filters.status === 'unassigned' ? 'any' : filters.status,
                 tech:
                   value === 'anyone'
                     ? { kind: 'anyone' }
                     : { kind: 'tech', technicianId: value, name: nameOf(value) ?? '' },
-              })
-            }
+              });
+            }}
             disabled={offline}
             testID="job-logs-filter-tech"
           />
@@ -487,8 +570,10 @@ export function FilterBar({
             key={key}
             testID={`job-logs-chip-${key}`}
             label={jobLogsChipLabel(key, filters, nameOf)}
+            icon={CHIP_ICONS[key]}
             active={isActive(key)}
             disabled={offline}
+            floor={floor}
             onPress={() => setOpen(open === key ? null : key)}
           />
         ))}
@@ -505,29 +590,61 @@ export function FilterBar({
             }}
             style={[styles.clearButton, offline ? styles.chipDisabled : null]}
           >
-            <Text style={styles.clearLabel}>✕</Text>
+            <Icon name="close" size={ICON.md} color={SEMANTIC.text.secondary} />
           </Pressable>
         )}
       </View>
       {open === null ? null : (
         <Sheet visible title={SHEET_TITLES[open]} onDismiss={() => setOpen(null)} testID={`job-logs-sheet-${open}`}>
-          {options.map((option) => (
-            <Pressable
-              key={option.label}
-              testID={optionTestId(option.label)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isOptionSelected(option) }}
-              onPress={() => applyOption(option)}
-              style={styles.optionRow}
-            >
-              <Text style={isOptionSelected(option) ? styles.optionLabelSelected : styles.optionLabel}>{option.label}</Text>
-            </Pressable>
-          ))}
+          {/* Rows, not a native picker: the chosen one fills navy with a
+              light tick — the same "this one is on" the chips wear, and
+              the same mark the technician's cancel sheet uses. */}
+          <View style={styles.options}>
+            {options.map((option) => {
+              const selected = isOptionSelected(option);
+              return (
+                <Pressable
+                  key={option.label}
+                  testID={optionTestId(option.label)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() => applyOption(option)}
+                  style={[styles.optionRow, { minHeight: floor }, selected ? styles.optionRowSelected : null]}
+                >
+                  {/* The leading mark is the option's own object: a glyph
+                      for a day or a person, the status colour as a dot for
+                      a state. */}
+                  <View style={styles.optionLead}>
+                    {option.dot === undefined ? (
+                      <Icon
+                        name={option.icon ?? 'list'}
+                        size={ICON.sm}
+                        color={selected ? FRAME.text : SEMANTIC.text.secondary}
+                      />
+                    ) : (
+                      <View style={[styles.optionDot, { backgroundColor: option.dot }]} />
+                    )}
+                  </View>
+                  <Text style={[selected ? styles.optionLabelSelected : styles.optionLabel, styles.optionText]}>
+                    {option.label}
+                  </Text>
+                  {selected ? <Icon name="check" size={ICON.sm} color={FRAME.text} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
         </Sheet>
       )}
     </View>
   );
 }
+
+/** Each chip wears its own object: a day, a person, a state. */
+const CHIP_ICONS: Record<ChipKey, IconName> = {
+  date: 'calendar',
+  tech: 'people',
+  status: 'list',
+};
 
 const SHEET_TITLES: Record<ChipKey, string> = {
   date: 'Which day',
@@ -607,6 +724,10 @@ export function JobLogsScreen(deps: JobLogsDeps): React.ReactNode {
 
   return (
     <View style={styles.screen} testID="job-logs-screen">
+      {/* The navy frame (2026-09-17): the title and the search control sit
+          on slate.900, and the selection bar cross-fades over them on the
+          same ground — a light overlay would flash white at the top of
+          the screen every time a row is picked up. */}
       <View style={styles.headerWrap}>
         <Animated.View style={[styles.headerBar, restStyle]} testID="job-logs-header">
           <Text style={styles.title}>Job Logs</Text>
@@ -619,7 +740,7 @@ export function JobLogsScreen(deps: JobLogsDeps): React.ReactNode {
             onPress={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
             style={[styles.headerAction, deps.offline ? styles.chipDisabled : null]}
           >
-            <Text style={styles.searchIcon}>{searchOpen ? '✕' : '⌕'}</Text>
+            <Icon name={searchOpen ? 'close' : 'search'} size={ICON.lg} color={FRAME.text} />
           </Pressable>
         </Animated.View>
         <Animated.View
@@ -640,7 +761,20 @@ export function JobLogsScreen(deps: JobLogsDeps): React.ReactNode {
               testID="job-logs-reassign"
             />
           ) : null}
-          <Button label="Cancel" variant="ghost" onPress={() => setSelection(new Set())} testID="job-logs-selection-cancel" />
+          {/* Not a `ghost` Button: its ink is `text.secondary`, which is
+              slate.500 — invisible on the frame. The escape is a plain
+              light word beside the one action, the dashboard's own
+              arrangement. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel selection"
+            hitSlop={hitSlop}
+            onPress={() => setSelection(new Set())}
+            style={styles.cancelSelection}
+            testID="job-logs-selection-cancel"
+          >
+            <Text style={styles.cancelSelectionWord}>Cancel</Text>
+          </Pressable>
         </Animated.View>
       </View>
 
@@ -678,9 +812,17 @@ export function JobLogsScreen(deps: JobLogsDeps): React.ReactNode {
         />
       )}
 
-      <Text style={styles.resultCount} testID="job-logs-result-count">
-        {formatResultCount(sortedJobs.length, overdueCount)}
-      </Text>
+      <View style={styles.resultsMarker}>
+        <SectionHeader
+          label="Jobs"
+          icon="list"
+          action={
+            <Text style={styles.resultCount} testID="job-logs-result-count">
+              {formatResultCount(sortedJobs.length, overdueCount)}
+            </Text>
+          }
+        />
+      </View>
 
       {deps.error !== null ? (
         <EmptyState message={deps.error} actionLabel="Retry" onAction={deps.onRetry} testID="job-logs-error" />
@@ -689,9 +831,14 @@ export function JobLogsScreen(deps: JobLogsDeps): React.ReactNode {
           {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
             <View key={i} style={styles.skeletonRow}>
               <View style={[styles.rail, { backgroundColor: SEMANTIC.bg.dense }]} />
-              <View style={styles.skeletonBody}>
-                <Skeleton width="46%" height={15} />
-                <Skeleton width="70%" height={13} />
+              <View style={styles.body}>
+                <View style={styles.textCol}>
+                  <Skeleton width="46%" height={14} />
+                  <Skeleton width="70%" height={12} />
+                </View>
+                {/* The status pill's own footprint, so the rows do not
+                    shift sideways when the data lands. */}
+                <Skeleton width={76} height={20} radius={RADII.control} />
               </View>
             </View>
           ))}
@@ -724,39 +871,45 @@ export function JobLogsScreen(deps: JobLogsDeps): React.ReactNode {
         </View>
       )}
 
-      <Sheet
-        visible={pickerOpen}
-        title="Reassign to"
-        onDismiss={() => setPickerOpen(false)}
-        testID="job-logs-reassign-sheet"
-      >
-        {deps.technicians.length === 0 ? (
-          <EmptyState message="No technicians on the roster." testID="job-logs-reassign-empty" />
-        ) : (
-          deps.technicians.map((technician, index) => (
-            <Pressable
-              key={technician.employeeId}
-              testID={`job-logs-reassign-${technician.employeeId}`}
-              accessibilityRole="button"
-              disabled={deps.bulkBusy}
-              onPress={() => {
-                setPickerOpen(false);
-                setSelection(new Set()); // the selection is in flight — the mode ends
-                deps.onReassign([...selection], technician.employeeId);
-              }}
-              style={styles.pickerRow}
-            >
-              <TechnicianLoadRow
-                name={technician.name}
-                load={technician.openTotal}
-                maxLoad={busiestLoad}
-                index={index}
-                testID={`job-logs-picker-${technician.employeeId}`}
-              />
-            </Pressable>
-          ))
-        )}
-      </Sheet>
+      {/* Mounted only while open (2026-09-17), the job detail's idiom: a
+          sheet built on every render of a screen that is just idling is
+          a subtree nothing asked for, and it is one prop away from
+          seeding from data that is not there yet. */}
+      {pickerOpen ? (
+        <Sheet visible title="Reassign to" onDismiss={() => setPickerOpen(false)} testID="job-logs-reassign-sheet">
+          <SectionHeader label="Lightest load first" icon="people" tint={COLORS.accent} />
+          {deps.technicians.length === 0 ? (
+            <EmptyState message="No technicians on the roster." testID="job-logs-reassign-empty" />
+          ) : (
+            // Load ascending, stable — the same order (and the same
+            // helper) the job detail's picker uses, because the
+            // comparison IS the decision.
+            sortTechniciansByLoad(deps.technicians).map((technician, index) => (
+              <Pressable
+                key={technician.employeeId}
+                testID={`job-logs-reassign-${technician.employeeId}`}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: deps.bulkBusy }}
+                disabled={deps.bulkBusy}
+                onPress={() => {
+                  setPickerOpen(false);
+                  setSelection(new Set()); // the selection is in flight — the mode ends
+                  deps.onReassign([...selection], technician.employeeId);
+                }}
+                style={styles.pickerRow}
+              >
+                <TechnicianLoadRow
+                  name={technician.name}
+                  load={technician.openTotal}
+                  maxLoad={busiestLoad}
+                  index={index}
+                  testID={`job-logs-picker-${technician.employeeId}`}
+                />
+              </Pressable>
+            ))
+          )}
+        </Sheet>
+      ) : null}
     </View>
   );
 }
@@ -768,21 +921,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACE[4],
+    gap: SPACE[2],
+    paddingHorizontal: SPACE[3],
     paddingTop: SPACE[3],
-    paddingBottom: SPACE[2],
-    backgroundColor: SEMANTIC.bg.app,
+    paddingBottom: SPACE[3],
+    backgroundColor: FRAME.bg,
   },
-  headerOverlay: { ...StyleSheet.absoluteFillObject },
-  title: { ...textStyle('h1'), color: SEMANTIC.text.primary },
+  // The overlay covers the resting bar exactly, on the SAME navy — the
+  // cross-fade has to hide it, not paint a second ground over it.
+  headerOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: FRAME.bg },
+  title: { ...textStyle('h1'), color: FRAME.text },
   headerAction: {
     minWidth: TAP.console,
     minHeight: TAP.console,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchIcon: { ...textStyle('h1'), color: SEMANTIC.text.primary },
-  selectionCount: { ...textStyle('h2'), color: SEMANTIC.text.primary, flex: 1 },
+  selectionCount: { ...textStyle('h2'), color: FRAME.text, flex: 1 },
+  // The selection mode's escape: a light word, no fill — the one action
+  // (Reassign) is the white Button beside it.
+  cancelSelection: { minHeight: TAP.console, justifyContent: 'center', paddingHorizontal: SPACE[2] },
+  cancelSelectionWord: { ...textStyle('label'), color: FRAME.textMuted },
   // The desk bar: three dropdowns on one line, wrapping on a narrow
   // window, each wide enough to read a technician's full name.
   deskBar: {
@@ -803,47 +962,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACE[2],
     paddingHorizontal: SPACE[3],
-    paddingVertical: SPACE[2],
+    paddingTop: SPACE[3],
+    paddingBottom: SPACE[2],
     backgroundColor: SEMANTIC.bg.app,
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
   },
   chip: {
-    minHeight: TAP.console, // 44 — the console floor, always + hit slop 8
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[1],
     paddingHorizontal: SPACE[3],
-    borderRadius: 4,
+    borderRadius: RADII.control,
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
     justifyContent: 'center',
   },
-  chipActive: { backgroundColor: SEMANTIC.bg.dense, borderColor: SEMANTIC.text.primary },
+  // An applied filter fills navy — the app's one "this is on" fill.
+  chipActive: { backgroundColor: SEMANTIC.bg.dark, borderColor: SEMANTIC.bg.dark },
   chipPressed: { backgroundColor: SEMANTIC.bg.pressed },
   chipDisabled: { opacity: 0.6 },
   chipLabel: { ...textStyle('label'), color: SEMANTIC.text.primary },
-  chipLabelActive: { ...textStyle('label'), color: SEMANTIC.text.primary, fontWeight: '600' },
+  chipLabelActive: { ...textStyle('label'), color: SEMANTIC.text.onDark, fontWeight: '600' },
   clearButton: {
     minWidth: TAP.console,
     minHeight: TAP.console,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  clearLabel: { ...textStyle('h2'), color: SEMANTIC.text.secondary },
   optionRow: {
-    minHeight: TAP.min, // a sheet of LARGE rows, not a native picker
-    justifyContent: 'center',
-    paddingHorizontal: SPACE[2],
-    borderTopWidth: 1,
-    borderTopColor: SEMANTIC.line.default,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
   },
+  optionRowSelected: { backgroundColor: SEMANTIC.bg.dark },
+  /** A fixed leading slot, so every label starts on the same x. */
+  optionLead: { width: ICON.lg, alignItems: 'center', justifyContent: 'center' },
+  optionDot: { width: 8, height: 8, borderRadius: 4 },
+  optionText: { flex: 1 },
   optionLabel: { ...textStyle('body'), color: SEMANTIC.text.primary },
-  optionLabelSelected: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
-  searchWrap: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[2] },
+  optionLabelSelected: { ...textStyle('bodyStrong'), color: SEMANTIC.text.onDark },
+  /** The sheet's options as a spaced stack, not a hairline-separated list. */
+  options: { alignSelf: 'stretch', gap: SPACE[1], paddingHorizontal: SPACE[2] },
+  searchWrap: { paddingHorizontal: SPACE[3], paddingBottom: SPACE[2] },
+  /** The list's own marker — the count rides the rule's trailing edge. */
+  resultsMarker: { paddingHorizontal: SPACE[3], paddingVertical: SPACE[2] },
   resultCount: {
     ...textStyle('caption'),
     color: SEMANTIC.text.secondary,
-    paddingHorizontal: SPACE[4],
-    paddingVertical: SPACE[2],
     fontVariant: ['tabular-nums'],
   },
   listWrap: { flex: 1 },
@@ -852,36 +1021,58 @@ const styles = StyleSheet.create({
   skeletonRow: {
     flexDirection: 'row',
     height: ROW_HEIGHT,
+    marginBottom: SPACE[2],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
     alignItems: 'center',
+    overflow: 'hidden',
   },
-  skeletonBody: { flex: 1, paddingHorizontal: SPACE[3], gap: SPACE[1] },
+  // A card per row, not a ruled line (Yashas, 2026-09-17: "add proper
+  // spacing between the job cards"): the same 56pt tap target, plus air
+  // between rows, a hairline all round and a corner the rail turns with
+  // (`overflow: hidden` is what clips the rail to the radius).
   row: {
     flexDirection: 'row',
     height: ROW_HEIGHT, // the row itself is the tap target, at 56pt
+    marginBottom: SPACE[2],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
     backgroundColor: SEMANTIC.bg.raised,
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
+    overflow: 'hidden',
   },
   rowPressed: { backgroundColor: SEMANTIC.bg.pressed }, // 90ms press state
-  rowSelected: { borderWidth: 1, borderColor: SEMANTIC.line.focus },
+  rowSelected: { borderColor: SEMANTIC.line.focus, backgroundColor: SEMANTIC.bg.pressed },
+  /** The real status rail, four points — the same weight as the card's. */
   rail: { width: RAIL_WIDTH },
-  body: { flex: 1, paddingHorizontal: SPACE[3], justifyContent: 'center', gap: 2 },
+  /** The pill centres on the row's axis — see the note at the call site. */
+  rowPill: { alignSelf: 'center' },
+  body: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    paddingHorizontal: SPACE[3],
+  },
+  textCol: { flex: 1, justifyContent: 'center', gap: 2 },
   line1: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] },
   jobNumber: { ...textStyle('mono'), color: SEMANTIC.text.secondary, fontVariant: ['tabular-nums'] },
-  rowTitle: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary, flexShrink: 1 },
+  rowTitle: { color: SEMANTIC.text.primary, flexShrink: 1 },
   line2: { flexDirection: 'row', alignItems: 'center', gap: SPACE[2] },
-  who: { ...textStyle('body'), color: SEMANTIC.text.secondary, flexShrink: 1 },
+  who: { color: SEMANTIC.text.secondary, flexShrink: 1 },
+  // The overdue flag as a tinted chip: the danger ink and its word, on a
+  // ground derived from it — never an outlined word floating in the line.
   overdueChip: {
-    borderWidth: 1,
-    borderColor: SEMANTIC.feedback.danger,
-    color: SEMANTIC.feedback.danger,
-    ...textStyle('caption'),
+    minHeight: 18,
+    justifyContent: 'center',
     paddingHorizontal: SPACE[1],
+    borderRadius: RADII.control,
+    borderWidth: 1,
+    borderColor: alpha(SEMANTIC.feedback.danger, TINT.chipLine),
+    backgroundColor: alpha(SEMANTIC.feedback.danger, TINT.chip),
   },
-  spacer: { flex: 1 },
-  status: { flexDirection: 'row', alignItems: 'center', gap: SPACE[1] },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  statusLabel: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  overdueWord: { ...textStyle('caption'), color: SEMANTIC.feedback.danger },
   pickerRow: { alignSelf: 'stretch', paddingVertical: SPACE[1] },
 });

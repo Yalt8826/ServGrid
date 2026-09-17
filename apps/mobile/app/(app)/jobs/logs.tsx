@@ -12,7 +12,7 @@
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME } from '@servgrid/shared';
 import { JobLogsScreen } from '../../../src/screens/dispatcher/job-logs';
 import { useJobLogs, useDispatchJobLogsFlags } from '../../../src/screens/dispatcher/useJobLogs';
 
@@ -34,7 +34,9 @@ export default function Screen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset belongs to the
+    // tab bar (the dispatcher dashboard's own arrangement).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <JobLogsScreen {...deps} />
     </SafeAreaView>
   );
