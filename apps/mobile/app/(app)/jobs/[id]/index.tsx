@@ -21,6 +21,8 @@ import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { JobDetailScreen } from '../../../../src/screens/technician/JobDetailScreen';
 import { activeJobOf, busyWithSentence } from '../../../../src/screens/technician/jobView';
 import { useJobTimeline, useTechJobsFlag, useTechnicianWork } from '../../../../src/screens/technician/useTechnicianWork';
+import { DispatcherJobDetailScreen } from '../../../../src/screens/dispatcher/jobDetail';
+import { useDispatcherJobDetail } from '../../../../src/screens/dispatcher/useJobDetail';
 import { OwnerJobDetailBody } from '../../../../src/screens/owner/JobDetailBody';
 import { useOwnerAmendFlag, useOwnerJobCard, useOwnerJobDetail } from '../../../../src/screens/owner/useOwnerJobs';
 import { useSessionStore } from '../../../../src/state/sessionStore';
@@ -28,6 +30,20 @@ import { useSessionStore } from '../../../../src/state/sessionStore';
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
+
+function DispatcherJobDetailRoute({ jobId }: { jobId: string }): React.ReactNode {
+  const router = useRouter();
+  const deps = useDispatcherJobDetail(jobId, () => router.back());
+  // The frame's ground, top edge only — like every other screen with a
+  // navy bar: the bar runs to the status bar and the bottom inset
+  // belongs to the shell that draws the tab bar. Without this wrapper
+  // the app bar rendered UNDER the status bar's clock and battery.
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
+      <DispatcherJobDetailScreen {...deps} />
+    </SafeAreaView>
+  );
+}
 
 function OwnerJobDetailRoute({ jobId }: { jobId: string }): React.ReactNode {
   const card = useOwnerJobCard(jobId);
@@ -65,6 +81,13 @@ export default function Screen() {
 
   if (actor !== null && actor.role === 'owner' && jobId !== undefined) {
     return <OwnerJobDetailRoute jobId={jobId} />;
+  }
+
+  // The dispatcher's own job page (2026-09-17): read-only, money-free by
+  // shape. Every tap that should show one job — a needs-attention card, a
+  // Job Logs row — used to land on the placeholder below.
+  if (actor !== null && actor.role === 'dispatcher' && jobId !== undefined) {
+    return <DispatcherJobDetailRoute jobId={jobId} />;
   }
 
   const view = jobId === undefined || deps === null ? null : (deps.views.find((v) => v.job.id === jobId) ?? null);

@@ -55,7 +55,7 @@ import Animated from 'react-native-reanimated';
 
 import { SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { TechnicianLoadRow } from '../../components/domain/TechnicianLoadRow';
-import { Banner, Button, DatePicker, Sheet, TextField } from '../../components/ui';
+import { Banner, Button, CalendarGrid, DatePicker, Sheet, TextField } from '../../components/ui';
 import { haptic } from '../../components/ui/haptics';
 import { useArrival } from '../../components/ui/motion';
 import { textStyle } from '../../fonts/textStyle';
@@ -82,7 +82,7 @@ export const DISPATCH_OFFLINE_MESSAGE = 'No connection. This screen is not live.
 export type AssignmentChoice = { kind: 'unset' } | { kind: 'tech'; id: string } | { kind: 'unassigned' };
 
 /** Which option sheet is open — one at a time, like D2's filter bar. */
-type SheetKey = 'unit' | 'service' | 'time' | null;
+type SheetKey = 'unit' | 'service' | 'time' | 'date' | null;
 
 export interface DispatchJobDeps {
   offline: boolean;
@@ -492,7 +492,12 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
           <Text style={styles.fieldLabel}>Schedule</Text>
           <View style={styles.scheduleRow}>
             <View style={styles.scheduleDate}>
-              <DatePicker label="Day" value={scheduledDate} onChange={setScheduledDate} testID="dispatch-date" />
+              {/* `DatePicker` is a field with a trigger and no choosing UI
+                  of its own — its tap used to set a placeholder date, so
+                  the day could not be chosen at all (found while wiring
+                  the dispatcher's reschedule sheet, 2026-09-17). The day
+                  is picked from the sheet below, like the time. */}
+              <DatePicker label="Day" value={scheduledDate} onChange={() => setSheet('date')} testID="dispatch-date" />
             </View>
             <View style={styles.scheduleTime}>
               <Text style={styles.fieldLabel}>Time</Text>
@@ -590,6 +595,37 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
           ))}
         </Sheet>
       ) : null}
+      {sheet === 'date' ? (
+        <Sheet visible title="Which day" onDismiss={() => setSheet(null)} testID="dispatch-date-sheet">
+          {/* The same month calendar the reschedule sheet uses — one day
+              picker in the console, not two. Choosing a day closes the
+              sheet; "No day" stays, because a job may be raised undated. */}
+          <CalendarGrid
+            value={scheduledDate}
+            todayIso={deps.todayIso}
+            onSelect={(iso) => {
+              haptic('pickerSelect');
+              setScheduledDate(iso);
+              setSheet(null);
+            }}
+            testID="dispatch-date-calendar"
+          />
+          <Pressable
+            testID="date-option-none"
+            accessibilityRole="button"
+            accessibilityState={{ selected: scheduledDate === null }}
+            onPress={() => {
+              haptic('pickerSelect');
+              setScheduledDate(null);
+              setSheet(null);
+            }}
+            style={styles.optionRow}
+          >
+            <Text style={scheduledDate === null ? styles.optionLabelSelected : styles.optionLabel}>No day</Text>
+          </Pressable>
+        </Sheet>
+      ) : null}
+
       {sheet === 'time' ? (
         <Sheet visible title="When" onDismiss={() => setSheet(null)} testID="dispatch-time-sheet">
           {TIME_SLOTS.map((slot) => (
