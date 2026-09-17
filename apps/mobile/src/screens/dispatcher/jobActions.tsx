@@ -168,6 +168,11 @@ export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
       }
     >
       <SectionHeader label="New slot" icon="calendar" tint={COLORS.accent} />
+      {/* The slot's three controls are one block with their own rhythm:
+          the sheet's body stacks children flush, so a day field, the
+          button that changes it and the list it opens would otherwise
+          sit welded together (reported on the handset, 2026-09-17). */}
+      <View style={styles.slotBlock}>
       {/* The field shows the choice; the list below makes it. `DatePicker`
           is a trigger with no choosing UI (its tap sets a placeholder),
           so the day is picked from days — today first, every one legal. */}
@@ -219,6 +224,7 @@ export function RescheduleSheet(props: RescheduleSheetProps): React.ReactNode {
             testID="dispatch-reschedule-time"
           />
         </View>
+      </View>
       </View>
       {/* The sentence the dispatcher reads back to the customer — §T5's
           confirmation, in the console's words. */}
@@ -385,6 +391,8 @@ const styles = StyleSheet.create({
     backgroundColor: alpha(COLORS.accent, TINT.chip),
   },
   currentChip: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  /** The slot controls, spaced as one block (see the note at the call site). */
+  slotBlock: { alignSelf: 'stretch', gap: SPACE[3] },
   scheduleRow: { flexDirection: 'row', gap: SPACE[3], alignItems: 'flex-start' },
   dayList: {
     alignSelf: 'stretch',
@@ -408,7 +416,7 @@ const styles = StyleSheet.create({
     borderColor: alpha(COLORS.accent, TINT.chipLine),
     backgroundColor: alpha(COLORS.accent, TINT.chip),
   },
-  confirmLine: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary, marginTop: SPACE[2] },
+  confirmLine: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary, marginTop: SPACE[4] },
   reasons: { alignSelf: 'stretch', gap: SPACE[2] },
   reasonRow: {
     minHeight: TAP.min,
