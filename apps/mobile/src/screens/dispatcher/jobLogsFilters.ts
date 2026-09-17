@@ -85,6 +85,33 @@ export function jobLogsFiltersToParams(filters: JobLogsFilters, query: string): 
   return params;
 }
 
+/**
+ * The patch `router.setParams` should be given: the codec's delta with
+ * every key it left out spelled `undefined`.
+ *
+ * `setParams` MERGES into the params already in the URL, and the codec
+ * above omits a filter that is back at its default — so the old value
+ * stayed in the URL and the screen read it straight back. Clear was a
+ * dead button: `?date=all` survived every press (found on the handset,
+ * 2026-09-17). Naming the defaults `undefined` makes the merge DELETE
+ * them, which keeps both halves: the resting URL stays clean, and a
+ * filter can come off again.
+ *
+ * (A `router.replace` of the rebuilt href fixes Clear the same way, but
+ * it re-resolves the route on every keystroke and the search field — a
+ * controlled input fed by the params — silently drops characters. A/B on
+ * the handset: `replace` typed "A" of "AMC", `setParams` typed all of it.)
+ */
+export function jobLogsParamsPatch(filters: JobLogsFilters, query: string): Record<string, string | undefined> {
+  const delta = jobLogsFiltersToParams(filters, query);
+  return {
+    date: delta.date,
+    tech: delta.tech,
+    status: delta.status,
+    [JOB_LOGS_SEARCH_PARAM]: delta[JOB_LOGS_SEARCH_PARAM],
+  };
+}
+
 const DATE_VALUES: readonly JobLogsDateFilter[] = ['today', 'tomorrow', 'week', 'all'];
 const STATUS_VALUES: readonly JobLogsStatusFilter[] = ['any', 'overdue', ...JOB_STATUSES];
 
@@ -179,7 +206,9 @@ const DATE_LABELS: Record<JobLogsDateFilter, string> = {
   all: 'All days',
 };
 
-const STATUS_LABELS: Record<JobLogsStatusFilter, string> = {
+/** The status words, one map for the chip label and the screen's sheet —
+ * they were two verbatim copies in one directory until 2026-09-17. */
+export const STATUS_LABELS: Record<JobLogsStatusFilter, string> = {
   any: 'Any status',
   overdue: 'Overdue',
   unassigned: 'Unassigned',

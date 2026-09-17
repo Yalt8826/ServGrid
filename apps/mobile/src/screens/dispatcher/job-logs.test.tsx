@@ -47,6 +47,7 @@ import {
   DEFAULT_JOB_LOGS_FILTERS,
   jobLogsFiltersFromParams,
   jobLogsFiltersToParams,
+  jobLogsParamsPatch,
   type JobLogsFilters,
   type JobLogsJob,
 } from './jobLogsFilters';
@@ -204,6 +205,23 @@ describe('JobLogsScreen (§D2)', () => {
     expect(params).toEqual({ date: 'week', status: 'overdue', tech: TECH_A, q: 'JC-2627-00042' });
     const decoded = jobLogsFiltersFromParams(params);
     expect(jobLogsFiltersToParams(decoded.filters, decoded.query)).toEqual(params);
+
+    // What the hook WRITES is the delta with every omitted key named
+    // `undefined`: `setParams` merges, so a key left out kept its old
+    // value in the URL and Clear was a dead button (2026-09-17). Naming
+    // the defaults is what makes the merge delete them.
+    expect(jobLogsParamsPatch(set, 'JC-2627-00042')).toEqual({
+      date: 'week',
+      tech: TECH_A,
+      status: 'overdue',
+      q: 'JC-2627-00042',
+    });
+    expect(jobLogsParamsPatch(DEFAULT_JOB_LOGS_FILTERS, '')).toEqual({
+      date: undefined,
+      tech: undefined,
+      status: undefined,
+      q: undefined,
+    });
 
     // A remount with only the URL in hand re-opens the exact view:
     // search mode answers the link's own question, and the chips read

@@ -40,8 +40,8 @@ import { cachedFeatureFlags, setFeatureFlags } from '../../state/featureFlags';
 import { useIsOnline } from '../dispatcher/useDispatcherDashboard';
 import {
   jobLogsFiltersFromParams,
-  jobLogsFiltersToParams,
   jobLogsListQuery,
+  jobLogsParamsPatch,
   type JobLogsParams,
 } from '../dispatcher/jobLogsFilters';
 import type { JobLogsTechnician } from '../dispatcher/job-logs';
@@ -169,8 +169,9 @@ export function useOwnerJobs(): {
     filters,
     query,
     amendFlagOn,
-    onFiltersChange: (next) => router.setParams(jobLogsFiltersToParams(next, query)),
-    onQueryChange: (next) => router.setParams(jobLogsFiltersToParams(filters, next)),
+    // A patch that can delete — see `jobLogsParamsPatch`.
+    onFiltersChange: (next) => router.setParams(jobLogsParamsPatch(next, query)),
+    onQueryChange: (next) => router.setParams(jobLogsParamsPatch(filters, next)),
     onRetry: () => void list.refetch(),
     onLoadMore: () => {
       if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
