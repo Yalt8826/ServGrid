@@ -18,12 +18,15 @@
  * form with the customer already chosen (the AMC tab's own deep link),
  * and "Not now" files what was said and when to ring again.
  */
-import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import {
   alpha,
   COLORS,
+  DURATION,
+  EASING,
   FRAME,
   ICON,
   RADII,
@@ -40,6 +43,7 @@ import {
 } from '@servgrid/shared';
 import { Banner, Button, CalendarGrid, EmptyState, SectionHeader, Sheet, Skeleton, TextField, useDensity } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
+import { easing } from '../../components/ui/motion';
 import { haptic } from '../../components/ui/haptics';
 import { useSkeleton } from '../../components/ui/Skeleton';
 import { textStyle } from '../../fonts/textStyle';
@@ -174,12 +178,40 @@ function ServiceCallRow({
 
 // ── the screen ───────────────────────────────────────────────────────────
 
+type CallsTab = 'due' | 'pushed';
+
+const TABS: readonly { key: CallsTab; label: string }[] = [
+  { key: 'due', label: 'Due now' },
+  { key: 'pushed', label: 'Pushed back' },
+];
+
 export function ServiceCallsScreen(props: ServiceCallsScreenProps): React.ReactNode {
   const [pushing, setPushing] = useState<ServiceCall | null>(null);
+  // One list at a time (Yashas, 2026-09-17): the two answers to "who do I
+  // ring" are alternatives, not a page to scroll — the counts ride the
+  // tabs, so the other list's size is still one glance away.
+  const [active, setActive] = useState<CallsTab>('due');
   const loading = props.loading || (props.due === null && props.error === null);
   const showSkeleton = useSkeleton(loading);
   const due = props.due ?? [];
   const pushed = props.pushed ?? [];
+
+  // The accent underline slides between tabs (the Jobs screen's own
+  // motion): `base` 220ms, instant under reduced motion.
+  const { width } = useWindowDimensions();
+  const tabWidth = width / TABS.length;
+  const reducedMotion = useReducedMotion();
+  const underline = useSharedValue(0);
+  useEffect(() => {
+    underline.value = withTiming(TABS.findIndex((t) => t.key === active) * tabWidth, {
+      duration: reducedMotion ? DURATION.instant : DURATION.base,
+      easing: easing(EASING.standard),
+    });
+  }, [active, tabWidth, underline, reducedMotion]);
+  const underlineStyle = useAnimatedStyle(() => ({ transform: [{ translateX: underline.value }] }));
+
+  const countOf = (tab: CallsTab): number | null =>
+    tab === 'due' ? (props.due === null ? null : due.length) : props.pushed === null ? null : pushed.length;
 
   return (
     <View style={styles.screen} testID={props.testID ?? 'service-calls'}>
@@ -188,6 +220,35 @@ export function ServiceCallsScreen(props: ServiceCallsScreenProps): React.ReactN
           Service calls
         </Text>
         <Text style={styles.frameCaption}>Ups and batteries every six months — ring them when the six are up.</Text>
+        <View accessibilityRole="tablist" style={styles.tabs}>
+          <View style={styles.tabRow}>
+            {TABS.map((tab) => {
+              const selected = tab.key === active;
+              const count = countOf(tab.key);
+              return (
+                <Text
+                  key={tab.key}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected }}
+                  testID={`service-calls-tab-${tab.key}`}
+                  onPress={() => {
+                    haptic('pickerSelect');
+                    setActive(tab.key);
+                  }}
+                  style={[styles.tab, { width: tabWidth }, selected ? styles.tabOn : null]}
+                >
+                  {count === null ? tab.label : `${tab.label} · ${count}`}
+                </Text>
+              );
+            })}
+          </View>
+          <View style={styles.tabTrack}>
+            <Animated.View
+              testID="service-calls-underline"
+              style={[underlineStyle, styles.tabUnderline, { width: tabWidth }]}
+            />
+          </View>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -206,34 +267,28 @@ export function ServiceCallsScreen(props: ServiceCallsScreenProps): React.ReactN
           />
         ) : null}
 
-        <View style={styles.sectionFirst} testID="service-calls-due-section">
-          <SectionHeader label="Due now" icon="phone" tint={COLORS.accent} count={props.due === null ? undefined : due.length} />
-          {props.due === null ? (
-            showSkeleton ? <SectionSkeleton testID="service-calls-skeleton" /> : null
-          ) : due.length === 0 ? (
-            <EmptyState
-              message="Nobody is due a service call."
-              testID="service-calls-empty"
-            />
-          ) : (
-            due.map((call) => (
-              <ServiceCallRow
-                key={call.customerId}
-                call={call}
-                pushed={false}
-                disabled={props.saving}
-                onCall={() => void Linking.openURL(`tel:${call.phone}`)}
-                onAssign={() => props.onAssign(call.customerId)}
-                onPush={() => setPushing(call)}
-                testID={`service-call-${call.customerId}`}
-              />
-            ))
-          )}
-        </View>
-
-        <View style={styles.section} testID="service-calls-pushed-section">
-          <SectionHeader label="Pushed back" icon="clock" count={props.pushed === null ? undefined : pushed.length} />
-          {props.pushed === null ? (
+        {/* The tab names the list; no marker repeats it. */}
+        <View testID={active === 'due' ? 'service-calls-due-section' : 'service-calls-pushed-section'}>
+          {active === 'due' ? (
+            props.due === null ? (
+              showSkeleton ? <SectionSkeleton testID="service-calls-skeleton" /> : null
+            ) : due.length === 0 ? (
+              <EmptyState message="Nobody is due a service call." testID="service-calls-empty" />
+            ) : (
+              due.map((call) => (
+                <ServiceCallRow
+                  key={call.customerId}
+                  call={call}
+                  pushed={false}
+                  disabled={props.saving}
+                  onCall={() => void Linking.openURL(`tel:${call.phone}`)}
+                  onAssign={() => props.onAssign(call.customerId)}
+                  onPush={() => setPushing(call)}
+                  testID={`service-call-${call.customerId}`}
+                />
+              ))
+            )
+          ) : props.pushed === null ? (
             showSkeleton ? <SectionSkeleton testID="service-calls-pushed-skeleton" /> : null
           ) : pushed.length === 0 ? (
             <EmptyState message="Nobody has asked to be rung later." testID="service-calls-pushed-empty" />
@@ -420,12 +475,24 @@ const styles = StyleSheet.create({
   frameTitle: { ...textStyle('h1'), color: FRAME.text },
   frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
   content: { paddingHorizontal: SPACE[4], paddingBottom: SPACE[8], paddingTop: SPACE[2] },
-  section: { marginTop: SPACE[5] },
-  sectionFirst: { marginTop: SPACE[3] },
+  /** The two lists as tabs on the frame — the Jobs screen's own control. */
+  tabs: { alignSelf: 'stretch', marginTop: SPACE[2] },
+  tabRow: { flexDirection: 'row' },
+  tab: {
+    ...textStyle('label'),
+    color: FRAME.textMuted,
+    minHeight: TAP.min,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    lineHeight: TAP.min,
+  },
+  tabOn: { color: FRAME.text },
+  tabTrack: { height: 2, backgroundColor: FRAME.divider, alignSelf: 'stretch' },
+  tabUnderline: { height: 2, backgroundColor: COLORS.accent },
   /** One customer, one card: the rail carries how late the call is. */
   card: {
     flexDirection: 'row',
-    marginTop: SPACE[3],
+    marginTop: SPACE[1],
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
     borderRadius: RADII.control,

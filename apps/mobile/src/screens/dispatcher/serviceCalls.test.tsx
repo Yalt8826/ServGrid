@@ -135,6 +135,14 @@ describe('ServiceCallsScreen (§D7)', () => {
   it('shows who is due, how late they are, and who is coming back', async () => {
     const renderer = await create(<ServiceCallsScreen {...baseProps()} />);
 
+    // One list at a time (2026-09-17): the counts ride the tabs, so the
+    // other list's size is still a glance away.
+    expect(textOf(renderer, 'service-calls-tab-due')).toBe('Due now · 1');
+    expect(textOf(renderer, 'service-calls-tab-pushed')).toBe('Pushed back · 1');
+    expect(
+      (findID(renderer, 'service-calls-tab-due')!.props.accessibilityState as { selected: boolean }).selected,
+    ).toBe(true);
+
     const due = textOf(renderer, `service-call-${CUST_A}`);
     expect(due).toContain('Sunrise Apartments');
     expect(due).toContain('9845012345');
@@ -142,18 +150,26 @@ describe('ServiceCallsScreen (§D7)', () => {
     expect(due).toContain('Last service 3 Mar 2026');
     expect(due).toContain('JC-2627-00044');
     expect(due).toContain('14 days overdue');
+    // …and the other list is not on screen at all.
+    expect(findID(renderer, `service-call-pushed-${CUST_B}`)).toBeUndefined();
 
+    await press(findID(renderer, 'service-calls-tab-pushed')!);
     const pushed = textOf(renderer, `service-call-pushed-${CUST_B}`);
     expect(pushed).toContain('Nandi Motors');
     expect(pushed).toContain('Back 15 Dec 2026');
     expect(pushed).toContain('Asked for December — Dispatcher Test');
     // A promise is not a debt: no overdue wording on a pushed row.
     expect(pushed).not.toContain('overdue');
+    expect(findID(renderer, `service-call-${CUST_A}`)).toBeUndefined();
+    expect(findID(renderer, 'service-calls-underline')).toBeDefined();
   });
 
   it('states an empty list as good news, and says nothing is pushed when nothing is', async () => {
     const renderer = await create(<ServiceCallsScreen {...baseProps({ due: [], pushed: [] })} />);
     expect(textOf(renderer, 'service-calls-empty')).toBe('Nobody is due a service call.');
+    // An empty tab says its count too — zero is information.
+    expect(textOf(renderer, 'service-calls-tab-due')).toBe('Due now · 0');
+    await press(findID(renderer, 'service-calls-tab-pushed')!);
     expect(textOf(renderer, 'service-calls-pushed-empty')).toBe('Nobody has asked to be rung later.');
   });
 
