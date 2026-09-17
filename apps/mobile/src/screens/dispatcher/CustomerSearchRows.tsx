@@ -5,9 +5,11 @@
  * area under it. The AMC form passes its own testID prefix; the dispatch
  * form's prefix keeps its `dispatch-customer-result-*` testIDs verbatim.
  */
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { useDensity } from '../../components/ui';
 import { haptic } from '../../components/ui/haptics';
 import { textStyle } from '../../fonts/textStyle';
 import type { DispatchCustomerOption } from './dispatchForm';
@@ -24,6 +26,10 @@ export interface CustomerSearchRowsProps {
 }
 
 export function CustomerSearchRows({ results, onSelect, testIDPrefix, disabled }: CustomerSearchRowsProps): React.ReactNode {
+  // The rows are shared with the AMC form; the type follows the density
+  // they are rendered in (console 15, desk 14), like every primitive.
+  const density = useDensity();
+  const name = useMemo(() => [styles.resultName, textStyle('bodyStrong', density)], [density]);
   return (
     <View style={styles.results}>
       {results.map((customer) => (
@@ -39,7 +45,7 @@ export function CustomerSearchRows({ results, onSelect, testIDPrefix, disabled }
           }}
           style={styles.resultRow}
         >
-          <Text numberOfLines={1} style={styles.resultName}>
+          <Text numberOfLines={1} style={name}>
             {customer.name}
           </Text>
           <Text numberOfLines={1} style={styles.resultMeta}>
@@ -53,15 +59,20 @@ export function CustomerSearchRows({ results, onSelect, testIDPrefix, disabled }
 }
 
 const styles = StyleSheet.create({
-  results: { marginTop: SPACE[1], borderWidth: 1, borderColor: SEMANTIC.line.default, borderRadius: 4 },
+  results: {
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
+  },
   resultRow: {
     minHeight: 56,
     justifyContent: 'center',
     paddingHorizontal: SPACE[3],
-    borderTopWidth: 1,
-    borderTopColor: SEMANTIC.line.default,
-    backgroundColor: SEMANTIC.bg.raised,
+    borderBottomWidth: 1,
+    borderBottomColor: SEMANTIC.line.default,
   },
-  resultName: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
+  resultName: { color: SEMANTIC.text.primary },
   resultMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
 });
