@@ -15,7 +15,6 @@
  *   default** — validation refuses a submit where the dispatcher never
  *   chose: neither a technician nor the explicit unassigned option.
  */
-import type { TechnicianHealthState } from '../../components/domain/TechnicianLoadRow';
 
 /** One customer the search answered — the two-line row's content. */
 export interface DispatchCustomerOption {
@@ -38,12 +37,12 @@ export interface DispatchServiceOption {
   name: string;
 }
 
-/** One roster row for `TechnicianPicker` — load plus tracking health. */
+/** One roster row for `TechnicianPicker` — the load comparison only
+ * (owner, 2026-09-17: no tracking state reaches the dispatcher). */
 export interface DispatchTechnician {
   employeeId: string;
   name: string;
   openTotal: number;
-  health: TechnicianHealthState | null;
 }
 
 export type DispatchPriority = 'low' | 'normal' | 'high' | 'urgent';

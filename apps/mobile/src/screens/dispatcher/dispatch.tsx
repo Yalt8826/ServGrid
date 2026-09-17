@@ -163,7 +163,6 @@ export function TechnicianPicker({
               name={technician.name}
               load={technician.openTotal}
               maxLoad={busiestLoad}
-              health={technician.health}
               index={index}
               testID={`dispatch-assign-load-${technician.employeeId}`}
             />
@@ -304,7 +303,12 @@ export function DispatchJobScreen(deps: DispatchJobDeps): React.ReactNode {
 
   return (
     <View style={styles.screen} testID="dispatch-screen">
-      <ScrollView contentContainerStyle={styles.content}>        <Text style={styles.title}>Dispatch Job</Text>
+      {/* No stray whitespace on this line: a same-line gap between the
+          ScrollView's opening tag and its first child renders as a string
+          child of a View — RN's "Text strings must be rendered within a
+          <Text> component" (found on device, 2026-09-17). */}
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.title}>Dispatch Job</Text>
 
         {deps.offline ? (
           <Banner tone="danger" message={DISPATCH_OFFLINE_MESSAGE} testID="dispatch-offline-banner" />

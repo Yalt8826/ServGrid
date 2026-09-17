@@ -1,9 +1,12 @@
 /**
  * `TechnicianLoadRow` (03-COMPONENTS.md, UI/plan-2/05-DISPATCHER.md §D1).
  * One row: name (`body`) · load count (`mono`, tabular) · **inline load
- * bar** · availability — with the tracking-health warning rendered inline
- * when his device went quiet, because the dispatcher is the person who
- * will actually notice.
+ * bar**. The tracking-health column is GONE (owner, 2026-09-17): the
+ * dispatcher does not consume the technicians' location-reporting state —
+ * not as a warning, not as an "active" tick — so this row carries the
+ * load comparison and nothing else. The row is a plain display unless a
+ * caller wraps it in a press; the dashboard wraps it to open a
+ * technician's day.
  *
  * This is the SHARED half of the assignment picker (`TechnicianPicker`,
  * T2.9) and the dashboard's TECHNICIAN LOAD list (T2.7): one component,
@@ -18,11 +21,10 @@
  * the decision. `draw=false` renders the final bar (past the first
  * focus, and under the reduced-motion seam).
  *
- * The health column reads `location.health` ONLY (PLAN-BACKEND.md §5):
- * a health value and the last-ping age. No coordinate exists in this
- * component's props, and none may — the dispatcher's tree is checked
- * for coordinates in dashboard.test.tsx and in the money-leak suite's
- * roster walk.
+ * The coordinate rule still holds, and is stronger now: no tracking
+ * state, no last-ping age, and no coordinate exists in this component's
+ * props, and none may — the dispatcher's tree is checked for coordinates
+ * in dashboard.test.tsx and in the money-leak suite's roster walk.
  */
 import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -31,23 +33,12 @@ import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } fro
 import { EASING, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { easing } from '../ui/motion';
-import { useDensity } from '../ui/DensityProvider';/** The `v_employee_tracking_health` health values, as the wire spells them. */
-export type TrackingHealthValue = 'not_tracked' | 'permission_missing' | 'never_reported' | 'stale' | 'active';
-
-export interface TechnicianHealthState {
-  health: TrackingHealthValue;
-  /** Age of the last ping in minutes; null when he has never reported. */
-  minutesSince: number | null;
-}
-
-export interface TechnicianLoadRowProps {
+import { useDensity } from '../ui/DensityProvider';export interface TechnicianLoadRowProps {
   name: string;
   /** The count the mono figure and the bar both show (open jobs). */
   load: number;
   /** The busiest load in the list — the bar is a fraction of it. */
   maxLoad: number;
-  /** His tracking health, when the roster read answered; null = unknown. */
-  health?: TechnicianHealthState | null;
   /** Draw the bar on focus (staggered by `index`); false = already drawn. */
   draw?: boolean;
   index?: number;
@@ -58,20 +49,10 @@ const DRAW_MS = 260;
 const STAGGER_MS = 30;
 const BAR_HEIGHT = 4;
 
-/** The last-ping age in words — the `location.health` read's whole point. */
-function ageLabel(minutesSince: number | null): string {
-  if (minutesSince === null) return 'never reported';
-  if (minutesSince < 60) return `last ping ${minutesSince}m ago`;
-  const hours = Math.floor(minutesSince / 60);
-  const minutes = minutesSince % 60;
-  return minutes === 0 ? `last ping ${hours}h ago` : `last ping ${hours}h ${minutes}m ago`;
-}
-
 export function TechnicianLoadRow({
   name,
   load,
   maxLoad,
-  health = null,
   draw = true,
   index = 0,
   testID,
@@ -90,10 +71,6 @@ export function TechnicianLoadRow({
   const fraction = maxLoad > 0 ? Math.min(1, load / maxLoad) : 0;
   const barStyle = useAnimatedStyle(() => ({ width: `${Math.round(progress.value * fraction * 100)}%` }));
 
-  const stale = health !== null && (health.health === 'stale' || health.health === 'never_reported');
-  const blocked = health !== null && health.health === 'permission_missing';
-  const warns = stale || blocked;
-
   return (
     <View testID={testID} style={styles.row}>
       {/* 96 is the phone's column; on the desk a full name fits and the
@@ -102,19 +79,6 @@ export function TechnicianLoadRow({
       <Text style={[textStyle('mono'), styles.count]}>{load}</Text>
       <View style={styles.track}>
         <Animated.View testID={testID === undefined ? undefined : `${testID}-bar`} style={[styles.fill, barStyle]} />
-      </View>
-      <View style={styles.state}>
-        {health === undefined || health === null ? null : warns ? (
-          <Text testID={testID === undefined ? undefined : `${testID}-warning`} style={[textStyle('caption'), styles.warningText]}>
-            {blocked ? '⚠ tracking off' : '⚠ no ping'}
-            {'\n'}
-            {blocked ? 'he cannot report' : ageLabel(health.minutesSince)}
-          </Text>
-        ) : (
-          <Text testID={testID === undefined ? undefined : `${testID}-state`} style={[textStyle('caption'), styles.stateText]}>
-            {health.health === 'not_tracked' ? 'not tracked' : 'active'}
-          </Text>
-        )}
       </View>
     </View>
   );
@@ -150,15 +114,5 @@ const styles = StyleSheet.create({
   fill: {
     height: BAR_HEIGHT,
     backgroundColor: SEMANTIC.text.secondary,
-  },
-  state: {
-    width: 120,
-    alignItems: 'flex-start',
-  },
-  stateText: {
-    color: SEMANTIC.text.secondary,
-  },
-  warningText: {
-    color: SEMANTIC.feedback.warning,
   },
 });

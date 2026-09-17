@@ -10,9 +10,11 @@
  * more. The query cache is memory only, and a lost connection covers the
  * stack without unmounting it (PLAN-FRONTEND.md §5).
  */
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
+import { AppState } from 'react-native';
 import { NoConnectionGate } from '../../src/components/NoConnectionGate';
 import { NavShell } from '../../src/navigation/NavShell';
 import { RoleGate } from '../../src/navigation/RoleGate';
@@ -23,6 +25,16 @@ import { useSessionStore } from '../../src/state/sessionStore';
 function QueryProvider({ children }: { children: ReactNode }) {
   const actor = useSessionStore((s) => s.actor);
   const client = actor !== null ? configureQueryClient(actor.role) : null;
+  // Foreground → refocus (2026-09-17): the app's queries follow the app
+  // state, so a resume re-reads the server and every screen's clock
+  // (greetings, date labels, "overdue N days") recomputes against now.
+  // Without this, a screen mounted since yesterday kept yesterday's date.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      focusManager.setFocused(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
   if (client === null) return <>{children}</>;
   return (
     <QueryClientProvider client={client}>
