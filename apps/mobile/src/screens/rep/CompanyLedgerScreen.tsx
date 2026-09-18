@@ -11,18 +11,26 @@
  * balance is the server's (`CompanyLedgerSchema.runningBalance`): the
  * rep's phone and the owner's desktop cannot disagree about money.
  *
+ * **A row opens the document it names** (2026-09-18): a sale's page with
+ * its product lines, a payment's with how it was collected. Until then
+ * the rep could walk into an account's history and go no further — the
+ * owner's desk has opened these from the same ledger all along, through
+ * `SaleItemsSheet` and `PaymentProofSheet`, and the phone's copy of the
+ * row simply never got the press.
+ *
  * Actions: *Record payment* (primary) · *New sale* (secondary). **No
  * reassign-owner control** — only the owner can move an account.
  *
  * Pure UI over injected deps; `useRepCompanyLedger` owns the reads.
  */
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { Company, CompanyLedger } from '@servgrid/shared';
-import { FRAME, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
+import { FRAME, ICON, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button, SectionHeader } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, ledgerAmountOf } from './money';
 import { RecordPaymentSheet, type RecordPaymentInput } from './PaymentsScreen';
@@ -42,6 +50,17 @@ export interface CompanyLedgerScreenProps {
   captureProof?: () => Promise<string | null>;
   onRecorded: () => void;
   onNewSale: (companyId: string) => void;
+  /**
+   * A ledger row opens what it names (2026-09-18): the sale's own page with
+   * its product lines, or the payment's. The owner's desk has done exactly
+   * this off this same ledger from the start — `SaleItemsSheet` and
+   * `PaymentProofSheet` hung on `ledger-row-…` — and the rep's copy of the
+   * row was never given it, so an account's documents were a dead end on
+   * the phone. Left `undefined` the rows stay inert, which is what keeps
+   * this screen usable without a router.
+   */
+  onOpenSale?: (saleId: string) => void;
+  onOpenPayment?: (paymentId: string) => void;
   /** The tappable phone (§S4) — the route owns the dialer (`Linking`). */
   onCallPhone?: (phone: string) => void;
   onRetry: () => void;
@@ -113,24 +132,43 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
           Nothing recorded yet.
         </Text>
       ) : (
-        props.ledger.entries.map((entry) => (
-          <View key={`${entry.kind}-${entry.id}`} style={styles.ledgerRow} testID={`ledger-row-${entry.kind}-${entry.id}`}>
-            <Text style={styles.ledgerDate}>{formatDateEnIN(entry.date, nowYear)}</Text>
-            <View style={styles.ledgerMain}>
-              <Text style={styles.ledgerKind}>{entry.kind === 'sale' ? 'Sale' : `Payment${entry.mode === null ? '' : ` ${entry.mode}`}`}</Text>
-              <Text style={styles.ledgerNumber}>{entry.number}</Text>
-              {entry.voided ? (
-                <Text style={styles.ledgerVoid} testID={`ledger-voided-${entry.id}`}>
-                  {`Voided${entry.voidReason === null ? '' : ` — ${entry.voidReason}`}`}
-                </Text>
-              ) : null}
-            </View>
-            <Text style={styles.ledgerAmount}>{ledgerAmountOf(entry.kind, entry.amount)}</Text>
-            <Text style={styles.ledgerRunning} testID={`ledger-running-${entry.kind}-${entry.id}`}>
-              {creditView(entry.runningBalance).text}
-            </Text>
-          </View>
-        ))
+        props.ledger.entries.map((entry) => {
+          // Tappable only when the route gave us somewhere to push — the
+          // `PaymentsScreen` guard, so a caller without a router (a test, the
+          // desk) renders the same rows with no dead affordance on them.
+          const open = entry.kind === 'sale' ? props.onOpenSale : props.onOpenPayment;
+          return (
+            <Pressable
+              key={`${entry.kind}-${entry.id}`}
+              accessibilityRole={open === undefined ? undefined : 'button'}
+              accessibilityLabel={open === undefined ? undefined : `Open ${entry.kind} ${entry.number}`}
+              onPress={open === undefined ? undefined : () => open(entry.id)}
+              style={styles.ledgerRow}
+              testID={`ledger-row-${entry.kind}-${entry.id}`}
+            >
+              <Text style={styles.ledgerDate}>{formatDateEnIN(entry.date, nowYear)}</Text>
+              <View style={styles.ledgerMain}>
+                <Text style={styles.ledgerKind}>{entry.kind === 'sale' ? 'Sale' : `Payment${entry.mode === null ? '' : ` ${entry.mode}`}`}</Text>
+                <Text style={styles.ledgerNumber}>{entry.number}</Text>
+                {entry.voided ? (
+                  <Text style={styles.ledgerVoid} testID={`ledger-voided-${entry.id}`}>
+                    {`Voided${entry.voidReason === null ? '' : ` — ${entry.voidReason}`}`}
+                  </Text>
+                ) : null}
+              </View>
+              <Text style={styles.ledgerAmount}>{ledgerAmountOf(entry.kind, entry.amount)}</Text>
+              <Text style={styles.ledgerRunning} testID={`ledger-running-${entry.kind}-${entry.id}`}>
+                {creditView(entry.runningBalance).text}
+              </Text>
+              {/* The chevron is the affordance, and it is drawn only when
+                  the row actually opens something: a browse-only ledger
+                  should not advertise a page that does not exist. */}
+              {open === undefined ? null : (
+                <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
+              )}
+            </Pressable>
+          );
+        })
       )}
 
       {sheetOpen && company !== null ? (

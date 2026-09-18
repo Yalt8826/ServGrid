@@ -58,6 +58,8 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
           payments.reload();
         }}
         onNewSale={(id) => router.push(`/sales/new?company=${id}`)}
+        onOpenSale={(saleId) => router.push(`/sales/${saleId}`)}
+        onOpenPayment={(paymentId) => router.push(`/payments/${paymentId}`)}
         onCallPhone={(phone) => void Linking.openURL(`tel:${phone}`)}
         onRetry={ledger.reload}
       />

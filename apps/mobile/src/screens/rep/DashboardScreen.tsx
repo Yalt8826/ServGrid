@@ -44,6 +44,14 @@ export interface RepDashboardScreenProps {
   companyNames: Record<string, string>;
   onNewSale: () => void;
   onOpenCompany: (companyId: string) => void;
+  /**
+   * A collected payment opens ITS OWN page (2026-09-18). Until then every
+   * card in the section called the same handler, so five different payments
+   * led to one list and the card that named a payment number could not show
+   * it.
+   */
+  onOpenPayment: (paymentId: string) => void;
+  /** The way to the full list, now that the cards no longer go there. */
   onOpenPayments: () => void;
   onRetry: () => void;
   testID?: string;
@@ -200,7 +208,24 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
       )}
 
       <View style={styles.section}>
-        <SectionHeader label="Recent payments" icon="wallet" />
+        {/* The section's own way to the whole list, since each card now
+            opens its own payment instead of the list. */}
+        <SectionHeader
+          label="Recent payments"
+          icon="wallet"
+          action={
+            <Pressable
+              accessibilityRole="button"
+              onPress={props.onOpenPayments}
+              hitSlop={8}
+              style={styles.seeAll}
+              testID="dashboard-payments-all"
+            >
+              <Text style={styles.seeAllText}>See all</Text>
+              <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
+            </Pressable>
+          }
+        />
       </View>
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-payments-off">
@@ -219,7 +244,8 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
           <Pressable
             key={row.id}
             accessibilityRole="button"
-            onPress={props.onOpenPayments}
+            accessibilityLabel={`Open payment ${row.paymentNumber}`}
+            onPress={() => props.onOpenPayment(row.id)}
             style={styles.card}
             testID={`dashboard-payment-${row.id}`}
           >
@@ -330,6 +356,10 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1, gap: 2 },
   /** A section's air below the frame and between the two lists. */
   section: { marginTop: SPACE[5] },
+  /** The section marker's right-hand door — a quiet word with the chevron
+   * that says it opens something, never a button that outranks the cards. */
+  seeAll: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  seeAllText: { ...textStyle('label'), color: SEMANTIC.text.secondary },
   /** The figure's icon tile, tinted with the figure's own ink. */
   figureMark: {
     width: 28,

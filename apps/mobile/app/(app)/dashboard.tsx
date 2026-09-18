@@ -81,6 +81,9 @@ function RepDashboardRoute(): React.ReactNode {
         companyNames={{}}
         onNewSale={() => router.push('/sales/new')}
         onOpenCompany={(companyId) => router.push(`/companies/${companyId}`)}
+        // Each collected payment opens its own page; the section's "See all"
+        // is what reaches the list now (2026-09-18).
+        onOpenPayment={(paymentId) => router.push(`/payments/${paymentId}`)}
         onOpenPayments={() => router.push('/payments')}
         onRetry={dashboard.reload}
       />

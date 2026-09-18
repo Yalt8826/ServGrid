@@ -3,6 +3,16 @@
  * money moved — number, company, amount, mode, the day and moment it was
  * collected, which sale it settled (or on-account), status and notes.
  * Pure over injected data; the route owns the reads.
+ *
+ * **The moment is pinned to IST rather than the handset's zone**
+ * (2026-09-18). It was `new Date(receivedAt).toLocaleString('en-IN')`,
+ * which is correct on a phone set to IST — so nothing on the walk was
+ * actually wrong — but it is the handset that decided, and every other
+ * instant in this app is rendered through an IST helper
+ * (`istTimeLabel`, `istDateKey`) precisely so a device in another zone
+ * cannot re-date the business's money. This page was the one place that
+ * left the question to the phone. The shape also becomes the app's own:
+ * a 24-hour clock and no seconds.
  */
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -10,6 +20,7 @@ import type { PaymentRecord } from '@servgrid/shared';
 import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { formatDateEnIN } from '../../components/ui';
+import { istDateKey, istTimeLabel } from '../technician/jobView';
 
 export const PAYMENT_DETAIL_MODE_LABEL: Record<PaymentRecord['mode'], string> = {
   cash: 'Cash',
@@ -23,6 +34,17 @@ export const PAYMENT_DETAIL_STATUS: Record<PaymentRecord['status'], { label: str
   collected: { label: 'Collected', color: SEMANTIC.feedback.success },
   void: { label: 'Void', color: SEMANTIC.feedback.danger },
 };
+
+/**
+ * `14 Sep, 22:26` — the IST day and clock of a collection, whatever zone
+ * the handset is in. The clock is 24-hour, the app's own time shape
+ * (`istTimeLabel`), so this page and the job cards read alike.
+ */
+export function collectedAtLabel(receivedAt: string): string {
+  const day = istDateKey(receivedAt);
+  const year = Number(day.slice(0, 4));
+  return `${formatDateEnIN(day, year)}, ${istTimeLabel(receivedAt)}`;
+}
 
 export interface PaymentDetailScreenProps {
   payment: PaymentRecord | null;
@@ -88,7 +110,11 @@ export function PaymentDetailScreen(props: PaymentDetailScreenProps): React.Reac
           value={props.againstSaleNumber ?? 'On account'}
           testID="payment-detail-against"
         />
-        <Row label="Collected at" value={new Date(payment.receivedAt).toLocaleString('en-IN')} testID="payment-detail-collected-at" />
+        <Row
+          label="Collected at"
+          value={collectedAtLabel(payment.receivedAt)}
+          testID="payment-detail-collected-at"
+        />
         {payment.referenceNo !== null ? <Row label="Reference" value={payment.referenceNo} /> : null}
       </View>
 

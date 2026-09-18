@@ -214,10 +214,19 @@ export function companiesRowsOf(
   });
 }
 
-/** The last activity day a company row shows (§S4), sale or payment. */
+/**
+ * The last activity day a company row shows (§S4), sale or payment.
+ *
+ * The payment side is turned into an IST day rather than sliced
+ * (2026-09-18): `lastPaymentAt` is a timestamptz and `.slice(0, 10)` took
+ * its **UTC** date, so a payment collected at 01:30 IST on the 7th (20:00
+ * UTC on the 6th) dated the account's last activity a day early — and a
+ * day earlier than the `business_date` the server derives for the same
+ * payment. `lastSaleDate` is already a business date and needs nothing.
+ */
 export function lastActivityOf(row: CompanyRow): string | null {
   const sale = row.lastSaleDate;
-  const payment = row.lastPaymentAt === null ? null : row.lastPaymentAt.slice(0, 10);
+  const payment = row.lastPaymentAt === null ? null : istBusinessDate(new Date(row.lastPaymentAt));
   if (sale === null) return payment;
   if (payment === null) return sale;
   return sale > payment ? sale : payment;
