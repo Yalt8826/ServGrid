@@ -16,12 +16,14 @@ import { act } from 'react';
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
 import { SalesScreen, SALE_STATUS_PILL } from './SalesScreen';
 import {
+  SaleFormScreen,
   formComplete,
   invoiceTotalOf,
+  isValidQuantity,
   itemsOf,
   lineTotalOf,
   nextLineKey,
-  SaleFormScreen,
+  quantityValueOf,
   type SaleFormLine,
 } from './SaleFormScreen';
 import { dayLabelFor, filterSalesByDay, salesDaySections, sortSalesRows, type SaleRow } from './model';
@@ -187,15 +189,27 @@ describe('SaleFormScreen — create (§S2)', () => {
     expect(invoiceTotalOf([line(), line({ quantity: '1', unitPrice: '1000' })], '10')).toBe('16020');
     expect(invoiceTotalOf([line()], '')).toBe('16800');
     expect(lineTotalOf('1', '4250.50')).toBe('4250.50');
-    expect(lineTotalOf('', '8400')).toBe('0');
+    // A blank quantity is the placeholder's 1 (2026-09-18: the qty field
+    // opens empty showing a grey 1, so typing overwrites the suggestion
+    // instead of the rep having to delete it first).
+    expect(lineTotalOf('', '8400')).toBe('8400');
+    expect(quantityValueOf('')).toBe(1);
+    expect(quantityValueOf('2.5')).toBe(2.5);
+    expect(isValidQuantity('')).toBe(true);
+    // …but zero is still not a line: no units is a line to remove.
+    expect(isValidQuantity('0')).toBe(false);
 
     const lines = [line(), line({ productId: null, productName: 'Installation', productSku: null, unitPrice: '500' })];
     expect(lineTotalOf('2', '8400') === '16800' && lineTotalOf('1', '500') === '500').toBe(true);
     expect(itemsOf(lines)).toHaveLength(2);
-    // An incomplete line blocks the form; adding a complete one unblocks.
-    expect(formComplete(COMPANY_ID, [line({ quantity: '' })])).toBe(false);
+    // A blank quantity no longer blocks the form — it IS one unit — while a
+    // zero or a missing product still does.
+    expect(formComplete(COMPANY_ID, [line({ quantity: '' })])).toBe(true);
+    expect(formComplete(COMPANY_ID, [line({ quantity: '0' })])).toBe(false);
     expect(formComplete(COMPANY_ID, lines)).toBe(true);
     expect(formComplete(null, lines)).toBe(false);
+    // The payload carries the resolved quantity, never a blank string.
+    expect(itemsOf([line({ quantity: '' })])[0]!.quantity).toBe(1);
   });
 
   it('the sale date can actually be moved — the tappable field was a stub', async () => {

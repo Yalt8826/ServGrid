@@ -32,6 +32,13 @@ export interface TextFieldProps {
   loading?: boolean;
   secureTextEntry?: boolean;
   /**
+   * Which keyboard to raise (2026-09-18, Yashas: the discount and the
+   * quantity "should open the number keyboard only"). `numeric` is the
+   * number pad WITH a decimal point — a quantity can be 1.5 and a discount
+   * 3.5%, so `number-pad` would refuse legitimate input.
+   */
+  keyboardType?: 'default' | 'numeric' | 'number-pad' | 'decimal-pad' | 'email-address' | 'phone-pad';
+  /**
    * Multiline input (the complete sheet's Work done field, §T4: three
    * rows). `minHeight` only — the field grows with the text, so 200%
    * dynamic type wraps instead of clipping.
@@ -59,6 +66,7 @@ export function TextField({
   disabled = false,
   loading = false,
   secureTextEntry = false,
+  keyboardType,
   multiline = false,
   rows,
   trailing,
@@ -97,6 +105,7 @@ export function TextField({
           placeholder={placeholder}
           placeholderTextColor={SEMANTIC.text.placeholder}
           secureTextEntry={secureTextEntry}
+          keyboardType={keyboardType}
           multiline={multiline}
           numberOfLines={multiline ? rows : undefined}
           textAlignVertical={multiline ? 'top' : undefined}
