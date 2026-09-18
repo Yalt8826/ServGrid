@@ -6,7 +6,8 @@
  * Sort (§T2): Today by `scheduled_for` ascending, **overdue first** (and
  * yesterday's unfinished carry-over rides in Today — work he must do
  * today is today's); Completed newest first, dated by the server's
- * `closedAt`.
+ * `closedAt` and **holding today's completions only** (Yashas,
+ * 2026-09-19 — it was yesterday-and-today until then).
  *
  * **A search field appears only when the tab holds more than 12 jobs** —
  * a technician with six does not need search, and an always-present
