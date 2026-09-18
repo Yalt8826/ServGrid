@@ -55,8 +55,8 @@ import {
   partLineOf,
   payloadOf,
   submitBlockerOf,
+  sumServiceCharges,
   warrantyConfirmMessageOf,
-  withSiteFix,
   type CompleteSheetPayload,
   type PartProduct,
 } from './completeSheet';
@@ -484,8 +484,9 @@ describe('CompleteSheet (§T4)', () => {
     expect(banner, 'the refusal is shown').toBeDefined();
     expect(allText(banner!).join(' ')).toContain('This job was cancelled by the office at 14:32.');
     // Everything typed survives the refusal — including the service he
-    // chose, which is the sheet's first answer.
-    expect(allText(findByTestID(toJson(refusedRenderer), 'complete-service-trigger') ?? null).join(' ')).toContain(
+    // chose, which is the sheet's first answer: its row still stands.
+    expect(findByTestID(toJson(refusedRenderer), `complete-service-row-${SERVICE_SWAP.id}`)).toBeDefined();
+    expect(allText(findByTestID(toJson(refusedRenderer), `complete-service-row-${SERVICE_SWAP.id}`)!).join(' ')).toContain(
       SERVICE_SWAP.name,
     );
   });
@@ -700,10 +701,10 @@ describe('CompleteSheet — an AMC job opens on Free under AMC', () => {
     const amc = amcView();
     const base = { view: amc, discountAmount: '', discountReason: '', lines: [], customerConfirmed: false, now: NOW, completedAt: '2026-09-11T10:00:00.000Z' };
     const freeBody = JSON.stringify(
-      payloadOf({ ...base, workSummary: SERVICE_CHECK.name, serviceId: SERVICE_CHECK.id, amount: '', selectedMode: 'cash', amcChoice: 'free' }),
+      payloadOf({ ...base, workSummary: SERVICE_CHECK.name, serviceIds: [SERVICE_CHECK.id], amount: '', selectedMode: 'cash', amcChoice: 'free', siteFix: null }),
     );
     const chargeBody = JSON.stringify(
-      payloadOf({ ...base, workSummary: SERVICE_CHECK.name, serviceId: SERVICE_CHECK.id, amount: '1500', selectedMode: 'upi', amcChoice: 'charge' }),
+      payloadOf({ ...base, workSummary: SERVICE_CHECK.name, serviceIds: [SERVICE_CHECK.id], amount: '1500', selectedMode: 'upi', amcChoice: 'charge', siteFix: null }),
     );
     expect(freeBody).not.toBe(chargeBody);
 
@@ -882,9 +883,9 @@ describe('CompleteSheet — Done when (§T4)', () => {
 
     // Submit blockers are validation facts only — no network-shaped
     // input exists to disable submit for a network reason (§T4 Never).
-    const valid = { serviceId: SERVICE_SWAP.id, amount: '', lines: [] };
+    const valid = { serviceCount: 1, amount: '', lines: [] };
     expect(submitBlockerOf(valid)).toBeNull();
-    expect(submitBlockerOf({ ...valid, serviceId: null })).toBe('Choose the service you did.');
+    expect(submitBlockerOf({ ...valid, serviceCount: 0 })).toBe('Choose the service you did.');
     // No discount rule lives here any more: the sheet cannot set one, so a
     // blocker for it would be a rule about an unreachable field.
 
@@ -893,7 +894,7 @@ describe('CompleteSheet — Done when (§T4)', () => {
     const payload = payloadOf({
       view: viewOf(),
       workSummary: SERVICE_SWAP.name,
-      serviceId: SERVICE_SWAP.id,
+      serviceIds: [SERVICE_SWAP.id],
       amount: '500',
       selectedMode: 'upi',
       amcChoice: 'charge',
@@ -901,6 +902,7 @@ describe('CompleteSheet — Done when (§T4)', () => {
       customerConfirmed: true,
       now: NOW,
       completedAt: '2026-09-11T10:00:00.000Z',
+      siteFix: null,
     });
     expect(payload.collectionMode).toBe('upi');
     expect(payload.customerSigned).toBe(true);
@@ -912,7 +914,7 @@ describe('CompleteSheet — Done when (§T4)', () => {
     const freePayload = payloadOf({
       view: viewOf({ contract: { number: 'AMC-2627-00031', endDate: '2027-09-14' } }),
       workSummary: SERVICE_SWAP.name,
-      serviceId: SERVICE_SWAP.id,
+      serviceIds: [SERVICE_SWAP.id],
       amount: '500',
       selectedMode: 'upi',
       amcChoice: 'free',
@@ -920,6 +922,7 @@ describe('CompleteSheet — Done when (§T4)', () => {
       customerConfirmed: true,
       now: NOW,
       completedAt: '2026-09-11T10:00:00.000Z',
+      siteFix: null,
     });
     expect(freePayload.cost).toBeUndefined();
     expect(freePayload.discountAmount).toBeUndefined();
@@ -928,56 +931,122 @@ describe('CompleteSheet — Done when (§T4)', () => {
   });
 });
 
-describe('the on-site fix rides the completion, and only once (2026-09-17)', () => {
-  /**
-   * The owner asked that a technician's presence at a site leave a
-   * location behind. The server files it on the completion and makes it
-   * the customer's pin; the handset's only job is to attach ONE fix and
-   * keep it stable, because the completion is keyed by its body — a fix
-   * that moved between a first attempt and its retry would look like a
-   * new intent and could file the job twice.
-   */
-  const base: CompleteSheetPayload = {
-    completedAt: '2026-09-17T10:00:00.000Z',
-    workSummary: 'Serviced.',
-    serviceId: SERVICE_SWAP.id,
+describe('several services on one visit, and the customer-location question (2026-09-18)', () => {
+  const SERVICE_THIRD: ServiceOption = {
+    id: '01890a5e-s000-7000-8000-000000000003',
+    name: 'Site survey',
+    defaultCharge: '250.00',
   };
 
-  it('attaches both coordinates when the device gave a fix', () => {
-    const body = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
-    expect(body.latitude).toBe(12.9716);
-    expect(body.longitude).toBe(77.5946);
-    // Everything the sheet built survives untouched.
-    expect(body.workSummary).toBe('Serviced.');
-    expect(body.completedAt).toBe('2026-09-17T10:00:00.000Z');
+  function onSubmitMock(): ReturnType<typeof vi.fn> {
+    return vi.fn(async (_payload: CompleteSheetPayload) => {});
+  }
+
+  /** The fixture unit is in warranty, so a charged submit raises the one
+   * confirmation — a charged submit clears it before filing. */
+  async function submitCharged(renderer: Awaited<ReturnType<typeof create>>): Promise<void> {
+    await press(toJson(renderer), 'complete-submit');
+    if (findByTestID(toJson(renderer), 'complete-warranty') !== undefined) {
+      await press(toJson(renderer), 'complete-warranty-confirm');
+    }
+    await act(async () => {});
+  }
+
+  it('the amount is the chosen services\' charges summed; removing one re-fills it', async () => {
+    const onSubmit = onSubmitMock();
+    const deps = { ...baseDeps({ services: [SERVICE_SWAP, SERVICE_THIRD, SERVICE_CHECK] }), onSubmit };
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await chooseService(renderer, SERVICE_SWAP);
+    expect(inputOf(toJson(renderer), 'complete-amount').props.value).toBe('750');
+    await chooseService(renderer, SERVICE_THIRD);
+    // 750.00 + 250.00, summed — and both rows stand.
+    expect(findByTestID(toJson(renderer), `complete-service-row-${SERVICE_SWAP.id}`)).toBeDefined();
+    expect(findByTestID(toJson(renderer), `complete-service-row-${SERVICE_THIRD.id}`)).toBeDefined();
+    expect(inputOf(toJson(renderer), 'complete-amount').props.value).toBe('1,000');
+
+    // Removing one re-fills the sum from the ones that remain.
+    await press(toJson(renderer), `complete-service-remove-${SERVICE_SWAP.id}`);
+    expect(findByTestID(toJson(renderer), `complete-service-row-${SERVICE_SWAP.id}`)).toBeUndefined();
+    expect(inputOf(toJson(renderer), 'complete-amount').props.value).toBe('250');
+
+    // The submit carries both decisions: the ids in order, the summary
+    // naming them, the cost the sum.
+    await chooseService(renderer, SERVICE_SWAP);
+    await submitCharged(renderer);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const payload = onSubmit.mock.calls[0]![0] as CompleteSheetPayload;
+    expect(payload.serviceIds).toEqual([SERVICE_THIRD.id, SERVICE_SWAP.id]);
+    expect(payload.workSummary).toBe('Site survey, Battery water top-up');
+    expect(payload.cost).toBe('1000');
   });
 
-  it('leaves the body byte-identical when there is no fix — so the key still replays', () => {
-    // No permission, no lock, or the web console: the completion files
-    // without a pin rather than failing, and its body is unchanged —
-    // which is what lets a retry reuse the pinned idempotency key.
-    const noFix = withSiteFix(base, null);
-    expect(noFix).toEqual(base);
-    expect(JSON.stringify(noFix)).toBe(JSON.stringify(base));
-    expect(noFix).not.toHaveProperty('latitude');
+  it('a service without a price contributes nothing to the sum, not a block', () => {
+    expect(sumServiceCharges(['750.00', null, '250.5'])).toBe('1000.50');
+    expect(sumServiceCharges([null, null])).toBe('0');
   });
 
-  it('the same fix twice produces the same key; a moved fix would not', () => {
-    // The property the route depends on, stated as the request it makes:
-    // one capture per sheet → one body across attempts → one intent.
-    // A writer that only has to be DISTINCT per intent — the assertion is
-    // about identity, not about sending.
-    let n = 0;
-    const writers = bodyKeyedWriters(() => ({
-      send: async () => undefined,
-      pendingKey: () => `k${++n}`,
-    }));
-    const first = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
-    const retry = withSiteFix(base, { latitude: 12.9716, longitude: 77.5946 });
-    const moved = withSiteFix(base, { latitude: 12.9720, longitude: 77.5950 });
+  it('asks about the customer\'s location only when none is stored, and Yes captures on the spot', async () => {
+    const capture = vi.fn(async () => ({ latitude: 12.9716, longitude: 77.5946 }));
+    const onSubmit = onSubmitMock();
+    // The fixture customer has no pin, so the question renders.
+    const deps = { ...baseDeps({ captureSiteFix: capture }), onSubmit };
+    const renderer = await create(<CompleteSheet {...deps} />);
+    expect(findByTestID(toJson(renderer), 'complete-site-yes')).toBeDefined();
+    expect(findByTestID(toJson(renderer), 'complete-site-no')).toBeDefined();
 
-    expect(writers.writerFor(JSON.stringify(first))).toBe(writers.writerFor(JSON.stringify(retry)));
-    expect(writers.writerFor(JSON.stringify(moved))).not.toBe(writers.writerFor(JSON.stringify(first)));
+    // Yes captures NOW — the answer is true at the doorstep, not at submit.
+    await press(toJson(renderer), 'complete-site-yes');
+    expect(capture).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    expect(allText(findByTestID(toJson(renderer), 'complete-site-note')!).join(' ')).toContain('Location captured');
+
+    // And the pin rides the completion.
+    await chooseService(renderer, SERVICE_SWAP);
+    await submitCharged(renderer);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const payload = onSubmit.mock.calls[0]![0] as CompleteSheetPayload;
+    expect(payload.latitude).toBe(12.9716);
+    expect(payload.longitude).toBe(77.5946);
+  });
+
+  it('Not here files the completion without a pin', async () => {
+    const capture = vi.fn(async () => ({ latitude: 12.9716, longitude: 77.5946 }));
+    const onSubmit = onSubmitMock();
+    const deps = { ...baseDeps({ captureSiteFix: capture }), onSubmit };
+    const renderer = await create(<CompleteSheet {...deps} />);
+    await press(toJson(renderer), 'complete-site-no');
+    await act(async () => {});
+    expect(allText(findByTestID(toJson(renderer), 'complete-site-note')!).join(' ')).toContain(
+      'No location will be saved.',
+    );
+    await chooseService(renderer, SERVICE_SWAP);
+    await submitCharged(renderer);
+    const payload = onSubmit.mock.calls[0]![0] as CompleteSheetPayload;
+    expect(capture).not.toHaveBeenCalled();
+    expect('latitude' in payload).toBe(false);
+  });
+
+  it('a customer who already has a location is never asked — a stored pin is the office\'s data', async () => {
+    const capture = vi.fn(async () => ({ latitude: 12.9716, longitude: 77.5946 }));
+    const onSubmit = onSubmitMock();
+    const deps = {
+      ...baseDeps({
+        view: viewOf({}, { coordinates: { latitude: 12.9, longitude: 77.5 } }),
+        captureSiteFix: capture,
+      }),
+      onSubmit,
+    };
+    const renderer = await create(<CompleteSheet {...deps} />);
+    const tree = toJson(renderer);
+    expect(findByTestID(tree, 'complete-site-yes')).toBeUndefined();
+    expect(findByTestID(tree, 'complete-site-no')).toBeUndefined();
+
+    // …and a completion on that customer sends no coordinates at all —
+    // nothing can overwrite the office's pin from the completion form.
+    await chooseService(renderer, SERVICE_SWAP);
+    await submitCharged(renderer);
+    const payload = onSubmit.mock.calls[0]![0] as CompleteSheetPayload;
+    expect('latitude' in payload).toBe(false);
   });
 });
 
@@ -993,9 +1062,9 @@ describe('CompleteSheet — the service, no discount, and photos', () => {
     const renderer = await create(<CompleteSheet {...deps} />);
     let tree = toJson(renderer);
 
-    // Nothing chosen yet: the first question is unanswered and the amount
-    // is empty, so there is nothing to send.
-    expect(allText(findByTestID(tree, 'complete-service') ?? null).join(' ')).toContain('Which service did you do?');
+    // Nothing chosen yet: the picker offers to add, the amount is empty,
+    // and there is nothing to send.
+    expect(allText(findByTestID(tree, 'complete-service') ?? null).join(' ')).toContain('Add a service');
     expect(isDisabled(tree)).toBe(true);
 
     await chooseService(renderer, SERVICE_SWAP);
@@ -1009,21 +1078,30 @@ describe('CompleteSheet — the service, no discount, and photos', () => {
     tree = toJson(renderer); // the press handlers close over the last render
     await trySubmit(tree);
     const payload = submittedPayload(deps);
-    expect(payload.serviceId).toBe(SERVICE_SWAP.id);
+    expect(payload.serviceIds).toEqual([SERVICE_SWAP.id]);
     expect(payload.workSummary).toBe(SERVICE_SWAP.name);
   });
 
-  it('leaves the amount he typed alone when the service carries no charge', async () => {
+  it('an unpriced service adds nothing to the sum; a new service starts a new baseline', async () => {
     const deps = baseDeps();
     const renderer = await create(<CompleteSheet {...deps} />);
-    await typeInto(toJson(renderer), 'complete-amount', '1200');
-    await chooseService(renderer, SERVICE_CHECK); // defaultCharge: null
-
-    const tree = toJson(renderer);
+    await chooseService(renderer, SERVICE_SWAP);
+    let tree = toJson(renderer);
     const amount = firstDescendantOfType(findByTestID(tree, 'complete-amount')!, 'TextInput');
-    // The field groups the digits it is handed (en-IN), so '1200' reads
-    // back as '1,200' — unchanged in substance, still his figure.
-    expect(amount!.props.value).toBe('1,200');
+    expect(amount!.props.value).toBe('750');
+
+    // His edit is the figure for THIS set of services: 750 negotiated to
+    // 1,200 reads back grouped (en-IN) and unchanged.
+    await typeInto(tree, 'complete-amount', '1200');
+    tree = toJson(renderer);
+    expect(firstDescendantOfType(findByTestID(tree, 'complete-amount')!, 'TextInput')!.props.value).toBe('1,200');
+
+    // Adding an unpriced service adds nothing to the sum — the baseline
+    // stays the chosen services' charges (750), so the visit's price is
+    // not silently reset by a row with no price at all.
+    await chooseService(renderer, SERVICE_CHECK); // defaultCharge: null
+    tree = toJson(renderer);
+    expect(firstDescendantOfType(findByTestID(tree, 'complete-amount')!, 'TextInput')!.props.value).toBe('750');
   });
 
   it('offers no discount anywhere on the sheet', async () => {

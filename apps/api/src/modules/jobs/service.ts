@@ -513,9 +513,10 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
     if (card === null) {
       throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
     }
-    const [eventRows, completion, partRows] = await Promise.all([
+    const [eventRows, completion, serviceRows, partRows] = await Promise.all([
       repo.listTimelineEvents(getPool(), jobId),
       repo.findCompletionDetail(getPool(), jobId),
+      repo.listCompletionServices(getPool(), jobId),
       repo.listCompletionParts(getPool(), jobId),
     ]);
     return {
@@ -526,7 +527,10 @@ export function createJobsService(notifyAssignment?: AssignmentNotifier) {
           : {
               completedAt: completion.completed_at.toISOString(),
               workSummary: completion.work_summary,
-              serviceName: completion.service_name,
+              services: serviceRows.map((service) => ({
+                name: service.name,
+                charge: service.charge,
+              })),
               cost: completion.cost,
               discountAmount: completion.discount_amount,
               discountReason: completion.discount_reason,
@@ -1227,9 +1231,10 @@ function mapDbRefusal(error: unknown): Error {
 export interface CompletionInput {
   completedAt: string;
   workSummary: string;
-  /** The catalogue service performed (migration 022). Validated here, so an
-   * unknown id is a readable 422 rather than a foreign-key error at insert. */
-  serviceId?: string;
+  /** The catalogue services performed (migration 022; several since 024).
+   * Validated here, so an unknown id is a readable 422 rather than a
+   * foreign-key error at insert. */
+  serviceIds?: string[];
   /** Absent means 0 — the warranty/prepaid shape is cost 0, discount 0, mode none (§3.4). */
   cost?: string;
   discountAmount?: string;
@@ -1273,20 +1278,24 @@ export async function completeJob(
   const paymentReference = input.paymentReference ?? null;
   const customerSigned = input.customerSigned ?? false;
 
-  // The service the work was — validated here, before the transaction, so
+  // The services the work was — validated here, before the transaction, so
   // an id the catalogue does not have is a 422 that names the problem
   // rather than a foreign-key error surfacing from the insert (2026-09-16,
-  // migration 022). A retired service is refused: the sheet only offers the
-  // active catalogue, so a retired id means a stale list on his phone, and
-  // filing work against a service that is no longer sold is worse than
-  // asking him to pick again.
-  let serviceId: string | null = null;
-  if (input.serviceId !== undefined) {
-    const service = await repo.findActiveService(getPool(), input.serviceId);
-    if (service === null) {
-      throw new AppError('VALIDATION_FAILED', 'That service is not in the catalogue any more — pick it again.');
+  // migration 022; several per completion since 024, 2026-09-18 — Yashas:
+  // the technician "can choose multiple service … and the price is summed
+  // up", the sheet summing its charges into `cost`). A retired service is
+  // refused: the sheet only offers the active catalogue, so a retired id
+  // means a stale list on his phone, and filing work against a service
+  // that is no longer sold is worse than asking him to pick again.
+  const services: { id: string; name: string; default_charge: string | null }[] = [];
+  if (input.serviceIds !== undefined) {
+    for (const id of [...new Set(input.serviceIds)]) {
+      const service = await repo.findActiveService(getPool(), id);
+      if (service === null) {
+        throw new AppError('VALIDATION_FAILED', 'That service is not in the catalogue any more — pick it again.');
+      }
+      services.push(service);
     }
-    serviceId = service.id;
   }
 
   return withTransaction(async (client) => {
@@ -1328,7 +1337,6 @@ export async function completeJob(
         completedBy: actor.id,
         completedAt,
         workSummary: input.workSummary,
-        serviceId: serviceId ?? null,
         cost,
         discountAmount,
         discountReason,
@@ -1342,14 +1350,34 @@ export async function completeJob(
         longitude: input.longitude ?? null,
       });
 
-      // Step 2b — the site's own pin. The person who had to find the
-      // place is the best source for where it is, so an on-site fix
-      // becomes the customer's coordinates; that is what makes the next
-      // visit findable. It rides THIS transaction (both or neither) and
-      // overwrites: the completion row keeps every point ever captured,
-      // so the latest on-site truth is the one worth keeping on the site.
+      // Step 2a — the services as lines, with each catalogue charge at the
+      // moment of completion (024). The sheet sums the charges into `cost`;
+      // the lines keep the breakdown so the total can be read later.
+      if (services.length > 0) {
+        await repo.insertCompletionServices(
+          client,
+          jobId,
+          services.map((service, index) => ({
+            lineNo: index + 1,
+            serviceId: service.id,
+            charge: service.default_charge,
+          })),
+        );
+      }
+
+      // Step 2b — the site's own pin, but only when the customer has
+      // none (2026-09-18, Yashas: the sheet asks the technician whether
+      // he is at the customer's location "so we can register that
+      // location which makes it easier next time we go there" — a
+      // register-what-is-missing rule, not an overwrite. The person who
+      // had to find the place is the best source for where it is the
+      // FIRST time; after that the pin is the office's data and a
+      // correction belongs on the customer form). The client gates the
+      // same way; the WHERE clause is the backstop. It rides THIS
+      // transaction (both or neither), and the completion row keeps the
+      // point either way.
       if (input.latitude !== undefined && input.longitude !== undefined) {
-        await customersRepo.setSitePin(client, job.customer_id, input.latitude, input.longitude);
+        await customersRepo.setSitePinIfAbsent(client, job.customer_id, input.latitude, input.longitude);
       }
 
       // Step 3 — close the card at the moment the work happened.

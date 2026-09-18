@@ -118,12 +118,13 @@ export interface CompleteSheetPayload {
   completedAt: string;
   workSummary: string;
   /**
-   * The catalogue service performed (migration 022, 2026-09-16) — what the
-   * office can count and price, which a sentence in `workSummary` never
-   * could. The sheet always sends it; the API validates the id and answers
-   * 422 when the catalogue has moved on.
+   * The catalogue services performed (migration 022, 2026-09-16; several
+   * since 024, 2026-09-18 — Yashas: "the technician can choose multiple
+   * service … and the price is summed up", which this sheet computes into
+   * `cost`). The API validates every id and answers 422 when the catalogue
+   * has moved on.
    */
-  serviceId: string;
+  serviceIds: string[];
   cost?: string;
   /**
    * A discount is no longer offered on this sheet (Yashas, 2026-09-16), so
@@ -138,31 +139,16 @@ export interface CompleteSheetPayload {
   stackChanges?: JobStackChange[];
   parts?: JobCompletionPart[];
   /**
-   * Where the technician stood (2026-09-17). Absent when the device could
-   * not say — no permission, no lock, or the web console, which is not a
-   * place at all. The server files it on the completion and makes it the
-   * customer's own pin, so the next visit can find the gate.
+   * Where the technician stood (2026-09-17), sent ONLY when he answered
+   * yes to "are you at the customer's location?" AND the customer has no
+   * pin stored (2026-09-18 — a register-what-is-missing rule: the server
+   * sets the customer's pin only when it is absent, and a customer who
+   * already has one never gets it overwritten by a phone). Absent when
+   * the device could not say — no permission, no lock, or the web
+   * console, which is not a place at all.
    */
   latitude?: number;
   longitude?: number;
-}
-
-/**
- * The payload with the on-site fix attached, or unchanged when there is
- * none.
- *
- * A separate step because of the WRITE, not the shape: the completion is
- * keyed by its body (`bodyKeyedWriters`), so a fix that differed between
- * a first attempt and its retry would mint a second idempotency key and
- * could file the job twice. The routing layer captures one fix per sheet
- * and hands the same value in every time — this function is what makes
- * "the same value" produce "the same body".
- */
-export function withSiteFix(
-  payload: CompleteSheetPayload,
-  fix: { latitude: number; longitude: number } | null,
-): CompleteSheetPayload {
-  return fix === null ? payload : { ...payload, latitude: fix.latitude, longitude: fix.longitude };
 }
 
 // ── the conditional branches ─────────────────────────────────────────────────
@@ -263,13 +249,13 @@ function quantityOf(line: PartLine): number | null {
  * Charge side can never block a free completion.
  */
 export function submitBlockerOf(input: {
-  /** The catalogue service performed — required, and the record of *what*
-   * was done (migration 022). */
-  serviceId: string | null;
+  /** How many catalogue services he added — at least one, and the record
+   * of *what* was done (migration 022; several since 024). */
+  serviceCount: number;
   amount: string;
   lines: readonly PartLine[];
 }): string | null {
-  if (input.serviceId === null) {
+  if (input.serviceCount === 0) {
     return 'Choose the service you did.';
   }
   for (const line of input.lines) {
@@ -289,6 +275,28 @@ export function submitBlockerOf(input: {
   return null;
 }
 
+// ── the services list ────────────────────────────────────────────────────────
+
+/**
+ * The summed catalogue charge of the chosen services (2026-09-18) — the
+ * amount field's prefill. Services without a price contribute nothing
+ * rather than blocking the sum: the price of the visit is still his to
+ * type. Integer-paise arithmetic, because a float sums `0.1 + 0.2`.
+ */
+export function sumServiceCharges(charges: readonly (string | null)[]): string {
+  let paise = 0;
+  for (const raw of charges) {
+    if (raw === null || raw.trim() === '') continue;
+    const cleaned = raw.replace(/[^0-9.-]/g, '');
+    if (cleaned === '' || cleaned === '-') continue;
+    paise += Math.round(Number(cleaned) * 100);
+  }
+  const abs = Math.abs(paise);
+  const int = String(Math.floor(abs / 100));
+  const dec = String(abs % 100).padStart(2, '0');
+  return paise < 0 ? `-${int}.${dec}` : dec === '00' ? int : `${int}.${dec}`;
+}
+
 // ── the payload ──────────────────────────────────────────────────────────────
 
 /**
@@ -300,10 +308,9 @@ export function submitBlockerOf(input: {
  */
 export function payloadOf(input: {
   view: JobView;
-  /** The service's name — what `work_summary` carries. The service itself
-   * rides beside it as `serviceId`. */
+  /** What `work_summary` carries — the chosen services' names joined. */
   workSummary: string;
-  serviceId: string;
+  serviceIds: string[];
   amount: string;
   selectedMode: Exclude<CollectionMode, 'bank_transfer' | 'none'>;
   /** The AMC job's Free/Charge choice (decision 9) — Free sends no money at all. */
@@ -313,6 +320,10 @@ export function payloadOf(input: {
   now: Date;
   /** The submit instant — the completion's `completed_at`. */
   completedAt: string;
+  /** The on-site fix, when he said he is at the customer's location AND
+   * the customer has none stored (2026-09-18). Null otherwise — nothing
+   * is sent, nothing is overwritten. */
+  siteFix: { latitude: number; longitude: number } | null;
 }): CompleteSheetPayload {
   const free = isFreeUnderAmc(input.view, input.amcChoice);
   // No discount is offered on this sheet any more (Yashas, 2026-09-16), so
@@ -353,7 +364,7 @@ export function payloadOf(input: {
   return {
     completedAt: input.completedAt,
     workSummary,
-    serviceId: input.serviceId,
+    serviceIds: input.serviceIds,
     // Absent money fields are the server's honest zeros (§3.4) — a free
     // job sends no money at all, and a Free-under-AMC visit is the purest
     // case: nothing typed, nothing sent, whatever was left on the Charge
@@ -366,6 +377,9 @@ export function payloadOf(input: {
     ...(input.customerConfirmed ? { customerSigned: true } : {}),
     ...(parts.length > 0 ? { parts } : {}),
     ...(stackChanges.length > 0 ? { stackChanges } : {}),
+    ...(input.siteFix === null
+      ? {}
+      : { latitude: input.siteFix.latitude, longitude: input.siteFix.longitude }),
   };
 }
 

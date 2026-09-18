@@ -249,17 +249,25 @@ export async function updateCustomer(db: Db, customerId: string, fields: Custome
  * half a point, and the caller only has a fix when the device captured
  * one.
  */
-export async function setSitePin(
+/**
+ * Registers a site pin ONLY when the customer has none (2026-09-18,
+ * Yashas: the completion asks the technician whether he is at the
+ * customer's location "so we can register that location" — for the
+ * customers who do not have one). A pin that already exists is the
+ * office's data: correcting it is a customer-form act, not a side effect
+ * of a phone's GPS on the day. The WHERE clause is the whole rule — a
+ * concurrent pin lands first and this update simply does nothing.
+ */
+export async function setSitePinIfAbsent(
   db: Db,
   customerId: string,
   latitude: number,
   longitude: number,
 ): Promise<void> {
-  await db.query('UPDATE customers SET latitude = $2, longitude = $3 WHERE id = $1', [
-    customerId,
-    latitude,
-    longitude,
-  ]);
+  await db.query(
+    'UPDATE customers SET latitude = $2, longitude = $3 WHERE id = $1 AND latitude IS NULL AND longitude IS NULL',
+    [customerId, latitude, longitude],
+  );
 }
 
 export interface CustomerLockRow {

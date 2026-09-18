@@ -902,20 +902,23 @@ async function seedJobWithContract(contractId: string): Promise<string> {
  * top-ups, it does not read prose. Two things are asserted: the write
  * stores the FK, and the owner's job detail reads the name back.
  */
-describe('the service performed (§6.2, migration 022)', () => {
-  it('stores the service and reads it back by name on the owner’s detail', async () => {
+describe('the services performed (§6.2, migration 022; several since 024)', () => {
+  it('stores the services as lines and reads them back on the owner’s detail', async () => {
     const jobId = await seedJob('in_progress');
     const res = await postComplete(
       TECH_A.token,
       jobId,
-      completeBody({ serviceId, cost: '750.00', collectionMode: 'cash' }),
+      completeBody({ serviceIds: [serviceId], cost: '750.00', collectionMode: 'cash' }),
     );
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
 
-    const stored = await db.query<{ service_id: string }>(
-      'SELECT service_id FROM job_completions WHERE job_card_id = $1',
+    // The line table carries the service, with the catalogue's charge at
+    // completion as the snapshot.
+    const stored = await db.query<{ service_id: string; charge: string }>(
+      'SELECT service_id, charge::text AS charge FROM job_completion_services WHERE job_card_id = $1',
       [jobId],
     );
+    expect(stored.rows).toHaveLength(1);
     expect(stored.rows[0]!.service_id).toBe(serviceId);
 
     const detail = await app.inject({
@@ -924,14 +927,48 @@ describe('the service performed (§6.2, migration 022)', () => {
       headers: { authorization: `Bearer ${OWNER.token}`, 'x-client-source': 'mobile' },
     });
     expect(detail.statusCode).toBe(200);
-    expect((JSON.parse(detail.body) as { completion: { serviceName: string | null } }).completion.serviceName).toBe(
-      'T1.6 suite service',
+    const completion = (JSON.parse(detail.body) as { completion: { services: Array<{ name: string; charge: string | null }> } })
+      .completion;
+    expect(completion.services).toHaveLength(1);
+    expect(completion.services[0]!.name).toBe('T1.6 suite service');
+  });
+
+  it('several services file as several lines, in the order he added them', async () => {
+    const jobId = await seedJob('in_progress');
+    const second = crypto.randomUUID();
+    await db.query('INSERT INTO services (id, code, name, default_charge) VALUES ($1, $2, $3, $4)', [
+      second,
+      `T136-SECOND-${crypto.randomUUID().slice(0, 8)}`,
+      'Second suite service',
+      '250.00',
+    ]);
+    const res = await postComplete(
+      TECH_A.token,
+      jobId,
+      completeBody({ serviceIds: [serviceId, second], cost: '1000.00', collectionMode: 'cash' }),
     );
+    expect(res.statusCode, res.body).toBe(200);
+    const stored = await db.query<{ line_no: number; service_id: string; charge: string }>(
+      'SELECT line_no, service_id, charge::text AS charge FROM job_completion_services WHERE job_card_id = $1 ORDER BY line_no',
+      [jobId],
+    );
+    expect(stored.rows.map((r) => r.service_id)).toEqual([serviceId, second]);
+    // The first fixture service carries no default_charge — the snapshot
+    // says so rather than inventing a price; the second snapshots 250.00.
+    expect(stored.rows.map((r) => r.charge)).toEqual([null, '250.00']);
+
+    // The same id twice is one service, not two lines.
+    const dup = await postComplete(TECH_A.token, await seedJob('in_progress'), completeBody({ serviceIds: [serviceId, serviceId] }));
+    expect(dup.statusCode, dup.body).toBe(200);
+    const deduped = await db.query('SELECT line_no FROM job_completion_services WHERE job_card_id = $1', [
+      (JSON.parse(dup.body) as { id: string }).id,
+    ]);
+    expect(deduped.rowCount).toBe(1);
   });
 
   it('refuses a service the catalogue does not have — a 422, never a foreign-key error', async () => {
     const jobId = await seedJob('in_progress');
-    const res = await postComplete(TECH_A.token, jobId, completeBody({ serviceId: crypto.randomUUID() }));
+    const res = await postComplete(TECH_A.token, jobId, completeBody({ serviceIds: [crypto.randomUUID()] }));
     expect(res.statusCode).toBe(422);
     expect(envelopeOf(res.statusCode, res.body).code).toBe('VALIDATION_FAILED');
 
@@ -944,22 +981,19 @@ describe('the service performed (§6.2, migration 022)', () => {
     const jobId = await seedJob('in_progress');
     await db.query('UPDATE services SET is_active = false WHERE id = $1', [serviceId]);
     try {
-      const res = await postComplete(TECH_A.token, jobId, completeBody({ serviceId }));
+      const res = await postComplete(TECH_A.token, jobId, completeBody({ serviceIds: [serviceId] }));
       expect(res.statusCode).toBe(422);
     } finally {
       await db.query('UPDATE services SET is_active = true WHERE id = $1', [serviceId]);
     }
   });
 
-  it('leaves the column null when no service is named — old rows and today’s free-text closes', async () => {
+  it('files no lines when no service is named — old rows and today’s free-text closes', async () => {
     const jobId = await seedJob('in_progress');
     const res = await postComplete(TECH_A.token, jobId, completeBody({ cost: '100.00', collectionMode: 'cash' }));
     expect(res.statusCode).toBe(200);
-    const stored = await db.query<{ service_id: string | null }>(
-      'SELECT service_id FROM job_completions WHERE job_card_id = $1',
-      [jobId],
-    );
-    expect(stored.rows[0]!.service_id).toBeNull();
+    const stored = await db.query('SELECT 1 FROM job_completion_services WHERE job_card_id = $1', [jobId]);
+    expect(stored.rowCount).toBe(0);
   });
 });
 
@@ -1024,18 +1058,26 @@ describe('the on-site capture becomes the site’s pin (§6.4, 2026-09-17)', () 
     expect(await customerPin(customerId)).toMatchObject({ latitude: 12.9, longitude: 77.5 });
   });
 
-  it('a later on-site fix moves the pin — the freshest on-site truth wins', async () => {
+  it('a pin that already exists is NOT overwritten by a later on-site fix (2026-09-18)', async () => {
+    // Yashas: the capture registers the location for customers who do not
+    // have one — "which makes it easier next time we go there". A customer
+    // who HAS a pin got it from the office; a technician's phone on a
+    // later visit may be in the street outside, and it does not get to
+    // move the record. The completion still stores its own fix.
     await db.query('UPDATE customers SET latitude = 12.9, longitude = 77.5 WHERE id = $1', [customerId]);
     const jobId = await seedJob('in_progress');
 
     const res = await postComplete(TECH_A.token, jobId, {
       completedAt: sent(30),
-      workSummary: 'Second visit — corrected the pin.',
+      workSummary: 'Second visit — the phone had a fix, the pin stands.',
       latitude: 12.9352,
       longitude: 77.6245,
     });
     expect(res.statusCode, res.body).toBe(200);
-    expect(await customerPin(customerId)).toMatchObject({ latitude: 12.9352, longitude: 77.6245 });
+    // The site keeps the office's pin…
+    expect(await customerPin(customerId)).toMatchObject({ latitude: 12.9, longitude: 77.5 });
+    // …and the visit still records where the work was filed from.
+    expect(await completionPin(jobId)).toMatchObject({ latitude: 12.9352, longitude: 77.6245 });
   });
 
   it('half a point is refused as a field error, and the transaction leaves nothing behind', async () => {
