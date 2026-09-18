@@ -13,7 +13,8 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
+import { istBusinessDateKey } from '../../../src/screens/dispatcher/jobLogsFilters';
 import { DeskListShell } from '../../../src/components/ui';
 import { SalesScreen } from '../../../src/screens/rep/SalesScreen';
 import { useRepFlags, useRepSales } from '../../../src/screens/rep/useRepData';
@@ -49,11 +50,14 @@ function RepSalesRoute(): React.ReactNode {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the tab bar's
+    // (2026-09-18). The owner's branch below keeps its own wrapper.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <SalesScreen
         rows={sales.rows}
         error={sales.error}
         loading={sales.loading}
+        todayIso={istBusinessDateKey(new Date())}
         onNewSale={() => router.push('/sales/new')}
         onOpenSale={(saleId) => router.push(`/sales/${saleId}`)}
         onRetry={sales.reload}
