@@ -41,13 +41,49 @@ export const intentRequest: IntentRequest = (method, path, options) => api.reque
 
 async function fetchWork(): Promise<TechnicianWork> {
   const res = await api.request<TechnicianWork>('GET', '/v1/technician/work');
-  if (!res.ok || res.data === null) throw new Error(res.error?.message ?? 'Your jobs could not be loaded.');
+  if (!res.ok || res.data === null) {
+    const error = new Error(res.error?.message ?? 'Your jobs could not be loaded.');
+    // The status rides the error so the query can tell "the server answered
+    // no" (surface it) from "the server did not answer" (keep asking).
+    (error as Error & { status?: number }).status = res.status;
+    throw error;
+  }
   return res.data;
 }
 
+/** How long a failing work read keeps asking: ~5 minutes at 3s. */
+const WORK_RETRY_LIMIT = 100;
+const WORK_RETRY_MS = 3_000;
+
 /** The work query's options — shared with the push wake so both read one cache entry. */
 export function technicianWorkQuery() {
-  return { queryKey: TECHNICIAN_WORK_KEY, queryFn: fetchWork, staleTime: 30_000 };
+  return {
+    queryKey: TECHNICIAN_WORK_KEY,
+    queryFn: fetchWork,
+    staleTime: 30_000,
+    /**
+     * **The work IS the technician's screen.** If this read fails, every
+     * tab renders its dark placeholder — so it must not give up the way a
+     * decorative fetch may. React Query's default (three tries, ~7s) leaves
+     * the app dark with nothing left to wake it: a phone whose connectivity
+     * never changed fires no reconnect event, and the screen stays frozen
+     * until an app restart (2026-09-18 — found live next to the flags cache
+     * bug, after the API was unreachable at launch).
+     *
+     * A 4xx is the server ANSWERING — surfaced at once, never spun on.
+     */
+    retry: (count: number, error: unknown): boolean => {
+      if (count >= WORK_RETRY_LIMIT) return false;
+      // 0 is the API client's "the server did not answer" (network refusal),
+      // NOT a client error — it is the case this retry exists for. Getting
+      // this wrong was the first cut of this fix: `0` is neither undefined
+      // nor >= 500, so an unreachable server was treated as a final answer
+      // and the app stayed dark.
+      const status = (error as { status?: number }).status ?? 0;
+      return status === 0 || status >= 500;
+    },
+    retryDelay: WORK_RETRY_MS,
+  };
 }
 
 // ── flags ────────────────────────────────────────────────────────────────────
@@ -57,14 +93,31 @@ let cachedFlags: FeatureFlagState | null = null;
 async function loadFlags(): Promise<FeatureFlagState> {
   if (cachedFlags !== null) return cachedFlags;
   const res = await api.request<AuthMeResponse>('GET', '/v1/auth/me');
-  cachedFlags = {
-    ...defaultFeatureFlags(),
-    ...(res.ok && res.data !== null ? res.data.featureFlags : {}),
-  };
+  // A FAILED read is not an answer (2026-09-18, found live). This used to
+  // cache and publish "everything off" whenever `/auth/me` failed — and
+  // that had two consequences, both bad and neither obvious:
+  //
+  // 1. The technician's screens went dark FOR THE LIFE OF THE PROCESS. A
+  //    single 401 at the wrong moment was enough, and nothing retried: the
+  //    module cache held the failure and `useTechJobsFlag` returned early
+  //    on it forever. Seen on the A059 as a dashboard that rendered only
+  //    the word "Dashboard" while the API answered `tech.jobs: true`.
+  // 2. The location task was told `tech.location` was OFF. It stops only on
+  //    an EXPLICIT false (`explicitFlagState`), precisely so an unknown
+  //    answer cannot kill a day of pings — publishing defaults defeated
+  //    that guard and could silently stop tracking.
+  //
+  // So: uncached failure. The caller retries, and the flags stay UNKNOWN
+  // rather than becoming a false.
+  if (!res.ok || res.data === null) return { ...defaultFeatureFlags() };
+  cachedFlags = { ...defaultFeatureFlags(), ...res.data.featureFlags };
   // Publish process-wide: the location task's tech.location gate reads the same answer.
   setFeatureFlags(cachedFlags);
   return cachedFlags;
 }
+
+/** How long to wait before asking `/auth/me` again after a failed read. */
+const FLAG_RETRY_MS = 3_000;
 
 export interface TechnicianScreenFlags {
   flagsReady: boolean;
@@ -79,11 +132,24 @@ export function useTechJobsFlag(): TechnicianScreenFlags {
   useEffect(() => {
     if (cachedFlags !== null) return;
     let alive = true;
-    void loadFlags().then((flags) => {
-      if (alive) setState({ flagsReady: true, flagOn: flags['tech.jobs'] });
-    });
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const attempt = (): void => {
+      void loadFlags().then((flags) => {
+        if (!alive) return;
+        // `loadFlags` caches only on success, so still-uncached means the
+        // read failed. Keep asking rather than freezing the screen dark: a
+        // flaky connection at sign-in must not cost the whole session.
+        if (cachedFlags === null) {
+          timer = setTimeout(attempt, FLAG_RETRY_MS);
+          return;
+        }
+        setState({ flagsReady: true, flagOn: flags['tech.jobs'] });
+      });
+    };
+    attempt();
     return () => {
       alive = false;
+      if (timer !== null) clearTimeout(timer);
     };
   }, []);
   return state;
