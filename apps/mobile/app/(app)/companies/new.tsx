@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import type { Company } from '@servgrid/shared';
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME } from '@servgrid/shared';
 import { apiSend, useOnline } from '../../../src/screens/rep/useRepData';
 import { CompanyFormScreen } from '../../../src/screens/rep/CompanyFormScreen';
 import { useSessionStore } from '../../../src/state/sessionStore';
@@ -23,7 +23,8 @@ function RepNewCompanyRoute(): React.ReactNode {
   const online = useOnline();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the shell's.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <CompanyFormScreen
         online={online}
         create={async (input) => {

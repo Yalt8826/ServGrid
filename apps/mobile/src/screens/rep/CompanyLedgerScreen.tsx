@@ -20,8 +20,8 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { Company, CompanyLedger } from '@servgrid/shared';
-import { SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button } from '../../components/ui';
+import { FRAME, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
+import { Banner, Button, SectionHeader } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, ledgerAmountOf } from './money';
@@ -55,14 +55,14 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
   const balanceView = props.ledger === null ? null : creditView(props.ledger.balance);
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'company-ledger'}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'company-ledger'}>
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="company-ledger-error" />
       ) : null}
 
       {company !== null ? (
-        <View testID="company-header">
-          <Text style={styles.name} testID="company-name">
+        <View style={styles.frame} testID="company-header">
+          <Text style={styles.frameTitle} testID="company-name">
             {company.name}
           </Text>
           {company.contactPerson !== null ? (
@@ -88,7 +88,7 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
       ) : null}
 
       {balanceView !== null ? (
-        <View style={styles.balanceBlock}>
+        <View style={[styles.balanceBlock, styles.body]}>
           <Text style={[styles.balance, { color: balanceView.color }]} testID="company-balance">
             {balanceView.text}
           </Text>
@@ -97,18 +97,19 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
       ) : null}
 
       <View style={styles.actions}>
-        <Button label="Record payment" onPress={() => setSheetOpen(true)} testID="company-record-payment" />
-        <Button
-          label="New sale"
-          variant="secondary"
-          onPress={() => company !== null && props.onNewSale(company.id)}
-          testID="company-new-sale"
-        />
+        <View style={styles.actionCell}>
+          <Button label="New sale" icon="plus" variant="secondary" onPress={() => company !== null && props.onNewSale(company.id)} fullwidth testID="company-new-sale" />
+        </View>
+        <View style={styles.actionCell}>
+          <Button label="Record payment" icon="wallet" onPress={() => setSheetOpen(true)} fullwidth testID="company-record-payment" />
+        </View>
       </View>
 
-      <Text style={styles.sectionLabel}>LEDGER</Text>
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="Ledger" icon="document" count={props.ledger === null ? undefined : props.ledger.entries.length} />
+      </View>
       {props.ledger === null ? (
-        <Text style={styles.emptyLine} testID="company-ledger-empty">
+        <Text style={[styles.emptyLine, styles.body]} testID="company-ledger-empty">
           Nothing recorded yet.
         </Text>
       ) : (
@@ -151,18 +152,29 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
     paddingBottom: SPACE[8],
     gap: SPACE[2],
   },
-  name: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
+  /** The navy frame: who this account is, how to reach them, and what they
+   * owe — the three things the ledger below explains. */
+  frame: {
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+    marginBottom: SPACE[2],
+    gap: 2,
   },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  /** The page's gutter, once the frame has taken the edges. */
+  body: { paddingHorizontal: SPACE[4] },
+  sectionWrap: { paddingHorizontal: SPACE[4], marginTop: SPACE[4] },
   meta: {
     ...textStyle('body'),
-    color: SEMANTIC.text.secondary,
+    color: FRAME.textMuted,
   },
   phone: {
     color: SEMANTIC.text.primary,
@@ -176,12 +188,15 @@ const styles = StyleSheet.create({
   },
   balanceCaption: {
     ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
+    color: FRAME.textMuted,
   },
   actions: {
-    gap: SPACE[3],
-    marginVertical: SPACE[2],
+    flexDirection: 'row',
+    gap: SPACE[2],
+    marginTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
   },
+  actionCell: { flex: 1 },
   sectionLabel: {
     ...textStyle('label'),
     color: SEMANTIC.text.secondary,
@@ -191,17 +206,20 @@ const styles = StyleSheet.create({
   ledgerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 52,
-    paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
-    gap: SPACE[2],
+    marginHorizontal: SPACE[4],
+    marginTop: SPACE[2],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    gap: SPACE[3],
   },
   ledgerDate: {
     ...textStyle('mono'),
     color: SEMANTIC.text.secondary,
     fontVariant: ['tabular-nums'],
-    width: 72,
   },
   ledgerMain: {
     flex: 1,
@@ -224,14 +242,12 @@ const styles = StyleSheet.create({
     ...textStyle('mono'),
     color: SEMANTIC.text.primary,
     fontVariant: ['tabular-nums'],
-    width: 96,
     textAlign: 'right',
   },
   ledgerRunning: {
     ...textStyle('mono'),
-    color: SEMANTIC.text.primary,
+    color: SEMANTIC.text.secondary,
     fontVariant: ['tabular-nums'],
-    width: 96,
     textAlign: 'right',
   },
   emptyLine: {

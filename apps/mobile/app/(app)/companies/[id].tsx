@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Linking } from 'react-native';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { CompanyLedgerScreen } from '../../../src/screens/rep/CompanyLedgerScreen';
 import { useOnline, useRecordPayment, useRepCompanyLedger, useRepPayments } from '../../../src/screens/rep/useRepData';
 import { OwnerCompanyDetailScreen } from '../../../src/screens/owner/CompanyDetailScreen';
@@ -41,7 +41,8 @@ function RepCompanyLedgerRoute({ companyId }: { companyId: string }): React.Reac
   const online = useOnline();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the shell's.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <CompanyLedgerScreen
         company={ledger.company}
         ledger={ledger.ledger}

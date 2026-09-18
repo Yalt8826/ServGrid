@@ -14,7 +14,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { CompaniesScreen } from '../../../src/screens/rep/CompaniesScreen';
 import { useRepCompanies } from '../../../src/screens/rep/useRepData';
 import { OwnerCompaniesScreen } from '../../../src/screens/owner/CompaniesScreen';
@@ -30,7 +30,9 @@ function RepCompaniesRoute(): React.ReactNode {
   const companies = useRepCompanies();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the shell's
+    // (2026-09-18). The owner's branch keeps its own wrapper.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <CompaniesScreen
         rows={companies.rows}
         error={companies.error}
