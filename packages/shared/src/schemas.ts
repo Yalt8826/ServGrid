@@ -729,13 +729,28 @@ export const cashAmendRequestSchema = z
   });
 
 /**
- * One handover as the declaring employee sees it (§10, UI plan-2 §T6) —
- * deliberately narrow, and the narrowness is the feature: no
- * `expected_cash`, because he declares what he is handing over and the
- * system's expectation is the check (showing him the answer first turns a
- * reconciliation into a form-fill); no owner-side confirmation columns,
- * because the queue is the owner's (Phase 4). Strict, so a leaked
- * `expected_cash` fails response validation rather than shipping.
+ * One handover as the declaring employee sees it (§10, UI plan-2 §T6).
+ *
+ * **The withheld figure is still withheld.** No `expected_cash`, ever:
+ * he declares what he is handing over and the system's expectation is
+ * the check — showing him the answer first turns a reconciliation into a
+ * form-fill. Strict, so a leaked `expected_cash` fails response
+ * validation rather than shipping.
+ *
+ * **The office's ANSWER is here as of 2026-09-18** (Yashas: "the sales
+ * rep can have a history of cash declarations"). Until then this shape
+ * carried no owner-side column at all — the queue was the owner's — which
+ * left a disputed day reading as the bare word *Disputed*, with no figure
+ * and no reason, on the one screen whose whole job is to tell the
+ * employee what became of his money. `confirmedAmount` and `ownerNote`
+ * are the owner's communication TO him: what was accepted, and why not.
+ *
+ * They are still not the expectation, and the difference is load-bearing.
+ * The queue's `variance` is `declared - expected_cash` — a figure from
+ * which the expectation is one subtraction away, which is why NO variance
+ * is computed on this path. The only difference these two figures support
+ * is `declared - confirmed`, and both of those are a commitment the
+ * employee already made and an answer the owner deliberately gave him.
  */
 export const CashHandoverSchema = z
   .object({
@@ -745,6 +760,12 @@ export const CashHandoverSchema = z
     note: z.string().nullable(),
     status: reconciliationStatusSchema,
     declaredAt: isoDateTime,
+    /** What the owner accepted (§10 confirm) — null while `submitted`. */
+    confirmedAmount: moneyString.nullable(),
+    /** The owner's reason. Present on a dispute (the DB CHECK demands it). */
+    ownerNote: z.string().nullable(),
+    /** When the owner answered — null while `submitted`. */
+    confirmedAt: isoDateTime.nullable(),
     version: z.number().int(),
   })
   .strict();

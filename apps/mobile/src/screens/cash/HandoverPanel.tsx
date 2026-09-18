@@ -1,14 +1,13 @@
 /**
- * T6 Cash handover (UI/plan-2/04-TECHNICIAN.md §T6, PLAN-FRONTEND.md §9).
- * Its own tab — touched once a day at the end of a shift by someone who
- * wants to leave, so it is one tap from the tab bar, not a row inside
- * Profile. A skipped handover is the `missing_submission` row the
- * owner's whole queue exists to catch.
+ * The declaration form (UI/plan-2/04-TECHNICIAN.md §T6, PLAN-FRONTEND.md
+ * §9). The panel, not the screen: the navy frame and the Declare/History
+ * tabs belong to `CashScreen`, which composes this with
+ * `CashHistoryScreen` (2026-09-18 — the history came back, and it needed
+ * a tab of its own rather than a block appended here).
  *
  * Anatomy: date (today, changeable back 7 days) · one large `MoneyField`
  * · optional note · *Submit declaration* · the selected day's state with
- * its status pill. The declarations LIST is gone (2026-09-16, Yashas: he
- * declares — he does not browse his past).
+ * its status pill.
  *
  * The two absences, both deliberate (§T6): **no expected figure** — he
  * declares, and the system's expectation is the check; showing the
@@ -28,104 +27,45 @@
  *   correctable until signed off, then it takes a deliberate second
  *   action by someone else.
  *
- * Pure UI over injected seams (`HandoverDeps`) — the route file owns the
- * API calls, exactly as the ladder does. All dates are IST business
- * dates (`business_date()`, migration 001), computed once by the route
- * and passed in as `today`, so the window logic stays pure and
- * testable.
+ * `history` arrives from `CashScreen` rather than being loaded here: the
+ * tabs read the same rows, and two loads of one day's declarations is two
+ * chances to show two answers.
  */
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { CashAmendRequest, CashDeclareRequest, CashHandover, ReconciliationStatus } from '@servgrid/shared';
-import { formatMoneyEnIN, alpha, COLORS, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
-import { Banner, Button, DatePicker, MoneyField, SectionHeader, TextField, formatDateEnIN } from '../../components/ui';
+import type { CashAmendRequest, CashDeclareRequest, CashHandover } from '@servgrid/shared';
+import { alpha, COLORS, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
+import { formatMoneyEnIN } from '@servgrid/shared';
+import { Banner, Button, DatePicker, MoneyField, SectionHeader, TextField } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
+import {
+  dateOptionLabel,
+  HANDOVER_WINDOW_DAYS,
+  handoverError,
+  handoverWindow,
+  isValidAmount,
+  isWithinHandoverWindow,
+  lockedCopy,
+  STATUS_PILL,
+} from './handoverModel';
 
-// ── pure date helpers (exported for the route and the tests) ──────────────
-
-/** The declaration window: today back 7 days, inclusive (§T6). */
-export const HANDOVER_WINDOW_DAYS = 7;
-
-/** Today's IST business date — the same day the server's
- * `business_date()` stamps. `en-CA` formats as `YYYY-MM-DD`. */
-export function istBusinessDate(now: Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(now);
-}
-
-/** Calendar shift on plain ISO dates — no timezone hides in `YYYY-MM-DD`. */
-export function shiftBusinessDate(iso: string, days: number): string {
-  const [y = 1970, m = 1, d = 1] = iso.split('-').map(Number);
-  const shifted = new Date(Date.UTC(y, m - 1, d));
-  shifted.setUTCDate(shifted.getUTCDate() + days);
-  return shifted.toISOString().slice(0, 10);
-}
-
-/** The picker refuses anything outside today → today − 7 (and the future). */
-export function isWithinHandoverWindow(candidate: string, today: string): boolean {
-  return candidate <= today && candidate >= shiftBusinessDate(today, -HANDOVER_WINDOW_DAYS);
-}
-
-/** The days the picker offers, today first. */
-export function handoverWindow(today: string): string[] {
-  const days: string[] = [];
-  for (let back = 0; back <= HANDOVER_WINDOW_DAYS; back += 1) days.push(shiftBusinessDate(today, -back));
-  return days;
-}
-
-// ── pure presentation helpers ─────────────────────────────────────────────
-
-/** The server's `reconciliation_status`, as the pill reads (§T6). */
-export const STATUS_PILL: Record<ReconciliationStatus, { label: string; color: string }> = {
-  submitted: { label: 'Submitted', color: SEMANTIC.feedback.warning },
-  confirmed: { label: 'Confirmed', color: SEMANTIC.feedback.success },
-  disputed: { label: 'Disputed', color: SEMANTIC.feedback.danger },
-};
-
-/** Why the day is read-only (§T6) — correctable until signed off, then
- * it takes a deliberate second action by someone else. */
-export function lockedCopy(status: ReconciliationStatus): string {
-  return status === 'disputed'
-    ? 'The office has disputed this day. Ask the owner to reopen it.'
-    : 'The office has confirmed this day. Ask the owner to reopen it.';
-}
-
-const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
-
-/** Mirrors the server's `moneyString` so the button never submits a body
- * the API would refuse. `0` is honest — some days no cash is collected. */
-export function isValidAmount(raw: string): boolean {
-  return AMOUNT_PATTERN.test(raw);
-}
-
-/** The screen's banner copy from a failed call — the server's `message`
- * verbatim when there is one (§X5), a plain fallback otherwise. */
-export function handoverError(error: unknown): string {
-  const message = error instanceof Error ? error.message : '';
-  return message === '' ? 'The declaration could not be saved. Try again.' : message;
-}
-
-// ── the screen ────────────────────────────────────────────────────────────
-
-export interface HandoverDeps {
+export interface HandoverPanelDeps {
   /** Today's IST business date, `YYYY-MM-DD` — computed once by the route. */
   today: string;
-  /** His own declarations, any order; the screen sorts newest first. */
-  loadHistory: () => Promise<CashHandover[]>;
+  /** His own declarations, any order; the panel reads the selected day's.
+   * `null` while the read is in flight. */
+  history: CashHandover[] | null;
   declare: (input: CashDeclareRequest) => Promise<CashHandover>;
   /** `version` is the row's optimistic-concurrency version (`If-Match`). */
   amend: (id: string, version: number, input: CashAmendRequest) => Promise<CashHandover>;
+  /** Called with the row a declare or amend produced, so the screen that
+   * owns the history can fold it in without a second read. */
+  onChanged: (row: CashHandover) => void;
 }
 
-function dateOptionLabel(iso: string, today: string): string {
-  if (iso === today) return 'Today';
-  if (iso === shiftBusinessDate(today, -1)) return 'Yesterday';
-  return formatDateEnIN(iso, Number(today.slice(0, 4)));
-}
-
-export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
-  const [history, setHistory] = useState<CashHandover[] | null>(null);
+export function HandoverPanel(deps: HandoverPanelDeps): React.ReactNode {
   const [date, setDate] = useState(deps.today);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
@@ -135,23 +75,7 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
   const [dateError, setDateError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    deps
-      .loadHistory()
-      .then((rows) => {
-        if (alive) setHistory([...rows].sort((a, b) => (a.businessDate < b.businessDate ? 1 : -1)));
-      })
-      .catch(() => {
-        if (alive) setHistory([]);
-      });
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const row = history?.find((h) => h.businessDate === date) ?? null;
+  const row = deps.history?.find((h) => h.businessDate === date) ?? null;
 
   function chooseDate(iso: string): void {
     // The guard behind the picker: the sheet only offers in-window days,
@@ -180,7 +104,7 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
         declaredAmount: amount,
         ...(note.trim() === '' ? {} : { note: note.trim() }),
       });
-      setHistory((current) => [declared, ...(current ?? []).filter((h) => h.id !== declared.id)]);
+      deps.onChanged(declared);
       setAmount('');
       setNote('');
     } catch (e) {
@@ -199,7 +123,7 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
         declaredAmount: amount,
         ...(note.trim() === '' ? {} : { note: note.trim() }),
       });
-      setHistory((current) => (current ?? []).map((h) => (h.id === amended.id ? amended : h)));
+      deps.onChanged(amended);
       setAmending(false);
       setAmount('');
       setNote('');
@@ -226,26 +150,11 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
 
   const pill = row !== null ? STATUS_PILL[row.status] : null;
 
-  // The navy frame (2026-09-16): the same header the dashboard and the
-  // job detail wear, so the app's money screen opens like its work
-  // screens. The route paints `FRAME.bg` behind the status bar.
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }}
-      contentContainerStyle={{ paddingBottom: SPACE[8] }}
-      testID="handover-screen"
-    >
-      <View style={styles.frame}>
-        <Text style={[styles.heading, { color: FRAME.text }]} testID="handover-title">
-          Cash handover
-        </Text>
-        <Text style={[styles.caption, { color: FRAME.textMuted, marginBottom: 0 }]}>
-          Declare the cash you are handing over. One number.
-        </Text>
-      </View>
-
-      <View style={styles.body}>
-      {error !== null ? <Banner tone="danger" message={error} onDismiss={() => setError(null)} testID="handover-banner" /> : null}
+    <View style={styles.body} testID="handover-panel">
+      {error !== null ? (
+        <Banner tone="danger" message={error} onDismiss={() => setError(null)} testID="handover-banner" />
+      ) : null}
 
       <View style={styles.block}>
         <SectionHeader label="Day" icon="calendar" />
@@ -373,38 +282,17 @@ export function HandoverScreen(deps: HandoverDeps): React.ReactNode {
           )}
         </View>
       )}
-
-      </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  /** The navy frame: full-bleed header, the route paints the same slate
-   * behind the status bar (2026-09-16). */
-  frame: {
-    alignSelf: 'stretch',
-    backgroundColor: FRAME.bg,
-    paddingHorizontal: SPACE[4],
-    paddingTop: SPACE[4],
-    paddingBottom: SPACE[5],
-  },
   body: {
     alignSelf: 'stretch',
     flexGrow: 1,
-    backgroundColor: SEMANTIC.bg.app,
-    paddingHorizontal: SPACE[4],
+    // No horizontal gutter here: `CashScreen` owns the page's padding, so
+    // the panel and the history list line up on the same edge.
     paddingTop: SPACE[5],
-  },
-  heading: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
-    marginBottom: SPACE[1],
-  },
-  caption: {
-    ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
-    marginBottom: SPACE[4],
   },
   panel: {
     alignSelf: 'stretch',
@@ -457,12 +345,6 @@ const styles = StyleSheet.create({
     color: SEMANTIC.text.secondary,
     marginTop: SPACE[2],
   },
-  sectionLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
-    marginBottom: SPACE[2],
-    marginTop: SPACE[2],
-  },
   sheet: {
     alignSelf: 'stretch',
     marginBottom: SPACE[5],
@@ -472,11 +354,6 @@ const styles = StyleSheet.create({
     backgroundColor: SEMANTIC.bg.raised,
     padding: SPACE[3],
     gap: SPACE[2],
-  },
-  sheetTitle: {
-    ...textStyle('h2'),
-    color: SEMANTIC.text.primary,
-    marginBottom: SPACE[2],
   },
   sheetRow: {
     minHeight: TAP.min,

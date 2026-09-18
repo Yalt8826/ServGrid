@@ -17,7 +17,7 @@ import { SEMANTIC } from '@servgrid/shared';
 import { uuid } from '../../../src/lib/uuid';
 import { SaleFormScreen, type PickerCompany, type PickerProduct } from '../../../src/screens/rep/SaleFormScreen';
 import { apiGet, apiSend, useOnline, useRepFlags } from '../../../src/screens/rep/useRepData';
-import { istBusinessDate } from '../../../src/screens/technician/HandoverScreen';
+import { istBusinessDate } from '../../../src/screens/cash/handoverModel';
 import { useSessionStore } from '../../../src/state/sessionStore';
 
 const styles = StyleSheet.create({

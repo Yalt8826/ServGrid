@@ -7,13 +7,16 @@ import type { Db } from '../auth/repo.js';
  * the other repos run under.
  *
  * The EMPLOYEE-facing queries read the `cash_reconciliations` TABLE and
- * only the declaration-side columns (§3.7: only the declaration is
- * stored; what he *should* have handed over is derived). That split is
- * what keeps `expected_cash` out of his responses by construction —
- * T1.11's test asserts the key's absence on the serialised body. The
- * owner's half (Phase 4, T4.2, below) is where the split ends: the queue
- * reads `v_cash_reconciliation_queue`, whose whole point is the derived
- * figure beside the declared one.
+ * only that table's columns (§3.7: only the declaration is stored; what
+ * he *should* have handed over is derived). That split is what keeps
+ * `expected_cash` out of his responses by construction — T1.11's test
+ * asserts the key's absence on the serialised body, and as of 2026-09-18
+ * the employee's history carries three owner-side columns as well
+ * (`confirmed_amount`, `owner_note`, `confirmed_at`, the office's answer
+ * to him) while the derived expectation still comes from nowhere near
+ * this table. The owner's half (Phase 4, T4.2, below) is where the other
+ * split ends: the queue reads `v_cash_reconciliation_queue`, whose whole
+ * point is the derived figure beside the declared one.
  */
 
 /** `reconciliation_status` (migration 002), as pg returns it. */
@@ -24,6 +27,13 @@ export type ReconciliationStatus = 'submitted' | 'confirmed' | 'disputed';
  * `declared_amount` are cast to text here — a `date` parsed by pg becomes
  * a timezone-shifted JS Date, and money crosses the wire as a decimal
  * string (§3.4), so the cast happens once, in SQL, where both facts live.
+ *
+ * The three owner-side columns joined in 2026-09-18: the employee's
+ * history now shows him the office's answer (Yashas: "the sales rep can
+ * have a history of cash declarations"). `expected_cash` is not among
+ * them and never will be — it is not a column of this table at all, which
+ * is what made the split structural rather than a filter someone can
+ * forget.
  */
 export interface HandoverRow {
   id: string;
@@ -33,13 +43,17 @@ export interface HandoverRow {
   employee_note: string | null;
   status: ReconciliationStatus;
   declared_at: Date;
+  confirmed_amount: string | null;
+  owner_note: string | null;
+  confirmed_at: Date | null;
   version: number;
 }
 
 /** The declaration-side column list every employee-facing query selects. */
 const HANDOVER_COLUMNS = `id, employee_id, business_date::text AS business_date,
   declared_amount::text AS declared_amount, employee_note, status,
-  declared_at, version`;
+  declared_at, confirmed_amount::text AS confirmed_amount, owner_note,
+  confirmed_at, version`;
 
 /**
  * The two bounds of `businessDate` (§10: not in the future, not more than
@@ -79,28 +93,14 @@ export async function insertDeclaration(db: Db, input: DeclarationInsert): Promi
 }
 
 /** `SELECT … FOR UPDATE` — the lock every amendment holds to commit, so a
- * concurrent owner confirm and an employee amend serialise on the row. */
+ * concurrent owner confirm and an employee amend serialise on the row.
+ * It carries the owner-side columns too, which is what lets `reopen` keep
+ * the sign-off figures it is about to unwind for the audit trail: one
+ * lock query for all four actions, so no action can ever see a row shaped
+ * differently from another. */
 export async function lockById(db: Db, id: string): Promise<HandoverRow | null> {
   const r = await db.query<HandoverRow>(
     `SELECT ${HANDOVER_COLUMNS} FROM cash_reconciliations WHERE id = $1 FOR UPDATE`,
-    [id],
-  );
-  return r.rows[0] ?? null;
-}
-
-/** The row as a reopen finds it, carrying the sign-off figures the audit
- * row must preserve. Same `FOR UPDATE` lock — a concurrent confirm and
- * reopen serialise here, so `previousStatus` cannot go stale between the
- * check and the reversal. */
-export interface ReopenLock extends HandoverRow {
-  confirmed_amount: string | null;
-  owner_note: string | null;
-}
-
-export async function lockForReopen(db: Db, id: string): Promise<ReopenLock | null> {
-  const r = await db.query<ReopenLock>(
-    `SELECT ${HANDOVER_COLUMNS}, confirmed_amount::text AS confirmed_amount, owner_note
-     FROM cash_reconciliations WHERE id = $1 FOR UPDATE`,
     [id],
   );
   return r.rows[0] ?? null;
@@ -143,13 +143,28 @@ export async function amend(db: Db, id: string, patch: AmendmentPatch): Promise<
  * employee id — there is no path here that takes an employee id from the
  * request, which is what makes "a technician cannot read another's
  * handovers" structural rather than a filter someone can forget.
+ *
+ * `oldest` is the window floor, and the WINDOW IS THE POINT (2026-09-18,
+ * Yashas: "the sales rep gets the full history whereas the technician
+ * gets only the last 7 days history"). It is `null` for the rep — he
+ * takes the whole record, because he is the one who reconciles with the
+ * office over months. The caller supplies it rather than this function
+ * deriving it, because the value must be the SAME one `declare` enforces:
+ * the technician's history can never show him a day he could not also
+ * have declared for. It comes from `businessDateBounds`, the one place
+ * that 7-day rule lives.
  */
-export async function listForEmployee(db: Db, employeeId: string): Promise<HandoverRow[]> {
+export async function listForEmployee(
+  db: Db,
+  employeeId: string,
+  oldest: string | null,
+): Promise<HandoverRow[]> {
   const r = await db.query<HandoverRow>(
     `SELECT ${HANDOVER_COLUMNS} FROM cash_reconciliations
      WHERE employee_id = $1
+       AND ($2::date IS NULL OR business_date >= $2::date)
      ORDER BY business_date DESC, declared_at DESC`,
-    [employeeId],
+    [employeeId, oldest],
   );
   return r.rows;
 }

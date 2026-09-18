@@ -346,6 +346,90 @@ describe('the withheld figure — the employee never sees the expectation (§10)
   });
 });
 
+describe('own history — the office’s answer, and two windows on one endpoint (2026-09-18)', () => {
+  it('a rep’s history carries the owner’s figure and his reason — his answer, never the expectation', async () => {
+    // A day the owner answered with a figure of his own, not the declared one.
+    const answeredDay = await businessDate(-3);
+    const declared = CashHandoverSchema.parse(
+      (await declareCash(REP.token, { businessDate: answeredDay, declaredAmount: '4500' })).json(),
+    );
+    await db.query(
+      `UPDATE cash_reconciliations
+          SET status = 'confirmed', confirmed_amount = '4200',
+              confirmed_by = $2, confirmed_at = now()
+        WHERE id = $1`,
+      [declared.id, OWNER.id],
+    );
+
+    // …and a day he answered with a reason instead.
+    const disputedDay = await businessDate(-4);
+    const disputed = CashHandoverSchema.parse(
+      (await declareCash(REP.token, { businessDate: disputedDay, declaredAmount: '900' })).json(),
+    );
+    await db.query(
+      `UPDATE cash_reconciliations
+          SET status = 'disputed', owner_note = $2, confirmed_at = now()
+        WHERE id = $1`,
+      [disputed.id, 'Only ₹600 reached the desk.'],
+    );
+
+    const res = await myHandovers(REP.token);
+    expect(res.statusCode, res.body).toBe(200);
+    const items = cashHandoverListResponseSchema.parse(res.json());
+
+    const answeredRow = items.find((h) => h.businessDate === answeredDay)!;
+    expect(answeredRow.confirmedAmount).toBe('4200.00');
+    expect(answeredRow.ownerNote).toBeNull();
+    expect(answeredRow.confirmedAt).not.toBeNull();
+
+    // The reason is the whole point: `disputed` alone left the employee
+    // with a questioned day and no account of it.
+    const disputedRow = items.find((h) => h.businessDate === disputedDay)!;
+    expect(disputedRow.status).toBe('disputed');
+    expect(disputedRow.ownerNote).toBe('Only ₹600 reached the desk.');
+    expect(disputedRow.confirmedAmount).toBeNull();
+
+    // An unanswered day stays unanswered rather than showing zeroes.
+    const openRow = items.find((h) => h.status === 'submitted')!;
+    expect(openRow.confirmedAmount).toBeNull();
+    expect(openRow.ownerNote).toBeNull();
+    expect(openRow.confirmedAt).toBeNull();
+
+    // The withheld figure is still withheld. The office's answer crosses
+    // the wire; the expectation does not, and no variance against it is
+    // computed on this path — `declared - confirmed` is the only
+    // difference the two figures on this shape can support.
+    expect(keysOf(JSON.parse(res.body)).filter((k) => /expected/i.test(k))).toEqual([]);
+    expect(res.body).not.toContain('expected_cash');
+    expect(res.body).not.toContain('variance');
+  });
+
+  it('the rep reads past the declaration window; the technician is floored at the week he can still declare for', async () => {
+    // Seeded directly: the API refuses to declare this far back, so a row
+    // like this only arrives when the window narrows under an older
+    // record — which is exactly the case the two windows disagree about.
+    const oldDay = await businessDate(-30);
+    await db.query(
+      `INSERT INTO cash_reconciliations (employee_id, business_date, declared_amount, declared_at)
+       VALUES ($1, $2::date, '12000.00', now()), ($3, $2::date, '12000.00', now())`,
+      [REP.id, oldDay, TECH.id],
+    );
+
+    const repDays = cashHandoverListResponseSchema
+      .parse((await myHandovers(REP.token)).json())
+      .map((h) => h.businessDate);
+    expect(repDays).toContain(oldDay);
+
+    const techDays = cashHandoverListResponseSchema
+      .parse((await myHandovers(TECH.token)).json())
+      .map((h) => h.businessDate);
+    expect(techDays).not.toContain(oldDay);
+    // The floor is the same rule that bounds his declarations, so the week
+    // he declared in is still all there.
+    expect(techDays).toContain(await businessDate(0));
+  });
+});
+
 describe('a rep-day with a cash payment — through the queue (T3.1’s fixture, from the endpoint)', () => {
   it('a rep-day with a cash payment and no declaration flags missing_submission; the endpoint’s declaration resolves it', async () => {
     // REP_B rides his flag enabled directly (the matrix's pattern) — the

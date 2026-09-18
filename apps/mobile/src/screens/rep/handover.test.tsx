@@ -1,7 +1,7 @@
 /**
  * S6 Cash handover — the rep's lens on the technician's §T6 screen
  * (UI/plan-2/06-SALES-REP.md §S6: "identical to 04-TECHNICIAN.md §T6 with
- * a different heading"). The rep shares the same `HandoverScreen` — the
+ * a different heading"). The rep shares the same `CashScreen` — the
  * two absences and the amendment rule are asserted HERE against the rep's
  * usage so a later role-specialisation of the shared screen cannot
  * silently break the rep:
@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { CashHandover } from '@servgrid/shared';
 import { allText, create, findByTestID, toJson } from '../../components/ui/testing';
-import { HandoverScreen } from '../technician/HandoverScreen';
+import { CashScreen } from '../cash/CashScreen';
 
 const TODAY = '2026-09-11';
 
@@ -27,6 +27,9 @@ function declaration(overrides: Partial<CashHandover>): CashHandover {
     note: null,
     status: 'submitted',
     declaredAt: `${TODAY}T13:30:00.000Z`,
+    confirmedAmount: null,
+    ownerNote: null,
+    confirmedAt: null,
     version: 1,
     ...overrides,
   };
@@ -40,7 +43,7 @@ describe('RepHandover — §S6 via the shared §T6 screen', () => {
       declare: vi.fn(async () => declaration({})),
       amend: vi.fn(async () => declaration({})),
     };
-    const r = await create(<HandoverScreen {...deps} />);
+    const r = await create(<CashScreen {...deps} />);
     const tree = toJson(r);
     expect(findByTestID(tree, 'handover-title')).toBeDefined();
     expect(allText(tree)).toContain('Cash handover');
@@ -57,7 +60,7 @@ describe('RepHandover — §S6 via the shared §T6 screen', () => {
       declare: vi.fn(async () => declaration({})),
       amend: vi.fn(async () => declaration({})),
     };
-    const r = await create(<HandoverScreen {...deps} />);
+    const r = await create(<CashScreen {...deps} />);
     expect(findByTestID(toJson(r), 'handover-amend')).toBeDefined();
     expect(findByTestID(toJson(r), 'handover-submit')).toBeUndefined();
     expect(allText(toJson(r))).toContain('₹ 4,500');
@@ -68,7 +71,7 @@ describe('RepHandover — §S6 via the shared §T6 screen', () => {
       declare: vi.fn(async () => declaration({})),
       amend: vi.fn(async () => declaration({})),
     };
-    const lockedRenderer = await create(<HandoverScreen {...locked} />);
+    const lockedRenderer = await create(<CashScreen {...locked} />);
     expect(findByTestID(toJson(lockedRenderer), 'handover-amend')).toBeUndefined();
     expect(findByTestID(toJson(lockedRenderer), 'handover-locked-copy')).toBeDefined();
   });

@@ -15,7 +15,7 @@ import type {
   CompanyBalance,
   PaymentMode,
 } from '@servgrid/shared';
-import { istBusinessDate } from '../technician/HandoverScreen';
+import { istBusinessDate } from '../cash/handoverModel';
 import { sumMoney } from './money';
 
 // ── view rows ──────────────────────────────────────────────────────────────

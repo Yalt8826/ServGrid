@@ -8,6 +8,7 @@ import type {
   CashQueueResponse,
   CashQueueRow,
   CashReopenRequest,
+  Role,
 } from '@servgrid/shared';
 import type { CashQueueDayResponse } from './schemas.js';
 import { AppError } from '../../plugins/errors.js';
@@ -63,6 +64,26 @@ const STILL_OPEN_MESSAGE = 'This day is still open — reopen applies to a confi
 /** §10: `businessDate` may reach this many days into the past. */
 export const BUSINESS_DATE_MAX_AGE_DAYS = 7;
 
+/**
+ * How far back an employee's own history reaches (2026-09-18, Yashas:
+ * "the sales rep gets the full history whereas the technician gets only
+ * the last 7 days history").
+ *
+ * The technician's window is not a new rule — it is the SAME
+ * `BUSINESS_DATE_MAX_AGE_DAYS` that bounds what he may declare, which is
+ * what makes his history a view of a period he can still act within. The
+ * rep's is unbounded because he reconciles against the office over
+ * months, and a record he cannot see past a week is not a record.
+ *
+ * Returning days (not an ISO floor) keeps the "today" in one place: the
+ * floor is computed from `business_date(now())` by `businessDateBounds`,
+ * the same query `declare` bounds itself with, so history and declaration
+ * can never disagree about where the window starts.
+ */
+export function historyWindowDaysFor(role: Role): number | null {
+  return role === 'technician' ? BUSINESS_DATE_MAX_AGE_DAYS : null;
+}
+
 /** row → wire mapper; returns exactly `CashHandoverSchema`'s keys, nothing else. */
 function toHandover(row: repo.HandoverRow): CashHandover {
   return {
@@ -72,6 +93,9 @@ function toHandover(row: repo.HandoverRow): CashHandover {
     note: row.employee_note,
     status: row.status,
     declaredAt: row.declared_at.toISOString(),
+    confirmedAmount: row.confirmed_amount,
+    ownerNote: row.owner_note,
+    confirmedAt: row.confirmed_at === null ? null : row.confirmed_at.toISOString(),
     version: row.version,
   };
 }
@@ -171,10 +195,14 @@ export function createCashService() {
   /**
    * GET /v1/cash/handovers/me — own history (§10). Keyed off the token; the
    * request never names an employee, so nobody else's rows are reachable
-   * from this endpoint at all.
+   * from this endpoint at all. `windowDays` narrows it by role
+   * (`historyWindowDaysFor`) — the technician sees the week he can still
+   * declare for, the rep sees the whole record.
    */
-  async function history(employeeId: string): Promise<CashHandover[]> {
-    const rows = await repo.listForEmployee(getPool(), employeeId);
+  async function history(employeeId: string, windowDays: number | null): Promise<CashHandover[]> {
+    const oldest =
+      windowDays === null ? null : (await repo.businessDateBounds(getPool())).oldest;
+    const rows = await repo.listForEmployee(getPool(), employeeId, oldest);
     return rows.map(toHandover);
   }
 
@@ -291,7 +319,7 @@ export function createCashService() {
    */
   async function reopen(actor: CashActor, handoverId: string, body: CashReopenRequest): Promise<CashQueueRow> {
     return withTransaction(async (client) => {
-      const row = await repo.lockForReopen(client, handoverId);
+      const row = await repo.lockById(client, handoverId);
       if (row === null) {
         throw new AppError('NOT_FOUND', NOT_FOUND_MESSAGE);
       }
