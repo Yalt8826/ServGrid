@@ -138,7 +138,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACE[4],
     paddingTop: SPACE[4],
     paddingBottom: SPACE[4],
-    marginBottom: SPACE[4],
   },
   frameBody: { flex: 1, gap: 2 },
   frameTitle: { ...textStyle('h2'), color: FRAME.text, fontVariant: ['tabular-nums'] },
@@ -166,8 +165,15 @@ const styles = StyleSheet.create({
     backgroundColor: SEMANTIC.bg.raised,
     gap: 2,
   },
-  /** Every marker sits inside the page's gutters, not on its edge. */
-  sectionWrap: { paddingHorizontal: SPACE[4] },
+  /**
+   * Every marker sits inside the page's gutters, not on its edge — and it
+   * carries the air ABOVE itself (2026-09-18, measured: with no top margin
+   * the ITEMS marker sat 0dp under the Company panel while the gap below
+   * every marker was 12dp, which is the crowding Yashas saw. The frame's
+   * own bottom margin moved here so the Company marker gets the same 16 as
+   * the rest).
+   */
+  sectionWrap: { paddingHorizontal: SPACE[4], marginTop: SPACE[4] },
   primary: { ...textStyle('body'), color: SEMANTIC.text.primary },
   secondary: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   amount: { ...textStyle('body'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] },
@@ -179,7 +185,10 @@ const styles = StyleSheet.create({
     borderRadius: RADII.control,
     backgroundColor: SEMANTIC.bg.raised,
     padding: SPACE[3],
-    gap: 2,
+    // The name and the line under it were 2dp apart, which reads as one
+    // dense block once the detail line is long (the SKU · qty × price ·
+    // list · discount caption is the longest text on this screen).
+    gap: SPACE[2],
   },
   lineHead: { flexDirection: 'row', justifyContent: 'space-between', gap: SPACE[3] },
   totalRow: {
