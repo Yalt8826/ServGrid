@@ -19,9 +19,10 @@
  */
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Button, EmptyState } from '../../components/ui';
+import { formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
+import { Button, EmptyState, SectionHeader } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, MoneyFigure } from './money';
 import type { OwedRow, PaymentRow } from './model';
@@ -55,54 +56,62 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
   const nowYear = new Date().getFullYear();
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'rep-dashboard'}>
-      <View style={styles.header}>
-        <Text style={styles.heading} testID="dashboard-name">
-          {props.name}
-        </Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'rep-dashboard'}>
+      {/* The frame (2026-09-18): who is signed in, the month's two figures,
+          and the one action — on the navy the tab bar wears. The route
+          paints the same navy behind the status bar. */}
+      <View style={styles.frame}>
+        <View style={styles.frameHead}>
+          <Text style={styles.frameTitle} testID="dashboard-name">
+            {props.name}
+          </Text>
+          <Button label="New sale" icon="plus" variant="secondary" onPress={props.onNewSale} testID="dashboard-new-sale" />
+        </View>
+        <View style={styles.frameRule} />
+
+        {props.figuresError !== null ? (
+          <>
+            <Text style={styles.errorText} testID="dashboard-figures-error">
+              {props.figuresError}
+            </Text>
+            <Button label="Retry" variant="secondary" onPress={props.onRetry} testID="dashboard-retry" />
+          </>
+        ) : props.figures === null ? null : (
+          <View style={styles.figuresRow}>
+            <View style={styles.figureCell}>
+              {props.salesOff ? (
+                <Text style={styles.offLine} testID="dashboard-figure-sold-off">
+                  Turned off right now.
+                </Text>
+              ) : (
+                <MoneyFigure
+                  value={`₹${formatMoneyEnIN(props.figures.soldThisMonth)}`}
+                  onFrame
+                  testID="dashboard-figure-sold"
+                />
+              )}
+              <Text style={styles.figureCaption}>sold this month</Text>
+            </View>
+            <View style={styles.figureDivider} />
+            <View style={styles.figureCell}>
+              {props.paymentsOff ? (
+                <Text style={styles.offLine} testID="dashboard-figure-outstanding-off">
+                  Turned off right now.
+                </Text>
+              ) : (
+                <MoneyFigure
+                  value={`₹${formatMoneyEnIN(props.figures.outstanding)}`}
+                  onFrame
+                  testID="dashboard-figure-outstanding"
+                />
+              )}
+              <Text style={styles.figureCaption}>outstanding</Text>
+            </View>
+          </View>
+        )}
       </View>
 
-      {props.figuresError !== null ? (
-        <>
-          <Text style={styles.errorText} testID="dashboard-figures-error">
-            {props.figuresError}
-          </Text>
-          <Button label="Retry" variant="secondary" onPress={props.onRetry} testID="dashboard-retry" />
-        </>
-      ) : props.figures === null ? null : (
-        <View style={styles.figuresRow}>
-          <View style={styles.figureCell}>
-            {props.salesOff ? (
-              <Text style={styles.offLine} testID="dashboard-figure-sold-off">
-                Turned off right now.
-              </Text>
-            ) : (
-              <MoneyFigure
-                value={`₹${formatMoneyEnIN(props.figures.soldThisMonth)}`}
-                testID="dashboard-figure-sold"
-              />
-            )}
-            <Text style={styles.figureCaption}>sold this month</Text>
-          </View>
-          <View style={styles.figureCell}>
-            {props.paymentsOff ? (
-              <Text style={styles.offLine} testID="dashboard-figure-outstanding-off">
-                Turned off right now.
-              </Text>
-            ) : (
-              <MoneyFigure
-                value={`₹${formatMoneyEnIN(props.figures.outstanding)}`}
-                testID="dashboard-figure-outstanding"
-              />
-            )}
-            <Text style={styles.figureCaption}>outstanding</Text>
-          </View>
-        </View>
-      )}
-
-      <Button label="+ New sale" onPress={props.onNewSale} testID="dashboard-new-sale" />
-
-      <Text style={styles.sectionLabel}>OWES THE MOST</Text>
+      <SectionHeader label="Owes the most" icon="wallet" />
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-owed-off">
           Payments are turned off right now.
@@ -119,23 +128,25 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
               key={row.companyId}
               accessibilityRole="button"
               onPress={() => props.onOpenCompany(row.companyId)}
-              style={styles.listRow}
+              style={styles.card}
               testID={`dashboard-owed-${row.companyId}`}
             >
-              <Text style={styles.rowPrimary}>{owedRowText(row.name, row.balance)}</Text>
-              <View style={styles.rowEnd}>
-                {/* Positive dues render plain; `creditView` only colours a
-                negative — the row is filtered to positives, so this is the
-                plain figure. */}
-                <Text style={[styles.rowMoney, { color: view.color }]}>{`₹${formatMoneyEnIN(row.balance)}`}</Text>
-                <Text style={styles.chevron}>→</Text>
+              <View style={styles.cardBody}>
+                <Text style={styles.rowPrimary}>{owedRowText(row.name, row.balance)}</Text>
+                <View style={styles.rowEnd}>
+                  {/* Positive dues render plain; `creditView` only colours a
+                  negative — the row is filtered to positives, so this is the
+                  plain figure. */}
+                  <Text style={[styles.rowMoney, { color: view.color }]}>{`₹${formatMoneyEnIN(row.balance)}`}</Text>
+                  <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
+                </View>
               </View>
             </Pressable>
           );
         })
       )}
 
-      <Text style={styles.sectionLabel}>RECENT PAYMENTS</Text>
+      <SectionHeader label="Recent payments" icon="wallet" />
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-payments-off">
           Payments are turned off right now.
@@ -154,10 +165,10 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             key={row.id}
             accessibilityRole="button"
             onPress={props.onOpenPayments}
-            style={styles.listRow}
+            style={styles.card}
             testID={`dashboard-payment-${row.id}`}
           >
-            <View style={styles.rowMain}>
+            <View style={styles.cardBody}>
               <Text style={styles.rowPrimary}>{props.companyNames[row.companyId] ?? row.companyName}</Text>
               <Text style={styles.rowSecondary}>{`${row.paymentNumber} · ${row.mode} · ${formatDateEnIN(
                 row.businessDate,
@@ -177,50 +188,61 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself — the frame above must
+   * not bleed into where short content ends. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
     paddingBottom: SPACE[8],
-    gap: SPACE[2],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
   },
-  header: {
+  /** The frame: who, the month's two figures, and the one action. */
+  frame: {
+    backgroundColor: FRAME.bg,
+    marginHorizontal: SPACE[4] * -1, // full bleed to the screen's edges
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+  },
+  frameHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACE[2],
+    gap: SPACE[3],
+    marginBottom: SPACE[4],
   },
-  heading: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
-  },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameRule: { height: 1, backgroundColor: FRAME.divider, marginBottom: SPACE[4] },
   figuresRow: {
     flexDirection: 'row',
-    gap: SPACE[6],
-    marginVertical: SPACE[3],
+    alignItems: 'stretch',
   },
   figureCell: {
     flex: 1,
     gap: 2,
   },
+  /** The hairline between the two figures — the dashboard's own divider
+   * language (FRAME.divider), vertical here. */
+  figureDivider: { width: 1, backgroundColor: FRAME.divider, marginHorizontal: SPACE[4] },
   figureCaption: {
     ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
+    color: FRAME.textMuted,
   },
-  sectionLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
-    marginTop: SPACE[4],
-    marginBottom: SPACE[1],
-  },
-  listRow: {
+  /** A row is a card: air between, hairline round, room to tap. */
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 52,
-    paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
     gap: SPACE[3],
+    marginTop: SPACE[2],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
   },
+  cardBody: { flex: 1, gap: 2 },
   rowPrimary: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
@@ -239,10 +261,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACE[2],
-  },
-  chevron: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
   },
   rowMain: {
     flex: 1,
