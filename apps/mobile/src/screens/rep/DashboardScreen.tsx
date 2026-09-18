@@ -25,10 +25,13 @@ import { formatDateEnIN } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, MoneyFigure } from './money';
+import { istDayLabel, istGreeting } from '../technician/jobView';
 import type { OwedRow, PaymentRow } from './model';
 
 export interface RepDashboardScreenProps {
   name: string;
+  /** Injectable clock — the greeting and the date line are judged by it. */
+  now: Date;
   figures: { soldThisMonth: string; outstanding: string } | null;
   figuresError: string | null;
   /** `sales.cards` off — the sold figure renders "turned off", honestly. */
@@ -61,6 +64,15 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
           and the one action — on the navy the tab bar wears. The route
           paints the same navy behind the status bar. */}
       <View style={styles.frame}>
+        {/* The greeting and the IST date line — the other dashboards' own
+            header shape, judged by the injected clock, never the phone's
+            timezone. */}
+        <Text style={styles.greeting} testID="dashboard-greeting">
+          {`${istGreeting(props.now)}, ${props.name}`}
+        </Text>
+        <Text style={styles.dateLine} testID="dashboard-date">
+          {istDayLabel(props.now)}
+        </Text>
         <View style={styles.frameHead}>
           <Text style={styles.frameTitle} testID="dashboard-name">
             {props.name}
@@ -228,6 +240,12 @@ const styles = StyleSheet.create({
     paddingTop: SPACE[4],
     paddingBottom: SPACE[4],
   },
+  greeting: { ...textStyle('h1'), color: FRAME.text },
+  dateLine: {
+    ...textStyle('caption'),
+    color: FRAME.textMuted,
+    marginBottom: SPACE[4],
+  },
   frameHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -235,7 +253,8 @@ const styles = StyleSheet.create({
     gap: SPACE[3],
     marginBottom: SPACE[4],
   },
-  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  /** The username line, quieter under the greeting (no h3 in the ramp). */
+  frameTitle: { ...textStyle('label'), color: FRAME.textMuted },
   frameRule: { height: 1, backgroundColor: FRAME.divider, marginBottom: SPACE[4] },
   figuresRow: {
     flexDirection: 'row',

@@ -62,6 +62,7 @@ function RepDashboardRoute(): React.ReactNode {
     <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <RepDashboardScreen
         name={actor?.username ?? ''}
+        now={new Date()}
         figures={
           dashboard.data === null
             ? null

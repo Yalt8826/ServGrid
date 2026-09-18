@@ -76,6 +76,7 @@ function payment(overrides: Partial<PaymentRecord> = {}): PaymentRecord {
 function baseProps(overrides: Partial<Parameters<typeof RepDashboardScreen>[0]> = {}) {
   return {
     name: 'Anitha',
+    now: new Date('2026-09-18T09:00:00+05:30'),
     figures: { soldThisMonth: '420000', outstanding: '185000' },
     figuresError: null,
     salesOff: false,
