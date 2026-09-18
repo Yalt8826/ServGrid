@@ -14,11 +14,21 @@
  *
  * A negative balance renders through `creditView` — the word Credit in
  * `feedback.success`, never a minus sign in red.
+ *
+ * **The filter (2026-09-18).** Five accounts fit on a screen and do not
+ * need one; the rep's book will not stay at five, and hunting a name by
+ * eye down a list of sixty is not a lookup (the same reasoning that put
+ * the field inside the sale form's account dropdown the day before). It
+ * matches the NAME only, deliberately: the row shows the name, and a
+ * search that matches something the row does not show is a search you
+ * cannot trust the results of. The list is already in memory, so the
+ * filter is local and instant — no round trip, nothing to debounce.
  */
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { FRAME, ICON, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, EmptyState } from '../../components/ui';
+import { Banner, Button, EmptyState, TextField } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
@@ -35,6 +45,13 @@ export interface CompaniesScreenProps {
   onNewCompany: () => void;
   onRetry: () => void;
   testID?: string;
+}
+
+/** Matches a row against the typed needle. Name only — see the header. */
+export function accountsMatching(rows: readonly CompanyRow[], query: string): CompanyRow[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === '') return [...rows];
+  return rows.filter((row) => row.name.toLowerCase().includes(needle));
 }
 
 /** The static `Shared` chip — a label, not a control. */
@@ -63,6 +80,11 @@ const chipStyles = StyleSheet.create({
 
 export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
   const nowYear = new Date().getFullYear();
+  const [query, setQuery] = useState('');
+  const shown = accountsMatching(props.rows, query);
+  const filtering = query.trim() !== '';
+  const count = `${shown.length} ${shown.length === 1 ? 'account' : 'accounts'}`;
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'rep-companies'}>
       {/* The frame (2026-09-18): what this is, how many accounts, and the
@@ -71,8 +93,11 @@ export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
         <View style={styles.frameHead}>
           <View style={styles.frameBody}>
             <Text style={styles.frameTitle}>Companies</Text>
-            <Text style={styles.frameCaption}>
-              {`${props.rows.length} ${props.rows.length === 1 ? 'account' : 'accounts'}`}
+            <Text style={styles.frameCaption} testID="companies-count">
+              {/* While filtering the caption answers "how many, of what" —
+                  a bare "2 accounts" over a filtered list would read as the
+                  whole book having shrunk. */}
+              {filtering ? `${count} of ${props.rows.length}` : count}
             </Text>
           </View>
         </View>
@@ -90,10 +115,31 @@ export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="companies-error" />
       ) : null}
 
+      {/* Nothing to filter when there is nothing there: an empty box over
+          "No accounts yet." would be an invitation to nothing. */}
+      {props.rows.length > 0 ? (
+        <View style={styles.searchWrap}>
+          <TextField
+            label="Find an account"
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Name — typing filters the list"
+            testID="companies-search"
+          />
+        </View>
+      ) : null}
+
       {!props.loading && props.error === null && props.rows.length === 0 ? (
         <EmptyState message="No accounts yet." testID="companies-empty" />
+      ) : filtering && shown.length === 0 ? (
+        <EmptyState
+          message={`No account matches “${query.trim()}”.`}
+          actionLabel="Show all"
+          onAction={() => setQuery('')}
+          testID="companies-no-match"
+        />
       ) : (
-        props.rows.map((row) => {
+        shown.map((row) => {
           const balance = row.balance === null ? null : creditView(row.balance);
           const lastActivity = lastActivityOf(row);
           return (
@@ -172,6 +218,10 @@ const styles = StyleSheet.create({
   /** The two create doors share the frame's second line. */
   frameActions: { flexDirection: 'row', gap: SPACE[2] },
   frameAction: { flex: 1 },
+  /** The filter sits on the page ground under the frame — a light field on
+   * the navy would need its own ink to be legible, and the frame is the
+   * doors, not the workbench. */
+  searchWrap: { marginBottom: SPACE[1] },
   /** A row is a card: air between, hairline round, the rail leading. */
   card: {
     flexDirection: 'row',
