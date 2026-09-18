@@ -78,7 +78,19 @@ interface PinnedSubmit {
   bodyJson: string;
 }
 
-export function useDispatchForm(options?: { initialCustomerId?: string | null }): DispatchJobDeps {
+export function useDispatchForm(options?: {
+  initialCustomerId?: string | null;
+  /**
+   * Called once the job is RAISED — and assigned, when a technician was
+   * named. The form's exit (Yashas, 2026-09-19: "when the dispatch job
+   * form is done and created and assigned it should close the form").
+   *
+   * Deliberately not called when the raise succeeds and the ASSIGN is
+   * refused: the job exists, the dispatcher has to read why, and the form
+   * is where he retries from.
+   */
+  onCreated?: () => void;
+}): DispatchJobDeps {
   const router = useRouter();
   const queryClient = useQueryClient();
   const offline = !useIsOnline();
@@ -152,7 +164,15 @@ export function useDispatchForm(options?: { initialCustomerId?: string | null })
     setAmcTicked(true);
   }, [selectedCustomer?.id]);
 
-  // ── submit: raise, then assign — both without leaving the screen ────────
+  // The close seam, held in a ref: the route passes a fresh arrow each
+  // render, and listing `options` in the submit callback's deps would
+  // rebuild it for nothing.
+  const onCreatedRef = useRef(options?.onCreated);
+  onCreatedRef.current = options?.onCreated;
+
+  // ── submit: raise, then assign, then LEAVE ─────────────────────────────
+  // It used to end on the screen with a success banner. The dispatcher's
+  // next act is the next call, not a confirmation he already knows.
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<{ jobNumber: string; technicianName: string | null } | null>(null);
@@ -207,6 +227,10 @@ export function useDispatchForm(options?: { initialCustomerId?: string | null })
           assigneeName = technicians.find((technician) => technician.employeeId === fields.technicianId)?.name ?? null;
         }
         setSubmitted({ jobNumber: created.jobNumber, technicianName: assigneeName });
+        // Raised, and assigned if he named someone: the dispatch is done, so
+        // the form closes. A caller without a router (tests) leaves it out
+        // and keeps the banner.
+        onCreatedRef.current?.();
       } catch (error) {
         // A definite refusal is a finished intent; a dropped connection
         // keeps it, so the retry replays under the same key.

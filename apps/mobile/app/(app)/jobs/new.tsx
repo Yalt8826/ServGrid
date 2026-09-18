@@ -16,7 +16,7 @@
  */
 import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { FRAME } from '@servgrid/shared';
 import { DispatchJobScreen } from '../../../src/screens/dispatcher/dispatch';
@@ -29,6 +29,7 @@ const styles = StyleSheet.create({
 });
 
 export default function Screen() {
+  const router = useRouter();
   const flags = useDispatchJobLogsFlags();
   const actor = useSessionStore((s) => s.actor);
   // The AMC tab's Dispatch deep-link (`/jobs/new?customerId=…`) lands
@@ -36,7 +37,16 @@ export default function Screen() {
   // param and starts from an empty search.
   const params = useLocalSearchParams<{ customerId?: string | string[] }>();
   const initialCustomerId = Array.isArray(params.customerId) ? params.customerId[0] : params.customerId;
-  const deps = useDispatchForm({ initialCustomerId: initialCustomerId ?? null });
+  const deps = useDispatchForm({
+    initialCustomerId: initialCustomerId ?? null,
+    // The dispatch is done — leave. Back to where he came from (the
+    // dashboard, the job logs, or the AMC tab on the deep link); a cold
+    // entry with nothing behind it lands on the log instead.
+    onCreated: () => {
+      if (router.canGoBack()) router.back();
+      else router.replace('/jobs');
+    },
+  });
 
   if (actor?.role !== 'owner' && !flags.consoleOn) {
     // Dark without the flag — the honest placeholder, nothing spinning.
