@@ -51,9 +51,12 @@ import {
   Button,
   EmptyState,
   MoneyField,
+  PageHeader,
+  Panel,
   Select,
   Sheet,
   TextField,
+  pageContentStyle,
   useDensity,
 } from '../../components/ui';
 import { haptic } from '../../components/ui/haptics';
@@ -511,9 +514,12 @@ function DaySheet({
 
 // ── the rows ────────────────────────────────────────────────────────────────
 
-function TodayCaption(): React.ReactNode {
+/** Today's row is still syncing. `padded` is for the desk, where the
+ * caption sits inside the card and the table below it starts flush to
+ * the card's edge. */
+function TodayCaption({ padded = false }: { padded?: boolean }): React.ReactNode {
   return (
-    <Text style={styles.todayCaption} testID="cash-today-caption">
+    <Text style={[styles.todayCaption, padded && styles.todayCaptionPadded]} testID="cash-today-caption">
       {TODAY_CAPTION}
     </Text>
   );
@@ -712,43 +718,67 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
       key: 'flag',
       label: 'Flag',
       width: 170,
-      render: (r) => <FlagPill flag={r.flag} />,
+      // The table's cell stretches its children, which drew the pill the
+      // full 146dp of the column — a bordered empty-looking box for an
+      // eight-letter word. In a row wrapper it hugs its label again.
+      render: (r) => (
+        <View style={styles.pillWrap}>
+          <FlagPill flag={r.flag} />
+        </View>
+      ),
       sortValue: (r) => FLAG_ORDER[r.flag],
     },
     {
       key: 'actions',
       label: '',
-      width: 330,
+      // An open row's three buttons are 304dp of 36dp-tall Button, and
+      // the cell's own 12dp side padding means a 330dp column left them
+      // 6dp short — they wrapped to a second line inside a 40dp row,
+      // whose `overflow: hidden` then cut every label in half and let
+      // "View the day" paint into the next row's band (2026-09-19).
+      width: 356,
       render: (r) => actionSet(r, acts, 'row'),
     },
   ];
 
+  // The page's two filters. On the desk they ride in the page header,
+  // which is where a console list keeps its filters (Companies, §O5) —
+  // and the header is the one element that outranks the table: a
+  // dropdown menu painted under the rows it filters is the bug the
+  // header's z-index exists to prevent.
+  const filters = (
+    <>
+      <Select
+        label="Range"
+        value={deps.range}
+        options={RANGE_OPTIONS.map((o) => ({ ...o }))}
+        onSelect={(v) => deps.onRange(v as CashQueueRange)}
+        testID="cash-range"
+      />
+      <Select
+        label="Flags"
+        value={deps.flagFilter}
+        options={FLAG_FILTER_OPTIONS.map((o) => ({ ...o }))}
+        onSelect={(v) => deps.onFlagFilter(v as CashQueueFlagFilter)}
+        testID="cash-flag-filter"
+      />
+    </>
+  );
+
   return (
-    <View style={[styles.root, desk && styles.rootDesk]} testID="owner-cash-queue">
-      <Text style={{ ...textStyle('h1'), color: SEMANTIC.text.primary }} testID="cash-title">
-        Cash reconciliation
-      </Text>
+    <View style={[styles.root, desk && pageContentStyle(true)]} testID="owner-cash-queue">
+      <PageHeader
+        title="Cash reconciliation"
+        subtitle={desk ? 'Collected cash, against what each technician declared.' : undefined}
+        actions={desk ? filters : undefined}
+        testID="cash-page"
+      />
 
       {deps.offline ? (
         <Banner tone="danger" message="No connection. Figures are not live." testID="cash-offline-banner" />
       ) : null}
 
-      <View style={[styles.filters, desk ? { flexDirection: 'row', alignSelf: 'stretch' } : null]}>
-        <Select
-          label="Range"
-          value={deps.range}
-          options={RANGE_OPTIONS.map((o) => ({ ...o }))}
-          onSelect={(v) => deps.onRange(v as CashQueueRange)}
-          testID="cash-range"
-        />
-        <Select
-          label="Flags"
-          value={deps.flagFilter}
-          options={FLAG_FILTER_OPTIONS.map((o) => ({ ...o }))}
-          onSelect={(v) => deps.onFlagFilter(v as CashQueueFlagFilter)}
-          testID="cash-flag-filter"
-        />
-      </View>
+      {desk ? null : <View style={styles.filters}>{filters}</View>}
 
       {deps.error !== null ? (
         <EmptyState
@@ -767,8 +797,8 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
         <EmptyState message="Nothing to reconcile in this range." testID="cash-queue-empty" />
       ) : rows !== null ? (
         desk ? (
-          <>
-            {deps.range === 'today' ? <TodayCaption /> : null}
+          <Panel padded={false}>
+            {deps.range === 'today' ? <TodayCaption padded /> : null}
             <DeskTable
               data={rows}
               columns={columns}
@@ -779,7 +809,7 @@ export function OwnerCashQueueScreen(deps: CashQueueDeps): React.ReactNode {
               scrollTestID="cash-queue-table"
               maxHeight={640}
             />
-          </>
+          </Panel>
         ) : (
           <ScrollView
             style={styles.cardList}
@@ -833,16 +863,9 @@ const styles = StyleSheet.create({
     padding: SPACE[4],
     gap: SPACE[3],
   },
-  // The console's page furniture — the same measure the DeskListShell
-  // gives the other lists, since this screen owns its own header.
-  rootDesk: {
-    paddingHorizontal: DESK.page.padX,
-    paddingTop: DESK.page.padY,
-    paddingBottom: DESK.page.padY,
-    maxWidth: DESK.page.maxWidth,
-    width: '100%',
-    alignSelf: 'center',
-  },
+  // The desk's page furniture is `pageContentStyle(true)` — the same
+  // measure DeskListShell hands the other lists, which this screen takes
+  // directly because it owns its own header (the filters live in it).
   filters: { gap: SPACE[3] },
   cardList: { flex: 1 },
   card: {
@@ -871,12 +894,15 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE[2], marginTop: SPACE[1] },
   rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE[1], alignItems: 'center' },
   todayCaption: { ...textStyle('caption'), color: SEMANTIC.text.secondary, fontStyle: 'italic' },
+  todayCaptionPadded: { paddingHorizontal: DESK.card.pad, paddingTop: DESK.card.pad },
   pill: {
     borderWidth: 1,
     borderRadius: 3,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
+  /** A row wrapper so the pill hugs its label inside the desk cell. */
+  pillWrap: { flexDirection: 'row', alignItems: 'center' },
   pillLabel: { ...textStyle('label'), fontSize: 11 },
   cell: { ...textStyle('body'), color: SEMANTIC.text.primary },
   cellStrong: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
