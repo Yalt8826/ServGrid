@@ -112,7 +112,13 @@ if adb devices 2>/dev/null | awk 'NR>1 {print $2}' | grep -q "device"; then
   SERIAL="${ANDROID_SERIAL:-$(adb devices | awk 'NR>1 && $2=="device" {print $1; exit}')}"
   adb -s "$SERIAL" reverse tcp:8787 tcp:8787 >/dev/null
   adb -s "$SERIAL" reverse tcp:8081 tcp:8081 >/dev/null
-  say "phone $SERIAL: adb reverse set (8787, 8081)"
+  # 9000 too: attachment bytes (payment proof photos, job photos) are served
+  # from MinIO, and the presigned URL is built from the API's own
+  # S3_ENDPOINT — http://localhost:9000 — so on the handset that name is the
+  # PHONE unless this tunnel exists. Without it every photo in the app is a
+  # blank box while every figure beside it is fine (2026-09-18).
+  adb -s "$SERIAL" reverse tcp:9000 tcp:9000 >/dev/null
+  say "phone $SERIAL: adb reverse set (8787, 8081, 9000)"
   if [ "$RELAUNCH_APP" -eq 1 ]; then
     adb -s "$SERIAL" shell am force-stop com.servgrid.app
     sleep 1
@@ -121,7 +127,7 @@ if adb devices 2>/dev/null | awk 'NR>1 {print $2}' | grep -q "device"; then
   fi
 else
   say "phone: none attached — adb reverse skipped (plug in and re-run, or set the tunnels by hand:"
-  say "  adb reverse tcp:8787 tcp:8787 && adb reverse tcp:8081 tcp:8081)"
+  say "  adb reverse tcp:8787 tcp:8787 && adb reverse tcp:8081 tcp:8081 && adb reverse tcp:9000 tcp:9000)"
 fi
 
 if [ "$api_ok" -eq 1 ] && [ "$metro_ok" -eq 1 ]; then

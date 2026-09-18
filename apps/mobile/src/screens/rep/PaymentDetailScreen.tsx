@@ -20,7 +20,8 @@
  * panel, and the details sit in a bordered panel under a section marker —
  * the account ledger's shape, so the two money screens read as kin.
  */
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { PaymentRecord } from '@servgrid/shared';
 import { alpha, COLORS, formatMoneyEnIN, FRAME, RADII, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
@@ -59,6 +60,15 @@ export interface PaymentDetailScreenProps {
   againstSaleNumber: string | null;
   loading: boolean;
   error: string | null;
+  /**
+   * The proof photo's short-lived URL, or null when the payment carries
+   * none (2026-09-18 — Yashas: "on the sales rep user i click on payment
+   * details it does not show the picture captured and sent during the
+   * record being made"). A dep seam like every read on this screen: the
+   * route owns the call, so the screen renders and tests without a device.
+   * Left undefined the section is absent entirely.
+   */
+  loadProof?: () => Promise<string | null>;
   onRetry: () => void;
   testID?: string;
 }
@@ -74,6 +84,37 @@ function Row({ label, value, testID }: { label: string; value: string; testID?: 
 }
 
 export function PaymentDetailScreen(props: PaymentDetailScreenProps): React.ReactNode {
+  const loadProof = props.loadProof;
+  const [proofUrl, setProofUrl] = useState<string | null>(null);
+  const [proofState, setProofState] = useState<'idle' | 'loading' | 'ready' | 'none' | 'error'>('idle');
+  const [proofError, setProofError] = useState<string | null>(null);
+  const paymentId = props.payment?.id ?? null;
+
+  // Loaded on the ROW, not on a press: the proof is evidence the payment
+  // happened, and a receipt you have to go looking for is one nobody
+  // checks. A 5-minute presigned URL (§9) means this is fetched per visit.
+  useEffect(() => {
+    if (loadProof === undefined || paymentId === null) return;
+    let alive = true;
+    setProofState('loading');
+    setProofError(null);
+    void loadProof()
+      .then((url) => {
+        if (!alive) return;
+        setProofUrl(url);
+        setProofState(url === null ? 'none' : 'ready');
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setProofError(e instanceof Error ? e.message : 'The proof photo could not be loaded.');
+        setProofState('error');
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentId, loadProof]);
+
   if (props.loading) {
     return (
       <View style={styles.center} testID="payment-detail-loading">
@@ -166,6 +207,39 @@ export function PaymentDetailScreen(props: PaymentDetailScreenProps): React.Reac
             </>
           ) : null}
         </View>
+
+        {loadProof === undefined ? null : (
+          <>
+            <View style={styles.section}>
+              <SectionHeader label="Proof photo" icon="camera" />
+            </View>
+            {proofState === 'loading' ? (
+              <Text style={styles.secondary} testID="payment-detail-proof-loading">
+                Opening the photo…
+              </Text>
+            ) : proofState === 'error' ? (
+              <Text style={[styles.secondary, styles.voidText]} testID="payment-detail-proof-error">
+                {proofError}
+              </Text>
+            ) : proofState === 'ready' && proofUrl !== null ? (
+              // The bytes are never proxied: the URL is the store's own,
+              // signed for five minutes (§9).
+              <Image
+                source={{ uri: proofUrl }}
+                resizeMode="contain"
+                style={styles.proof}
+                testID="payment-detail-proof"
+              />
+            ) : (
+              // Said plainly, and only once the read has answered: a payment
+              // recorded without a photo is a real state (the picker is a
+              // seam), not an error.
+              <Text style={styles.secondary} testID="payment-detail-proof-none">
+                No proof photo was attached to this payment.
+              </Text>
+            )}
+          </>
+        )}
 
         {payment.notes !== null ? (
           <>
@@ -275,5 +349,13 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   secondary: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  /** The photo, contained in a fixed box — the owner's proof sheet size, so
+   * a tall picture cannot push the figures off the page. */
+  proof: {
+    width: '100%',
+    height: 420,
+    borderRadius: 4,
+    backgroundColor: SEMANTIC.bg.dense,
+  },
   voidText: { color: SEMANTIC.feedback.danger },
 });

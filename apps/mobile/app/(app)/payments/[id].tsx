@@ -12,6 +12,7 @@ import { useLocalSearchParams } from 'expo-router';
 
 import type { Company, PaymentRecord, SaleRecord } from '@servgrid/shared';
 import { FRAME } from '@servgrid/shared';
+import { api } from '../../../src/lib/api';
 import { apiGet } from '../../../src/screens/rep/useRepData';
 import { PaymentDetailScreen } from '../../../src/screens/rep/PaymentDetailScreen';
 import { useSessionStore } from '../../../src/state/sessionStore';
@@ -67,6 +68,17 @@ function RepPaymentDetailRoute(): React.ReactNode {
         againstSaleNumber={againstSaleNumber}
         loading={loading}
         error={error}
+        // The photo captured while the payment was recorded, as a 5-minute
+        // presigned URL — the same read the owner's ledger row uses, and the
+        // rep is allowed it for his own collections (payments/routes.ts).
+        loadProof={async () => {
+          if (paymentId === undefined) return null;
+          const res = await api.request<{ url: string }>('GET', `/v1/payments/${paymentId}/proof`);
+          if (res.ok && res.data !== null) return res.data.url;
+          // NOT_FOUND is the honest "no photo was attached", not a failure.
+          if (res.error?.code === 'NOT_FOUND') return null;
+          throw new Error(res.error?.message ?? 'The proof photo could not be loaded.');
+        }}
         onRetry={() => setTick((t) => t + 1)}
       />
     </SafeAreaView>
