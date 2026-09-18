@@ -13,13 +13,19 @@
  * cannot re-date the business's money. This page was the one place that
  * left the question to the phone. The shape also becomes the app's own:
  * a 24-hour clock and no seconds.
+ *
+ * **The house dress, same day** — the last screen in the rep's app without
+ * it: the navy frame carries the number and the status as a tinted chip,
+ * the amount is the largest figure on screen in its own accent-railed
+ * panel, and the details sit in a bordered panel under a section marker —
+ * the account ledger's shape, so the two money screens read as kin.
  */
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { PaymentRecord } from '@servgrid/shared';
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
+import { alpha, COLORS, formatMoneyEnIN, FRAME, RADII, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
+import { SectionHeader, formatDateEnIN } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
-import { formatDateEnIN } from '../../components/ui';
 import { istDateKey, istTimeLabel } from '../technician/jobView';
 
 export const PAYMENT_DETAIL_MODE_LABEL: Record<PaymentRecord['mode'], string> = {
@@ -57,6 +63,7 @@ export interface PaymentDetailScreenProps {
   testID?: string;
 }
 
+/** One labelled fact, on the panel's hairline row. */
 function Row({ label, value, testID }: { label: string; value: string; testID?: string }): React.ReactNode {
   return (
     <View style={styles.row} testID={testID}>
@@ -86,72 +93,187 @@ export function PaymentDetailScreen(props: PaymentDetailScreenProps): React.Reac
 
   const payment = props.payment;
   const status = PAYMENT_DETAIL_STATUS[payment.status];
+  const nowYear = new Date().getFullYear();
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'payment-detail'}>
-      <Text style={styles.heading} testID="payment-detail-title">
-        {payment.paymentNumber}
-      </Text>
-      <Text style={[styles.statusPill, { color: status.color }]} testID="payment-detail-status">
-        {status.label}
-      </Text>
-
-      <View style={styles.amountCard} testID="payment-detail-amount-card">
-        <Text style={styles.amountValue}>{`₹${formatMoneyEnIN(payment.amount)}`}</Text>
-        <Text style={styles.amountMeta}>
-          {`${PAYMENT_DETAIL_MODE_LABEL[payment.mode]} · ${formatDateEnIN(payment.businessDate, new Date().getFullYear())}`}
-        </Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      testID={props.testID ?? 'payment-detail'}
+    >
+      {/* The frame: which payment, and where it stands — the number a
+          customer reads out, the word the office files it under. */}
+      <View style={styles.frame}>
+        <View style={styles.frameHead}>
+          <View style={styles.frameBody}>
+            <Text style={styles.frameTitle} testID="payment-detail-title">
+              {payment.paymentNumber}
+            </Text>
+            <Text style={styles.frameCaption}>
+              {`${PAYMENT_DETAIL_MODE_LABEL[payment.mode]} · ${formatDateEnIN(payment.businessDate, nowYear)}`}
+            </Text>
+          </View>
+          {/* The status as a tinted chip — the dot keeps the status ink,
+              the word the meaning, the tint only a ground. */}
+          <View
+            testID="payment-detail-status"
+            style={[
+              styles.statusChip,
+              {
+                borderColor: alpha(status.color, TINT.chipLine),
+                backgroundColor: alpha(status.color, TINT.chip),
+              },
+            ]}
+          >
+            <View style={[styles.statusDot, { backgroundColor: status.color }]} />
+            <Text style={styles.statusText}>{status.label}</Text>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.block}>
-        <Row label="Company" value={props.companyName ?? '—'} testID="payment-detail-company" />
-        <Row
-          label="Against"
-          value={props.againstSaleNumber ?? 'On account'}
-          testID="payment-detail-against"
-        />
-        <Row
-          label="Collected at"
-          value={collectedAtLabel(payment.receivedAt)}
-          testID="payment-detail-collected-at"
-        />
-        {payment.referenceNo !== null ? <Row label="Reference" value={payment.referenceNo} /> : null}
+      <View style={styles.body}>
+        {/* The figure, on the accent rail — the one number this page exists
+            to show, at display size like the ledger's balance. */}
+        <View style={styles.amountCard} testID="payment-detail-amount-card">
+          <View style={styles.amountRail} />
+          <View style={styles.amountBody}>
+            <Text style={styles.amountValue}>{`₹${formatMoneyEnIN(payment.amount)}`}</Text>
+            <Text style={styles.secondary}>Counted toward the balance.</Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <SectionHeader label="Details" icon="document" />
+        </View>
+        <View style={styles.panel}>
+          <Row label="Company" value={props.companyName ?? '—'} testID="payment-detail-company" />
+          <View style={styles.rowRule} />
+          <Row
+            label="Against"
+            value={props.againstSaleNumber ?? 'On account'}
+            testID="payment-detail-against"
+          />
+          <View style={styles.rowRule} />
+          <Row
+            label="Collected at"
+            value={collectedAtLabel(payment.receivedAt)}
+            testID="payment-detail-collected-at"
+          />
+          {payment.referenceNo !== null ? (
+            <>
+              <View style={styles.rowRule} />
+              <Row label="Reference" value={payment.referenceNo} />
+            </>
+          ) : null}
+        </View>
+
+        {payment.notes !== null ? (
+          <>
+            <View style={styles.section}>
+              <SectionHeader label="Notes" icon="document" />
+            </View>
+            <Text style={styles.secondary}>{payment.notes}</Text>
+          </>
+        ) : null}
+
+        {payment.voidReason !== null ? (
+          <>
+            <View style={styles.section}>
+              <SectionHeader label="Voided" icon="document" tint={SEMANTIC.feedback.danger} />
+            </View>
+            <Text style={[styles.secondary, styles.voidText]}>{payment.voidReason}</Text>
+          </>
+        ) : null}
       </View>
-
-      {payment.notes !== null ? (
-        <View style={styles.block}>
-          <Text style={styles.fieldLabel}>Notes</Text>
-          <Text style={styles.secondary}>{payment.notes}</Text>
-        </View>
-      ) : null}
-
-      {payment.voidReason !== null ? (
-        <View style={styles.block}>
-          <Text style={[styles.fieldLabel, { color: SEMANTIC.feedback.danger }]}>Voided</Text>
-          <Text style={styles.secondary}>{payment.voidReason}</Text>
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: SEMANTIC.bg.app },
-  content: { padding: SPACE[4], gap: SPACE[3], backgroundColor: SEMANTIC.bg.app },
-  heading: { ...textStyle('h1'), color: SEMANTIC.text.primary },
-  statusPill: { ...textStyle('label'), alignSelf: 'flex-start' },
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
+  content: {
+    paddingTop: SPACE[2],
+    paddingBottom: SPACE[8],
+  },
+  /** The navy frame, bleeding to the screen's edges — the route paints
+   * the same slate behind the status bar. */
+  frame: {
+    alignSelf: 'stretch',
+    backgroundColor: FRAME.bg,
+    // Bleeds 16 past the screen each side and pads 32 back in — this
+    // page's content container carries no gutter of its own (the body
+    // does), so the frame must return its own: 32 − 16 = the 16dp gutter.
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4] * 2,
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[3],
+  },
+  frameHead: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3] },
+  frameBody: { flex: 1, gap: 2 },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** The day's state, as a tinted chip (the StatusPill arithmetic). */
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 3,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { ...textStyle('label'), color: FRAME.text },
+  /** The page's gutter under the full-bleed frame. */
+  body: { paddingHorizontal: SPACE[4], paddingTop: SPACE[2], gap: SPACE[2] },
+  /** The one number, on the accent rail — the invoice panel's shape. */
   amountCard: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
-    borderRadius: 12,
-    padding: SPACE[4],
-    gap: 2,
+    borderRadius: RADII.none,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
+    marginTop: SPACE[1],
   },
-  amountValue: { ...textStyle('h1'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] },
-  amountMeta: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
-  block: { gap: SPACE[2] },
-  row: { gap: 1 },
+  amountRail: { width: 4, backgroundColor: COLORS.accent },
+  amountBody: { flex: 1, padding: SPACE[3], gap: 2 },
+  amountValue: {
+    ...textStyle('display'),
+    color: SEMANTIC.text.primary,
+    fontVariant: ['tabular-nums'],
+  },
+  section: { marginTop: SPACE[3], marginBottom: SPACE[1] },
+  panel: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.none,
+    backgroundColor: SEMANTIC.bg.raised,
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[1],
+  },
+  row: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACE[3],
+    paddingVertical: SPACE[2],
+  },
+  rowRule: { height: 1, backgroundColor: SEMANTIC.line.default },
   fieldLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
-  rowValue: { ...textStyle('body'), color: SEMANTIC.text.primary },
+  rowValue: {
+    ...textStyle('body'),
+    color: SEMANTIC.text.primary,
+    textAlign: 'right',
+    flexShrink: 1,
+  },
   secondary: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  voidText: { color: SEMANTIC.feedback.danger },
 });
