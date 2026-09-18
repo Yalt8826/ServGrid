@@ -82,11 +82,23 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
           {/* The count sits with the action it explains: "12 sales" is the
               number the New sale button adds to (2026-09-18). */}
           {props.figures === null || props.salesOff ? null : (
+            // A band, not a bare line: the row has the button on its right
+            // and this on its left, and a label floating in the gap left it
+            // looking empty (2026-09-18). The band takes the space, on the
+            // frame's own one-step-up ground, so the header reads as two
+            // things rather than a button in the corner.
             <View style={styles.salesCount}>
-              <Text style={styles.salesCountValue} testID="dashboard-sales-count">
-                {`${props.figures.salesCount} ${props.figures.salesCount === 1 ? 'sale' : 'sales'}`}
-              </Text>
-              <Text style={styles.salesCountCaption}>this month</Text>
+              <Icon
+                name="list"
+                size={ICON.md}
+                color={props.figures.salesCount === 0 ? FRAME.textMuted : FRAME.success}
+              />
+              <View style={styles.salesCountText}>
+                <Text style={styles.salesCountValue} testID="dashboard-sales-count">
+                  {`${props.figures.salesCount} ${props.figures.salesCount === 1 ? 'sale' : 'sales'}`}
+                </Text>
+                <Text style={styles.salesCountCaption}>this month</Text>
+              </View>
             </View>
           )}
           {/* THE action of the screen — the accent, like every other
@@ -266,7 +278,19 @@ const styles = StyleSheet.create({
     gap: SPACE[3],
     marginBottom: SPACE[4],
   },
-  salesCount: { gap: 2 },
+  /** The count's band: it takes the free width between the frame's edge
+   * and the action, so the row has no dead space in the middle. */
+  salesCount: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+    borderRadius: RADII.control,
+    backgroundColor: FRAME.bgSoft,
+  },
+  salesCountText: { gap: 2 },
   /** The count in the frame's own ink, at the figures' weight — it is one
    * of the month's numbers, just the one that needs no rupee sign. */
   salesCountValue: { ...textStyle('bodyStrong'), color: FRAME.text },

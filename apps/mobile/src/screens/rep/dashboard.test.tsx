@@ -181,7 +181,7 @@ describe('RepDashboardScreen (§S1)', () => {
     const r = await create(
       <RepDashboardScreen
         {...baseProps({
-          figures: { soldThisMonth: '0', outstanding: '0' },
+          figures: { soldThisMonth: '0', salesCount: 0, outstanding: '0' },
           owesTheMost: [],
           recentPayments: [],
         })}
