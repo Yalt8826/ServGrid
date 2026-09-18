@@ -34,6 +34,7 @@ import {
   outstandingOf,
   owesTheMostOf,
   sortSalesRows,
+  salesCountThisMonthOf,
   soldThisMonthOf,
   type CompanyRow,
   type OwedRow,
@@ -146,6 +147,7 @@ export function useRepFlags(): RepFlags {
 
 export interface RepDashboardData {
   soldThisMonth: string;
+  salesCount: number;
   outstanding: string;
   owesTheMost: OwedRow[];
   recentPayments: PaymentRow[];
@@ -222,6 +224,7 @@ export function useRepDashboard(): RepDashboard {
       if (!alive) return;
       setData({
         soldThisMonth: sales === null ? '0' : soldThisMonthOf(sales, month),
+        salesCount: sales === null ? 0 : salesCountThisMonthOf(sales, month),
         outstanding: balances === null ? '0' : outstandingOf(balances),
         owesTheMost: balances === null ? [] : owesTheMostOf(balances),
         recentPayments:

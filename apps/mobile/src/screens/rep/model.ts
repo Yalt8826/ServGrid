@@ -80,6 +80,18 @@ export function soldThisMonthOf(sales: ReadonlyArray<{ status: string; saleDate:
   );
 }
 
+/**
+ * How many sales he made this month (2026-09-18): the count `soldThisMonthOf`
+ * sums — same filter, same month, so the figure and its count can never
+ * disagree about what "this month" means.
+ */
+export function salesCountThisMonthOf(
+  sales: ReadonlyArray<{ status: string; saleDate: string }>,
+  month: string,
+): number {
+  return sales.filter((s) => s.status === 'confirmed' && istMonthOf(s.saleDate) === month).length;
+}
+
 /** Outstanding across his accounts (§S1): the sum of positive balances.
  * A credit balance is not outstanding — it is the customer's good news. */
 export function outstandingOf(balances: readonly CompanyBalance[]): string {

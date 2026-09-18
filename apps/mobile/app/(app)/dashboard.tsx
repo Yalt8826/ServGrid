@@ -57,13 +57,20 @@ function RepDashboardRoute(): React.ReactNode {
   const dashboard = useRepDashboard();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset belongs to the
+    // tab bar (the console's own arrangement, 2026-09-18).
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <RepDashboardScreen
         name={actor?.username ?? ''}
+        now={new Date()}
         figures={
           dashboard.data === null
             ? null
-            : { soldThisMonth: dashboard.data.soldThisMonth, outstanding: dashboard.data.outstanding }
+            : {
+                soldThisMonth: dashboard.data.soldThisMonth,
+                salesCount: dashboard.data.salesCount,
+                outstanding: dashboard.data.outstanding,
+              }
         }
         figuresError={dashboard.errors.figures}
         salesOff={dashboard.salesOff}

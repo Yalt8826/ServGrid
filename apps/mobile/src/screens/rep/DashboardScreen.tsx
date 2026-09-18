@@ -19,16 +19,20 @@
  */
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Button, EmptyState } from '../../components/ui';
+import { alpha, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
+import { Button, EmptyState, SectionHeader } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView, MoneyFigure } from './money';
+import { istDayLabel, istGreeting } from '../technician/jobView';
 import type { OwedRow, PaymentRow } from './model';
 
 export interface RepDashboardScreenProps {
   name: string;
-  figures: { soldThisMonth: string; outstanding: string } | null;
+  /** Injectable clock — the greeting and the date line are judged by it. */
+  now: Date;
+  figures: { soldThisMonth: string; salesCount: number; outstanding: string } | null;
   figuresError: string | null;
   /** `sales.cards` off — the sold figure renders "turned off", honestly. */
   salesOff: boolean;
@@ -55,54 +59,109 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
   const nowYear = new Date().getFullYear();
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'rep-dashboard'}>
-      <View style={styles.header}>
-        <Text style={styles.heading} testID="dashboard-name">
-          {props.name}
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'rep-dashboard'}>
+      {/* The frame (2026-09-18): who is signed in, the month's two figures,
+          and the one action — on the navy the tab bar wears. The route
+          paints the same navy behind the status bar. */}
+      <View style={styles.frame}>
+        {/* The greeting and the IST date line — the other dashboards' own
+            header shape, judged by the injected clock, never the phone's
+            timezone. */}
+        <Text style={styles.greeting} testID="dashboard-greeting">
+          {`${istGreeting(props.now)}, `}
+          {/* The name rides inside the greeting — it was said twice, once
+              here and once on its own line under it (2026-09-18). The
+              inner Text keeps `dashboard-name` for the screen's own
+              "who is this" hook. */}
+          <Text testID="dashboard-name">{props.name}</Text>
         </Text>
+        <Text style={styles.dateLine} testID="dashboard-date">
+          {istDayLabel(props.now)}
+        </Text>
+        <View style={styles.frameHead}>
+          {/* The count sits with the action it explains: "12 sales" is the
+              number the New sale button adds to (2026-09-18). */}
+          {props.figures === null || props.salesOff ? null : (
+            // A band, not a bare line: the row has the button on its right
+            // and this on its left, and a label floating in the gap left it
+            // looking empty (2026-09-18). The band takes the space, on the
+            // frame's own one-step-up ground, so the header reads as two
+            // things rather than a button in the corner.
+            <View style={styles.salesCount}>
+              <Icon
+                name="list"
+                size={ICON.md}
+                color={props.figures.salesCount === 0 ? FRAME.textMuted : FRAME.success}
+              />
+              <View style={styles.salesCountText}>
+                <Text style={styles.salesCountValue} testID="dashboard-sales-count">
+                  {`${props.figures.salesCount} ${props.figures.salesCount === 1 ? 'sale' : 'sales'}`}
+                </Text>
+                <Text style={styles.salesCountCaption}>this month</Text>
+              </View>
+            </View>
+          )}
+          {/* THE action of the screen — the accent, like every other
+              dashboard's primary. */}
+          <Button label="New sale" icon="plus" variant="primary" onPress={props.onNewSale} testID="dashboard-new-sale" />
+        </View>
+        <View style={styles.frameRule} />
+
+        {props.figuresError !== null ? (
+          <>
+            <Text style={styles.errorText} testID="dashboard-figures-error">
+              {props.figuresError}
+            </Text>
+            <Button label="Retry" variant="secondary" onPress={props.onRetry} testID="dashboard-retry" />
+          </>
+        ) : props.figures === null ? null : (
+          <View style={styles.figuresRow}>
+            <View style={styles.figureCell}>
+              {/* The icon tints with the figure: success when the month has
+                  sales, the frame's muted ink when it does not — the same
+                  "colour only when non-zero" rule the other dashboards run
+                  on their dark-ground inks. */}
+              <View style={[styles.figureMark, { backgroundColor: alpha(props.salesOff ? FRAME.text : props.figures.soldThisMonth === '0' ? FRAME.text : FRAME.success, TINT.band) }]}>
+                <Icon name="trending" size={ICON.sm} color={props.salesOff || props.figures.soldThisMonth === '0' ? FRAME.textMuted : FRAME.success} />
+              </View>
+              {props.salesOff ? (
+                <Text style={styles.offLine} testID="dashboard-figure-sold-off">
+                  Turned off right now.
+                </Text>
+              ) : (
+                <MoneyFigure
+                  value={`₹${formatMoneyEnIN(props.figures.soldThisMonth)}`}
+                  onFrame
+                  testID="dashboard-figure-sold"
+                />
+              )}
+              <Text style={styles.figureCaption}>sold this month</Text>
+            </View>
+            <View style={styles.figureDivider} />
+            <View style={styles.figureCell}>
+              <View style={[styles.figureMark, { backgroundColor: alpha(props.paymentsOff || props.figures.outstanding === '0' ? FRAME.text : FRAME.warning, TINT.band) }]}>
+                <Icon name="wallet" size={ICON.sm} color={props.paymentsOff || props.figures.outstanding === '0' ? FRAME.textMuted : FRAME.warning} />
+              </View>
+              {props.paymentsOff ? (
+                <Text style={styles.offLine} testID="dashboard-figure-outstanding-off">
+                  Turned off right now.
+                </Text>
+              ) : (
+                <MoneyFigure
+                  value={`₹${formatMoneyEnIN(props.figures.outstanding)}`}
+                  onFrame
+                  testID="dashboard-figure-outstanding"
+                />
+              )}
+              <Text style={styles.figureCaption}>outstanding</Text>
+            </View>
+          </View>
+        )}
       </View>
 
-      {props.figuresError !== null ? (
-        <>
-          <Text style={styles.errorText} testID="dashboard-figures-error">
-            {props.figuresError}
-          </Text>
-          <Button label="Retry" variant="secondary" onPress={props.onRetry} testID="dashboard-retry" />
-        </>
-      ) : props.figures === null ? null : (
-        <View style={styles.figuresRow}>
-          <View style={styles.figureCell}>
-            {props.salesOff ? (
-              <Text style={styles.offLine} testID="dashboard-figure-sold-off">
-                Turned off right now.
-              </Text>
-            ) : (
-              <MoneyFigure
-                value={`₹${formatMoneyEnIN(props.figures.soldThisMonth)}`}
-                testID="dashboard-figure-sold"
-              />
-            )}
-            <Text style={styles.figureCaption}>sold this month</Text>
-          </View>
-          <View style={styles.figureCell}>
-            {props.paymentsOff ? (
-              <Text style={styles.offLine} testID="dashboard-figure-outstanding-off">
-                Turned off right now.
-              </Text>
-            ) : (
-              <MoneyFigure
-                value={`₹${formatMoneyEnIN(props.figures.outstanding)}`}
-                testID="dashboard-figure-outstanding"
-              />
-            )}
-            <Text style={styles.figureCaption}>outstanding</Text>
-          </View>
-        </View>
-      )}
-
-      <Button label="+ New sale" onPress={props.onNewSale} testID="dashboard-new-sale" />
-
-      <Text style={styles.sectionLabel}>OWES THE MOST</Text>
+      <View style={styles.section}>
+        <SectionHeader label="Owes the most" icon="wallet" />
+      </View>
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-owed-off">
           Payments are turned off right now.
@@ -119,23 +178,30 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
               key={row.companyId}
               accessibilityRole="button"
               onPress={() => props.onOpenCompany(row.companyId)}
-              style={styles.listRow}
+              style={styles.card}
               testID={`dashboard-owed-${row.companyId}`}
             >
-              <Text style={styles.rowPrimary}>{owedRowText(row.name, row.balance)}</Text>
-              <View style={styles.rowEnd}>
-                {/* Positive dues render plain; `creditView` only colours a
-                negative — the row is filtered to positives, so this is the
-                plain figure. */}
-                <Text style={[styles.rowMoney, { color: view.color }]}>{`₹${formatMoneyEnIN(row.balance)}`}</Text>
-                <Text style={styles.chevron}>→</Text>
+              {/* The 4pt rail in the danger ink: this list IS the debt —
+                  sorted by it, highest first. */}
+              <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.danger }]} />
+              <View style={styles.cardBody}>
+                <Text style={styles.rowPrimary}>{owedRowText(row.name, row.balance)}</Text>
+                <View style={styles.rowEnd}>
+                  {/* Positive dues render plain; `creditView` only colours a
+                  negative — the row is filtered to positives, so this is the
+                  plain figure. */}
+                  <Text style={[styles.rowMoney, { color: view.color }]}>{`₹${formatMoneyEnIN(row.balance)}`}</Text>
+                  <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
+                </View>
               </View>
             </Pressable>
           );
         })
       )}
 
-      <Text style={styles.sectionLabel}>RECENT PAYMENTS</Text>
+      <View style={styles.section}>
+        <SectionHeader label="Recent payments" icon="wallet" />
+      </View>
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-payments-off">
           Payments are turned off right now.
@@ -154,10 +220,11 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             key={row.id}
             accessibilityRole="button"
             onPress={props.onOpenPayments}
-            style={styles.listRow}
+            style={styles.card}
             testID={`dashboard-payment-${row.id}`}
           >
-            <View style={styles.rowMain}>
+            <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.success }]} />
+            <View style={styles.cardBody}>
               <Text style={styles.rowPrimary}>{props.companyNames[row.companyId] ?? row.companyName}</Text>
               <Text style={styles.rowSecondary}>{`${row.paymentNumber} · ${row.mode} · ${formatDateEnIN(
                 row.businessDate,
@@ -177,49 +244,100 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself — the frame above must
+   * not bleed into where short content ends. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
     paddingBottom: SPACE[8],
-    gap: SPACE[2],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
   },
-  header: {
+  /** The frame: who, the month's two figures, and the one action. The
+   * negative margins bleed it to ALL screen edges — the strip of white
+   * above it was the content's top padding showing (reported on the
+   * handset, 2026-09-18). */
+  frame: {
+    backgroundColor: FRAME.bg,
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+  },
+  greeting: { ...textStyle('h1'), color: FRAME.text },
+  dateLine: {
+    ...textStyle('caption'),
+    color: FRAME.textMuted,
+    marginBottom: SPACE[4],
+  },
+  /** The frame's action line: the month's sale count, then the action. */
+  frameHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACE[2],
+    gap: SPACE[3],
+    marginBottom: SPACE[4],
   },
-  heading: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
+  /** The count's band: it takes the free width between the frame's edge
+   * and the action, so the row has no dead space in the middle. */
+  salesCount: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+    borderRadius: RADII.control,
+    backgroundColor: FRAME.bgSoft,
   },
+  salesCountText: { gap: 2 },
+  /** The count in the frame's own ink, at the figures' weight — it is one
+   * of the month's numbers, just the one that needs no rupee sign. */
+  salesCountValue: { ...textStyle('bodyStrong'), color: FRAME.text },
+  salesCountCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  frameRule: { height: 1, backgroundColor: FRAME.divider, marginBottom: SPACE[4] },
   figuresRow: {
     flexDirection: 'row',
-    gap: SPACE[6],
-    marginVertical: SPACE[3],
+    alignItems: 'stretch',
   },
   figureCell: {
     flex: 1,
     gap: 2,
   },
+  /** The hairline between the two figures — the dashboard's own divider
+   * language (FRAME.divider), vertical here. */
+  figureDivider: { width: 1, backgroundColor: FRAME.divider, marginHorizontal: SPACE[4] },
   figureCaption: {
     ...textStyle('caption'),
-    color: SEMANTIC.text.secondary,
+    color: FRAME.textMuted,
   },
-  sectionLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
-    marginTop: SPACE[4],
-    marginBottom: SPACE[1],
-  },
-  listRow: {
+  /** A row is a card: air between, hairline round, a 4pt rail leading. */
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 52,
-    paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
     gap: SPACE[3],
+    marginTop: SPACE[2],
+    paddingRight: SPACE[3],
+    paddingVertical: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
+  },
+  rail: { alignSelf: 'stretch', width: 4 },
+  cardBody: { flex: 1, gap: 2 },
+  /** A section's air below the frame and between the two lists. */
+  section: { marginTop: SPACE[5] },
+  /** The figure's icon tile, tinted with the figure's own ink. */
+  figureMark: {
+    width: 28,
+    height: 28,
+    borderRadius: RADII.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACE[2],
   },
   rowPrimary: {
     ...textStyle('body'),
@@ -239,10 +357,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACE[2],
-  },
-  chevron: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.secondary,
   },
   rowMain: {
     flex: 1,

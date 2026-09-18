@@ -27,7 +27,7 @@ import {
 } from 'react-native-reanimated';
 import Animated from 'react-native-reanimated';
 
-import { DURATION, EASING, formatMoneyEnIN, SEMANTIC } from '@servgrid/shared';
+import { DURATION, EASING, formatMoneyEnIN, FRAME, SEMANTIC } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 
 /** The figure cross-fade (§S1): `quick` — 140ms, opacity only. */
@@ -95,9 +95,15 @@ export function ledgerAmountOf(kind: 'sale' | 'payment', amount: string): string
 export function MoneyFigure({
   value,
   testID,
+  onFrame = false,
 }: {
   value: string;
   testID?: string;
+  /**
+   * On the navy frame (2026-09-18): the value renders in the frame's own
+   * light ink. Default false — the detail screens' figures sit on white.
+   */
+  onFrame?: boolean;
 }): React.ReactNode {
   const reduced = useReducedMotion();
   const fade = useSharedValue(1);
@@ -124,7 +130,7 @@ export function MoneyFigure({
   return (
     <View testID={testID}>
       <Animated.View style={style}>
-        <Text style={styles.figure} testID={testID ? `${testID}-text` : undefined}>
+        <Text style={[styles.figure, onFrame ? styles.figureOnFrame : null]} testID={testID ? `${testID}-text` : undefined}>
           {value}
         </Text>
       </Animated.View>
@@ -138,4 +144,5 @@ const styles = StyleSheet.create({
     color: SEMANTIC.text.primary,
     fontVariant: ['tabular-nums'],
   },
+  figureOnFrame: { color: FRAME.text },
 });
