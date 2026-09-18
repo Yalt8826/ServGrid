@@ -77,7 +77,7 @@ function baseProps(overrides: Partial<Parameters<typeof RepDashboardScreen>[0]> 
   return {
     name: 'Anitha',
     now: new Date('2026-09-18T09:00:00+05:30'),
-    figures: { soldThisMonth: '420000', outstanding: '185000' },
+    figures: { soldThisMonth: '420000', salesCount: 7, outstanding: '185000' },
     figuresError: null,
     salesOff: false,
     paymentsOff: false,
@@ -110,6 +110,19 @@ describe('RepDashboardScreen (§S1)', () => {
     expect(allText(toJson(r))).toContain('₹1,85,000');
     // en-IN grouping, Indian digit order — never 420,000.
     expect(allText(toJson(r))).not.toContain('420,000');
+  });
+
+  it('the month\u2019s sale count rides with the action it explains', async () => {
+    const r = await create(<RepDashboardScreen {...baseProps()} />);
+    expect(allText(findByTestID(toJson(r), 'dashboard-sales-count')!)).toEqual(['7 sales']);
+    // Singular when there is one, and it disappears with the sales surface
+    // it belongs to.
+    const one = await create(
+      <RepDashboardScreen {...baseProps({ figures: { soldThisMonth: '7560', salesCount: 1, outstanding: '0' } })} />,
+    );
+    expect(allText(findByTestID(toJson(one), 'dashboard-sales-count')!)).toEqual(['1 sale']);
+    const off = await create(<RepDashboardScreen {...baseProps({ salesOff: true })} />);
+    expect(findByTestID(toJson(off), 'dashboard-sales-count')).toBeUndefined();
   });
 
   it('owed rows read "… · owes ₹85,000", sorted by balance descending', async () => {

@@ -66,7 +66,11 @@ function RepDashboardRoute(): React.ReactNode {
         figures={
           dashboard.data === null
             ? null
-            : { soldThisMonth: dashboard.data.soldThisMonth, outstanding: dashboard.data.outstanding }
+            : {
+                soldThisMonth: dashboard.data.soldThisMonth,
+                salesCount: dashboard.data.salesCount,
+                outstanding: dashboard.data.outstanding,
+              }
         }
         figuresError={dashboard.errors.figures}
         salesOff={dashboard.salesOff}

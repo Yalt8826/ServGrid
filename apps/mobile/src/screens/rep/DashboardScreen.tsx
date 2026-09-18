@@ -32,7 +32,7 @@ export interface RepDashboardScreenProps {
   name: string;
   /** Injectable clock — the greeting and the date line are judged by it. */
   now: Date;
-  figures: { soldThisMonth: string; outstanding: string } | null;
+  figures: { soldThisMonth: string; salesCount: number; outstanding: string } | null;
   figuresError: string | null;
   /** `sales.cards` off — the sold figure renders "turned off", honestly. */
   salesOff: boolean;
@@ -79,6 +79,16 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
           {istDayLabel(props.now)}
         </Text>
         <View style={styles.frameHead}>
+          {/* The count sits with the action it explains: "12 sales" is the
+              number the New sale button adds to (2026-09-18). */}
+          {props.figures === null || props.salesOff ? null : (
+            <View style={styles.salesCount}>
+              <Text style={styles.salesCountValue} testID="dashboard-sales-count">
+                {`${props.figures.salesCount} ${props.figures.salesCount === 1 ? 'sale' : 'sales'}`}
+              </Text>
+              <Text style={styles.salesCountCaption}>this month</Text>
+            </View>
+          )}
           {/* THE action of the screen — the accent, like every other
               dashboard's primary. */}
           <Button label="New sale" icon="plus" variant="primary" onPress={props.onNewSale} testID="dashboard-new-sale" />
@@ -248,14 +258,19 @@ const styles = StyleSheet.create({
     color: FRAME.textMuted,
     marginBottom: SPACE[4],
   },
-  /** The frame's action line — New sale alone now that the name is said
-   * once, in the greeting above it. */
+  /** The frame's action line: the month's sale count, then the action. */
   frameHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
+    gap: SPACE[3],
     marginBottom: SPACE[4],
   },
+  salesCount: { gap: 2 },
+  /** The count in the frame's own ink, at the figures' weight — it is one
+   * of the month's numbers, just the one that needs no rupee sign. */
+  salesCountValue: { ...textStyle('bodyStrong'), color: FRAME.text },
+  salesCountCaption: { ...textStyle('caption'), color: FRAME.textMuted },
   frameRule: { height: 1, backgroundColor: FRAME.divider, marginBottom: SPACE[4] },
   figuresRow: {
     flexDirection: 'row',
