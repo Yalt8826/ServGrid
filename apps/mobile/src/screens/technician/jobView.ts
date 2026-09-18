@@ -310,11 +310,14 @@ export function tabSections(
   now: Date,
 ): TabSection {
   const todayKey = istDateKey(now);
-  // Completed work is only worth a day's look-back (Yashas, 2026-09-16):
-  // the Completed tab holds **yesterday and today**, not the server's
-  // whole work window. Older completions drop out entirely — the office
-  // owns that history.
-  const yesterdayKey = istDateKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  // **Today's completions only** (Yashas, 2026-09-19: "for the technician
+  // jobs completed tab should only show the jobs for the that day alone").
+  // This replaces the one-day look-back he asked for on 2026-09-16 —
+  // yesterday and today — so the tab is the day's review and nothing else;
+  // the earlier days and the server's wider window belong to the office.
+  // A completion the server never dated falls back to its slot
+  // (`completedAtOf`), which is the same rule the dashboard's "done
+  // today" figure uses — today's slot, today's work.
   const today: JobView[] = [];
   const upcoming: JobView[] = [];
   const completed: JobView[] = [];
@@ -324,8 +327,7 @@ export function tabSections(
     else if (bucket === 'upcoming') upcoming.push(view);
     else if (bucket === 'completed') {
       const at = completedAtOf(view, completedAtById);
-      const atKey = at === null ? null : istDateKey(at);
-      if (atKey === todayKey || atKey === yesterdayKey) completed.push(view);
+      if (at !== null && istDateKey(at) === todayKey) completed.push(view);
     }
   }
   return {

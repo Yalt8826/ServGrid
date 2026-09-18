@@ -174,17 +174,21 @@ describe('JobsScreen (§T2)', () => {
 });
 
 /**
- * The Completed tab's look-back (2026-09-16, Yashas): **yesterday and
- * today, nothing older.** The server's work read carries a longer window;
- * the office owns that history — the tab is a day's review, not an
- * archive.
+ * The Completed tab holds **that day alone** (Yashas, 2026-09-19: "for the
+ * technician jobs completed tab should only show the jobs for the that day
+ * alone"). This replaces the one-day look-back he asked for on 2026-09-16 —
+ * yesterday and today — so the tab is the day's review and nothing else.
+ *
+ * The day is the SERVER's `closedAt` read in IST, and a completion the
+ * server never dated falls back to its slot — the same rule the dashboard's
+ * "done today" figure uses.
  */
-describe('JobsScreen — the Completed tab looks back one day only', () => {
+describe('JobsScreen — the Completed tab is that day alone', () => {
   function completedView(id: string): JobView {
     return viewOf({ id, status: 'completed', scheduledFor: LATER });
   }
 
-  it('holds yesterday’s and today’s completions; older ones drop out entirely', async () => {
+  it('holds today’s completions; yesterday’s and older drop out entirely', async () => {
     const YESTERDAY = '2026-09-10T16:00:00+05:30';
     const FIVE_BACK = '2026-09-06T16:00:00+05:30';
     const yesterdayJob = completedView('01890a5e-1000-7000-8000-000000000101');
@@ -205,9 +209,20 @@ describe('JobsScreen — the Completed tab looks back one day only', () => {
     );
     await pressTab(renderer, 'completed');
     const ids = cardOrder(renderer).map((t) => t.replace('jobs-card-', ''));
-    expect(ids).toEqual([todayJob.job.id, yesterdayJob.job.id]); // newest day first
+    // Today's alone — yesterday's work was yesterday's review.
+    expect(ids).toEqual([todayJob.job.id]);
+    expect(ids).not.toContain(yesterdayJob.job.id);
     expect(ids).not.toContain(oldJob.job.id);
   });
 
-
+  it('a completion the server never dated is today’s if its slot is today', async () => {
+    // The fallback `completedAtOf` gives an undated completion: its slot.
+    // A job scheduled today and closed without one is today's work.
+    const undated = viewOf({ id: '01890a5e-1000-7000-8000-000000000109', status: 'completed', scheduledFor: LATER });
+    const renderer = await create(
+      <JobsScreen {...baseDeps({ jobs: [undated], completedAtById: {} })} />,
+    );
+    await pressTab(renderer, 'completed');
+    expect(cardOrder(renderer).map((t) => t.replace('jobs-card-', ''))).toEqual([undated.job.id]);
+  });
 });
