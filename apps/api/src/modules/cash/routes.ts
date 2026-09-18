@@ -16,7 +16,8 @@ import { cashQueueDayQuerySchema, cashQueueDayResponseSchema } from './schemas.j
 import { UNAUTHENTICATED_MESSAGE } from '../../plugins/auth.js';
 import { AppError } from '../../plugins/errors.js';
 import { ownerCashEnabled, salesRepCashEnabled } from '../flags/gates.js';
-import { createCashService } from './service.js';
+import { createCashService, historyWindowDaysFor } from './service.js';
+import type { Role } from '@servgrid/shared';
 
 /**
  * Cash handover routes (PLAN-BACKEND.md §10): the employee's half
@@ -86,7 +87,7 @@ function handoverIdParam(request: FastifyRequest): string {
   return id;
 }
 
-function claimsOf(request: FastifyRequest): { sub: string } {
+function claimsOf(request: FastifyRequest): { sub: string; role: Role } {
   const auth = request.auth;
   if (!auth) throw new AppError('UNAUTHENTICATED', UNAUTHENTICATED_MESSAGE);
   return auth;
@@ -124,7 +125,12 @@ export const cashRoutes: FastifyPluginAsync = async (app) => {
     },
     async (request) => {
       const auth = claimsOf(request);
-      return service.history(auth.sub);
+      // The window is the caller's, not the request's: a role decides how
+      // much of his own record he reads (2026-09-18, Yashas — the rep
+      // takes the whole history, the technician the last 7 days). Nothing
+      // in the request can widen it, and nothing can name another
+      // employee — the id is the token's.
+      return service.history(auth.sub, historyWindowDaysFor(auth.role));
     },
   );
 

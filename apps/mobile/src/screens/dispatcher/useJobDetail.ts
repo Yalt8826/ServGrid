@@ -30,7 +30,7 @@ import type {
 } from '@servgrid/shared';
 import { jobTimelineDispatcherResponseSchema } from '@servgrid/shared';
 import { api } from '../../lib/api';
-import { istBusinessDate } from '../technician/HandoverScreen';
+import { istBusinessDate } from '../cash/handoverModel';
 import type { DispatcherJobDetailDeps } from './jobDetail';
 
 async function fetchJson<T>(path: string): Promise<T> {

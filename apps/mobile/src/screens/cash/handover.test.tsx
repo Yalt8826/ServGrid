@@ -9,8 +9,11 @@
  * - **The date picker refuses 8 days back** — today, changeable back
  *   seven days, nothing further.
  *
- * The screen is pure UI over `HandoverDeps`; tests drive it through
- * fakes exactly as the consent and ladder tests do.
+ * The screen is pure UI over `CashScreenDeps`; tests drive it through
+ * fakes exactly as the consent and ladder tests do. These renders open on
+ * the DECLARE tab (the default), which is why the no-list invariant below
+ * is asserted against the whole tree — the history is one tab away by
+ * design, not on this view.
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -19,8 +22,8 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 
 import type { CashHandover } from '@servgrid/shared';
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
+import { CashScreen } from './CashScreen';
 import {
-  HandoverScreen,
   HANDOVER_WINDOW_DAYS,
   handoverError,
   handoverWindow,
@@ -28,7 +31,7 @@ import {
   istBusinessDate,
   lockedCopy,
   shiftBusinessDate,
-} from './HandoverScreen';
+} from './handoverModel';
 
 const TODAY = '2026-09-11'; // a Friday, in IST terms — the route's `today`
 const EIGHT_BACK = shiftBusinessDate(TODAY, -8); // 2026-09-03
@@ -41,6 +44,9 @@ function row(overrides: Partial<CashHandover>): CashHandover {
     note: null,
     status: 'submitted',
     declaredAt: `${TODAY}T13:30:00.000Z`,
+    confirmedAmount: null,
+    ownerNote: null,
+    confirmedAt: null,
     version: 1,
     ...overrides,
   };
@@ -87,13 +93,13 @@ async function press(renderer: ReactTestRenderer, testID: string): Promise<void>
   });
 }
 
-describe('HandoverScreen (§T6)', () => {
+describe('CashScreen — the declare tab (§T6)', () => {
   it('§ no `expected` figure anywhere in the tree', async () => {
     const { deps } = fake([
       row({ status: 'confirmed' }),
       row({ businessDate: shiftBusinessDate(TODAY, -1), status: 'disputed' }),
     ]);
-    const r = await create(<HandoverScreen {...deps} />);
+    const r = await create(<CashScreen {...deps} />);
     const tree = toJson(r);
     // The word, in any case, in any string in the tree — copy, helper,
     // label, pill, history.
@@ -105,7 +111,7 @@ describe('HandoverScreen (§T6)', () => {
 
   it('§ Amend visible while `submitted`; absent when `confirmed`, with the explanatory copy present', async () => {
     const submitted = fake([row({ status: 'submitted', declaredAmount: '4500' })]);
-    let r = await create(<HandoverScreen {...submitted.deps} />);
+    let r = await create(<CashScreen {...submitted.deps} />);
     expect(findByTestID(toJson(r), 'handover-amend')).toBeDefined();
     expect(findByTestID(toJson(r), 'handover-submit')).toBeUndefined();
     expect(allText(toJson(r))).toContain('₹ 4,500');
@@ -119,7 +125,7 @@ describe('HandoverScreen (§T6)', () => {
     expect(submitted.amend).toHaveBeenCalledWith(row({}).id, 1, { declaredAmount: '45000' });
 
     const confirmed = fake([row({ status: 'confirmed' })]);
-    r = await create(<HandoverScreen {...confirmed.deps} />);
+    r = await create(<CashScreen {...confirmed.deps} />);
     expect(findByTestID(toJson(r), 'handover-amend')).toBeUndefined();
     expect(findByTestID(toJson(r), 'handover-locked-copy')).toBeDefined();
     expect(allText(toJson(r))).toContain('The office has confirmed this day. Ask the owner to reopen it.');
@@ -152,7 +158,7 @@ describe('HandoverScreen (§T6)', () => {
 
     // And the rendered picker offers only those eight.
     const { deps } = fake();
-    const r = await create(<HandoverScreen {...deps} />);
+    const r = await create(<CashScreen {...deps} />);
     await press(r, 'handover-date-open');
     const sheet = findByTestID(toJson(r), 'handover-date-sheet');
     expect(sheet).toBeDefined();
@@ -180,7 +186,7 @@ describe('HandoverScreen (§T6)', () => {
 
   it('declare posts the day, the amount, and only a non-empty note', async () => {
     const f = fake();
-    const r = await create(<HandoverScreen {...f.deps} />);
+    const r = await create(<CashScreen {...f.deps} />);
     await typeAmount(r, '45000');
     await press(r, 'handover-submit');
     expect(f.declare).toHaveBeenCalledWith({ businessDate: TODAY, declaredAmount: '45000' });
@@ -189,7 +195,7 @@ describe('HandoverScreen (§T6)', () => {
     expect(findByTestID(toJson(r), 'handover-amend')).toBeDefined();
 
     const withNote = fake();
-    const r2 = await create(<HandoverScreen {...withNote.deps} />);
+    const r2 = await create(<CashScreen {...withNote.deps} />);
     await typeAmount(r2, '4500');
     const note = findAll(findByTestID(toJson(r2), 'handover-note')!, (n) => n.type === 'TextInput')[0]!;
     await act(async () => {
@@ -202,7 +208,7 @@ describe('HandoverScreen (§T6)', () => {
   it('an empty amount cannot submit, and a failed declaration shows the server copy', async () => {
     const failing = fake();
     failing.declare.mockRejectedValueOnce(new Error('This day is already declared.'));
-    const r = await create(<HandoverScreen {...failing.deps} />);
+    const r = await create(<CashScreen {...failing.deps} />);
     // The pressable is disabled with its reason; nothing fires.
     await typeAmount(r, ''); // stays empty
     const submitPressable = findAll(findByTestID(toJson(r), 'handover-submit')!, (n) => n.type === 'Pressable')[0]!;
@@ -221,23 +227,31 @@ describe('HandoverScreen (§T6)', () => {
     expect(handoverError('boom')).toBe('The declaration could not be saved. Try again.');
   });
 
-  it('renders no declarations list — he declares, he does not browse (2026-09-16)', async () => {
-    // Three past days sit behind the screen; none of them renders. The
-    // selected day's own state (row for `date`) is the only read.
+  it('the declare view carries no list — the history is its own tab (2026-09-16, revised 2026-09-18)', async () => {
+    // Three past days sit behind the screen; none of them renders HERE. The
+    // selected day's own state (row for `date`) is the only read. Revised
+    // when Yashas asked for the history back: it returned as a tab, not as
+    // a block under the form, so the daily act stays exactly this short —
+    // and the two assertions below still hold on this view.
     const { deps } = fake([
       row({ status: 'submitted' }),
       row({ businessDate: shiftBusinessDate(TODAY, -1), status: 'confirmed', declaredAmount: '12000' }),
       row({ businessDate: shiftBusinessDate(TODAY, -3), status: 'disputed', declaredAmount: '900' }),
     ]);
-    const r = await create(<HandoverScreen {...deps} />);
+    const r = await create(<CashScreen {...deps} />);
     const tree = toJson(r);
-    expect(findByTestID(tree, 'handover-history-empty')).toBeUndefined();
+    expect(findByTestID(tree, 'cash-history-empty')).toBeUndefined();
+    expect(findByTestID(tree, 'cash-history')).toBeUndefined();
     expect(
-      findAll(tree, (n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('handover-history-row-')),
+      findAll(tree, (n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('cash-history-row-')),
     ).toHaveLength(0);
     const texts = allText(tree);
     expect(texts).not.toContain('₹ 12,000');
     expect(texts).not.toContain('Your declarations'.toUpperCase());
+
+    // …and it is one tap away rather than gone: the tab is on this view.
+    expect(findByTestID(tree, 'cash-tab-history')).toBeDefined();
+    expect(findByTestID(tree, 'cash-tab-declare')).toBeDefined();
   });
 
   it('istBusinessDate reads the IST calendar, not the device clock', () => {
