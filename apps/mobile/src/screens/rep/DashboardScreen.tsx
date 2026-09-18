@@ -65,7 +65,9 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
           <Text style={styles.frameTitle} testID="dashboard-name">
             {props.name}
           </Text>
-          <Button label="New sale" icon="plus" variant="secondary" onPress={props.onNewSale} testID="dashboard-new-sale" />
+          {/* THE action of the screen — the accent, like every other
+              dashboard's primary. */}
+          <Button label="New sale" icon="plus" variant="primary" onPress={props.onNewSale} testID="dashboard-new-sale" />
         </View>
         <View style={styles.frameRule} />
 
@@ -143,9 +145,9 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
               style={styles.card}
               testID={`dashboard-owed-${row.companyId}`}
             >
-              {/* The 4pt rail, the job card's own mark: a debt is the thing
-                  this row wants acted on. */}
-              <View style={styles.rail} />
+              {/* The 4pt rail in the danger ink: this list IS the debt —
+                  sorted by it, highest first. */}
+              <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.danger }]} />
               <View style={styles.cardBody}>
                 <Text style={styles.rowPrimary}>{owedRowText(row.name, row.balance)}</Text>
                 <View style={styles.rowEnd}>
