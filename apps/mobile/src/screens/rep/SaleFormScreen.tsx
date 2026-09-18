@@ -21,10 +21,11 @@
  * (draft create, then confirm — the number arrives from the confirm).
  */
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoneyEnIN, FRAME, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
-import { Button, CalendarGrid, ConfirmDialog, DatePicker, SectionHeader, Sheet, haptic, TextField } from '../../components/ui';
+import { COLORS, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { Button, CalendarGrid, ConfirmDialog, DatePicker, SectionHeader, Select, Sheet, haptic, TextField } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { sumMoney } from './money';
 
@@ -51,10 +52,8 @@ export interface SaleFormLine {
   productName: string;
   productSku: string | null;
   quantity: string;
-  /** The owner's list price snapshot — the discount comes off THIS. */
+  /** The owner's list price snapshot. The invoice's discount comes off this. */
   unitPrice: string;
-  /** Percent off list, '' for none. The unit price is computed, never typed. */
-  discountPct: string;
   serialsOpen: boolean;
   serials: string;
 }
@@ -145,24 +144,53 @@ export function discountedUnitPriceOf(listPrice: string, discountPct: string): s
   return `${paise / 100n}.${(paise % 100n).toString().padStart(2, '0')}`;
 }
 
-/** A line is complete when its product, quantity and discount are real. */
+/** A line is complete when its product, quantity and price are real. */
 export function lineComplete(line: SaleFormLine): boolean {
   return (
     (line.productId !== null || line.productName.trim() !== '') &&
     isValidQuantity(line.quantity) &&
-    isValidUnitPrice(line.unitPrice) &&
-    isValidDiscount(line.discountPct)
+    isValidUnitPrice(line.unitPrice)
   );
 }
 
-/** The whole form can go to the wire when the company and every line are. */
-export function formComplete(companyId: string | null, lines: readonly SaleFormLine[]): boolean {
-  return companyId !== null && lines.length > 0 && lines.every(lineComplete);
+/**
+ * What the invoice comes to after its discount (2026-09-18): the discount is
+ * one figure for the whole sale, not a line-by-line negotiation, so each line
+ * is priced at `list × (1 − d)` and the totals are summed — the same
+ * arithmetic the server runs per line (migration 019) and therefore the same
+ * figure it will store.
+ */
+export function invoiceTotalOf(lines: readonly SaleFormLine[], discountPct: string): string {
+  return sumMoney(
+    lines.map((line) => lineTotalOf(line.quantity, discountedUnitPriceOf(line.unitPrice, discountPct))),
+  );
 }
 
-/** The wire items — each line sends its list price and discount, and the
- * server computes and stores the unit price beside them (migration 019). */
-export function itemsOf(lines: readonly SaleFormLine[]): Array<{
+/** The invoice's own discount: '' or '0' is none, and 100% is the ceiling. */
+export function isValidInvoiceDiscount(discountPct: string): boolean {
+  return isValidDiscount(discountPct);
+}
+
+/** The whole form can go to the wire when the company and every line are. */
+export function formComplete(
+  companyId: string | null,
+  lines: readonly SaleFormLine[],
+  discountPct = '',
+): boolean {
+  return (
+    companyId !== null &&
+    lines.length > 0 &&
+    lines.every(lineComplete) &&
+    isValidInvoiceDiscount(discountPct)
+  );
+}
+
+/** The wire items — each line sends its list price and THE INVOICE'S
+ * discount, and the server computes and stores the unit price beside them
+ * (migration 019). One discount for the sale is carried as the same
+ * percentage on every line: the sums are identical, and the owner's
+ * per-line reads stay meaningful. */
+export function itemsOf(lines: readonly SaleFormLine[], discountPct = ''): Array<{
   productId?: string;
   productName: string;
   productSku?: string;
@@ -183,16 +211,14 @@ export function itemsOf(lines: readonly SaleFormLine[]): Array<{
       ...(line.productSku !== null ? { productSku: line.productSku } : {}),
       quantity: Number(line.quantity),
       listPrice: line.unitPrice,
-      discountPct: line.discountPct === '' ? '0' : line.discountPct,
+      discountPct: discountPct === '' ? '0' : discountPct,
       ...(serials.length > 0 ? { serialNumbers: serials } : {}),
     };
   });
 }
 
 export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
-  const [companyQuery, setCompanyQuery] = useState('');
   const [companyId, setCompanyId] = useState<string | null>(deps.initialCompanyId ?? null);
-  const [companySearchOpen, setCompanySearchOpen] = useState(deps.initialCompanyId == null);
   const [saleDate, setSaleDate] = useState(deps.today);
   // The day picker (2026-09-18): `DatePicker` is a field with a trigger and
   // no choosing UI of its own — its tap re-emits the date it holds, so a
@@ -201,7 +227,6 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
   // after he made it.
   const [pickingDate, setPickingDate] = useState(false);
   const [lines, setLines] = useState<SaleFormLine[]>([]);
-  const [productQuery, setProductQuery] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,21 +237,26 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
     [companyId, deps.companies],
   );
 
-  const filteredCompanies = useMemo(() => {
-    const q = companyQuery.trim().toLowerCase();
-    return (q === '' ? deps.companies : deps.companies.filter((c) => c.name.toLowerCase().includes(q))).slice(0, 8);
-  }, [companyQuery, deps.companies]);
+  const companyOptions = useMemo(
+    () => deps.companies.map((c) => ({ value: c.id, label: c.name })),
+    [deps.companies],
+  );
+  const productOptions = useMemo(
+    () => deps.products.map((p) => ({ value: p.id, label: `${p.name} · ${p.sku}`, caption: `₹${formatMoneyEnIN(p.defaultPrice)}` })),
+    [deps.products],
+  );
 
-  const filteredProducts = useMemo(() => {
-    const q = productQuery.trim().toLowerCase();
-    return (q === '' ? deps.products : deps.products.filter((p) => `${p.name} ${p.sku}`.toLowerCase().includes(q))).slice(0, 8);
-  }, [productQuery, deps.products]);
-
-  const total = useMemo(
-    () => sumMoney(lines.map((l) => lineTotalOf(l.quantity, discountedUnitPriceOf(l.unitPrice, l.discountPct)))),
+  /** One discount for the whole sale (Yashas, 2026-09-18): the discount is
+   * negotiated on the invoice, not product by product. Each line is priced
+   * at list x (1 - d) and the totals are summed — the server's own
+   * arithmetic, so the figure here is the figure stored. */
+  const [invoiceDiscount, setInvoiceDiscount] = useState('');
+  const subtotal = useMemo(
+    () => sumMoney(lines.map((l) => lineTotalOf(l.quantity, l.unitPrice))),
     [lines],
   );
-  const complete = formComplete(companyId, lines);
+  const total = useMemo(() => invoiceTotalOf(lines, invoiceDiscount), [lines, invoiceDiscount]);
+  const complete = formComplete(companyId, lines, invoiceDiscount);
 
   function addProduct(product: PickerProduct): void {
     // The snapshot is taken HERE, at add time: name, SKU, price.
@@ -239,12 +269,10 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         productSku: product.sku,
         quantity: '1',
         unitPrice: product.defaultPrice,
-        discountPct: '',
         serialsOpen: false,
         serials: '',
       },
     ]);
-    setProductQuery('');
   }
 
   function patchLine(key: string, patch: Partial<SaleFormLine>): void {
@@ -265,7 +293,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         companyId,
         saleDate,
         ...(trimmedNotes === '' ? {} : { notes: trimmedNotes }),
-        items: itemsOf(lines),
+        items: itemsOf(lines, invoiceDiscount),
       });
       if (!confirm) {
         deps.onDone(draft.id, false);
@@ -300,42 +328,17 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         <SectionHeader label="Company" icon="business" />
       </View>
       <View style={styles.block}>
-        {companyName !== null && !companySearchOpen ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setCompanySearchOpen(true)}
-            style={styles.companyChosen}
-            testID="sale-form-company"
-          >
-            <Text style={styles.rowPrimary}>{companyName}</Text>
-            <Text style={styles.linkLike}>Change</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.searchBlock}>
-            <TextField
-              label="Search his accounts and house"
-              value={companyQuery}
-              onChangeText={setCompanyQuery}
-              placeholder="Company name"
-              testID="sale-form-company-search"
-            />
-            {filteredCompanies.map((c) => (
-              <Pressable
-                key={c.id}
-                accessibilityRole="button"
-                onPress={() => {
-                  setCompanyId(c.id);
-                  setCompanySearchOpen(false);
-                  setCompanyQuery('');
-                }}
-                style={styles.pickRow}
-                testID={`sale-form-company-option-${c.id}`}
-              >
-                <Text style={styles.rowPrimary}>{c.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
+        {/* A dropdown, not a list of every account under the field (Yashas,
+            2026-09-18): the app's own `Select`, searchable, with the chosen
+            account named on the field. */}
+        <Select
+          label="Company"
+          value={companyId}
+          options={companyOptions}
+          placeholder="Search his accounts and house"
+          onSelect={(value: string) => setCompanyId(value)}
+          testID="sale-form-company"
+        />
       </View>
 
       <View style={styles.sectionWrap}>
@@ -351,6 +354,11 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
       {lines.map((line) => (
         <View key={line.key} style={styles.line} testID={`sale-form-line-${line.key}`}>
           <View style={styles.lineHead}>
+            {/* The product's own mark, tinted like every other glyph chip:
+                the line reads as an object, not as a run of text. */}
+            <View style={styles.lineMark}>
+              <Icon name="cube" size={ICON.sm} color={SEMANTIC.text.primary} />
+            </View>
             <View style={styles.lineMain}>
               <Text style={styles.rowPrimary}>{line.productName}</Text>
               <Text style={styles.snapshot}>
@@ -370,19 +378,17 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
             </View>
             <View style={styles.priceCell}>
               <TextField
-                label="Discount %"
-                value={line.discountPct}
-                onChangeText={(t) => patchLine(line.key, { discountPct: t })}
-                placeholder="0"
-                testID={`sale-form-line-discount-${line.key}`}
+                label="Unit price"
+                value={line.unitPrice}
+                onChangeText={(t) => patchLine(line.key, { unitPrice: t })}
+                testID={`sale-form-line-price-${line.key}`}
               />
             </View>
           </View>
-          <Text style={styles.snapshot} testID={`sale-form-line-effective-${line.key}`}>
-            {`Unit ₹${formatMoneyEnIN(discountedUnitPriceOf(line.unitPrice, line.discountPct))} after ${line.discountPct === '' ? '0' : line.discountPct}% off list`}
-          </Text>
+          {/* The line comes to quantity × its price; the sale's discount is
+              applied once, on the invoice below. */}
           <Text style={styles.lineTotal} testID={`sale-form-line-total-${line.key}`}>
-            {`= ₹${formatMoneyEnIN(lineTotalOf(line.quantity, discountedUnitPriceOf(line.unitPrice, line.discountPct)))}`}
+            {`= ₹${formatMoneyEnIN(lineTotalOf(line.quantity, line.unitPrice))}`}
           </Text>
           {line.serialsOpen ? (
             <TextField
@@ -402,30 +408,50 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         </View>
       ))}
 
-      <Text style={styles.addLabel}>Add a product</Text>
-      <TextField
-        label="Search products"
-        value={productQuery}
-        onChangeText={setProductQuery}
-        placeholder="Name or SKU"
-        testID="sale-form-product-search"
+      {/* The same dropdown shape for the product: choosing one ADDS a line,
+          so the field is a door, not a value — it keeps its placeholder. */}
+      <Select
+        label="Add a product"
+        value={null}
+        options={productOptions}
+        placeholder="Search products by name or SKU"
+        onSelect={(value: string) => {
+          const picked = deps.products.find((p) => p.id === value);
+          if (picked !== undefined) addProduct(picked);
+        }}
+        testID="sale-form-product"
       />
-      {filteredProducts.map((p) => (
-        <Pressable
-          key={p.id}
-          accessibilityRole="button"
-          onPress={() => addProduct(p)}
-          style={styles.pickRow}
-          testID={`sale-form-product-option-${p.id}`}
-        >
-          <Text style={styles.rowPrimary}>{`${p.name} · ${p.sku}`}</Text>
-          <Text style={styles.rowMoney}>{`₹${formatMoneyEnIN(p.defaultPrice)}`}</Text>
-        </Pressable>
-      ))}
 
-      <View style={styles.totalRow} testID="sale-form-total">
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{`₹${formatMoneyEnIN(total)}`}</Text>
+      {/* The invoice's own arithmetic: what the lines come to, the discount
+          negotiated for the sale, and the figure that follows. */}
+      <View style={styles.invoicePanel} testID="sale-form-invoice">
+        <View style={styles.invoiceRow}>
+          <Text style={styles.invoiceLabel}>Subtotal</Text>
+          <Text style={styles.invoiceValue} testID="sale-form-subtotal">
+            {`₹${formatMoneyEnIN(subtotal)}`}
+          </Text>
+        </View>
+        <View style={styles.discountRow}>
+          <View style={styles.discountCell}>
+            <TextField
+              label="Discount for this sale (%)"
+              value={invoiceDiscount}
+              onChangeText={setInvoiceDiscount}
+              placeholder="0"
+              errorText={isValidInvoiceDiscount(invoiceDiscount) ? undefined : 'A discount is 0 to 100.'}
+              testID="sale-form-discount"
+            />
+          </View>
+          <Text style={styles.discountNote}>
+            {invoiceDiscount === '' || invoiceDiscount === '0'
+              ? 'Nothing off'
+              : `${invoiceDiscount}% off every line`}
+          </Text>
+        </View>
+        <View style={styles.totalRow} testID="sale-form-total">
+          <Text style={styles.totalLabel}>Total</Text>
+          <Text style={styles.totalValue}>{`₹${formatMoneyEnIN(total)}`}</Text>
+        </View>
       </View>
 
       <View style={styles.block}>
@@ -535,6 +561,33 @@ const styles = StyleSheet.create({
   },
   /** "Add a product" is an instruction, not a field label. */
   addLabel: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
+  /** The product's glyph chip on a line. */
+  lineMark: {
+    width: 28,
+    height: 28,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.pressed,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The invoice's arithmetic, on the raised ground with the accent rail. */
+  invoicePanel: {
+    marginTop: SPACE[4],
+    padding: SPACE[3],
+    gap: SPACE[3],
+    borderWidth: 1,
+    borderLeftWidth: 4,
+    borderColor: SEMANTIC.line.default,
+    borderLeftColor: COLORS.accent,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+  },
+  invoiceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACE[3] },
+  invoiceLabel: { ...textStyle('body'), color: SEMANTIC.text.secondary },
+  invoiceValue: { ...textStyle('mono'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] },
+  discountRow: { flexDirection: 'row', alignItems: 'flex-end', gap: SPACE[3] },
+  discountCell: { width: 160 },
+  discountNote: { ...textStyle('caption'), color: SEMANTIC.text.secondary, flex: 1, paddingBottom: 6 },
   searchBlock: {
     gap: SPACE[1],
   },

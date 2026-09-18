@@ -17,6 +17,7 @@ import { allText, create, findAll, findByTestID, toJson } from '../../components
 import { SalesScreen, SALE_STATUS_PILL } from './SalesScreen';
 import {
   formComplete,
+  invoiceTotalOf,
   itemsOf,
   lineTotalOf,
   nextLineKey,
@@ -49,7 +50,6 @@ function line(overrides: Partial<SaleFormLine> = {}): SaleFormLine {
     productSku: 'UPS-850',
     quantity: '2',
     unitPrice: '8400',
-    discountPct: '',
     serialsOpen: false,
     serials: '',
     ...overrides,
@@ -182,6 +182,10 @@ describe('SaleFormScreen — create (§S2)', () => {
     expect(lineTotalOf('2', '8400')).toBe('16800');
     // The negotiated price: the snapshot is editable, the total follows.
     expect(lineTotalOf('2', '8000')).toBe('16000');
+    // The discount is the invoice's now, applied to every line and summed.
+    expect(invoiceTotalOf([line()], '10')).toBe('15120');
+    expect(invoiceTotalOf([line(), line({ quantity: '1', unitPrice: '1000' })], '10')).toBe('16020');
+    expect(invoiceTotalOf([line()], '')).toBe('16800');
     expect(lineTotalOf('1', '4250.50')).toBe('4250.50');
     expect(lineTotalOf('', '8400')).toBe('0');
 
@@ -227,6 +231,54 @@ describe('SaleFormScreen — create (§S2)', () => {
     expect(findByTestID(toJson(r), 'sale-form-date-sheet')).toBeUndefined();
   });
 
+  it('the discount is the invoice’s, not the line’s — and it moves the total and the payload', async () => {
+    const createDraft = vi.fn(async (_input: unknown) => ({ id: 's1000000-0000-4000-8000-000000000011' }));
+    const deps = {
+      companies: [{ id: COMPANY_ID, name: 'Sterling Industries' }],
+      products: [
+        { id: 'pr0000000-0000-4000-8000-000000000001', name: 'UPS 850VA Luminous', sku: 'UPS-850', defaultPrice: '8400' },
+      ],
+      today: TODAY,
+      online: true,
+      initialCompanyId: COMPANY_ID,
+      createDraft,
+      confirmSale: vi.fn(async () => ({})),
+      onDone: vi.fn(),
+    };
+    const r = await create(<SaleFormScreen {...deps} />);
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-product-trigger')!, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-product-option-pr0000000-0000-4000-8000-000000000001')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
+    });
+
+    // No line carries a discount field any more.
+    const qtyNode = findAll(toJson(r), (n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('sale-form-line-qty-'))[0]!;
+    const lineKey = String(qtyNode.props.testID).replace('sale-form-line-qty-', '');
+    expect(findByTestID(toJson(r), `sale-form-line-discount-${lineKey}`)).toBeUndefined();
+    // …the invoice does, and the subtotal is the lines at list.
+    expect(allText(findByTestID(toJson(r), 'sale-form-subtotal')!)).toEqual(['₹8,400']);
+    expect(allText(findByTestID(toJson(r), 'sale-form-total')!)).toEqual(['Total', '₹8,400']);
+
+    // 10% off the sale moves the total, and the payload carries it per line
+    // (the server prices each line from list + discount, so the sums agree).
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-discount')!, (n) => n.type === 'TextInput')[0]!.props.onChangeText?.('10');
+    });
+    expect(allText(findByTestID(toJson(r), 'sale-form-total')!)).toEqual(['Total', '₹7,560']);
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-save-draft')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(createDraft).toHaveBeenCalledTimes(1);
+    expect(createDraft.mock.calls[0]![0]).toMatchObject({
+      items: [{ productName: 'UPS 850VA Luminous', quantity: 1, listPrice: '8400', discountPct: '10' }],
+    });
+  });
+
   it('serial numbers are optional per line and collapsed until opened', async () => {
     const deps = {
       companies: [{ id: COMPANY_ID, name: 'Sterling Industries' }],
@@ -241,7 +293,11 @@ describe('SaleFormScreen — create (§S2)', () => {
       onDone: vi.fn(),
     };
     const r = await create(<SaleFormScreen {...deps} />);
-    // Add the product — the snapshot lands on the line.
+    // Add the product — the snapshot lands on the line. It is a dropdown now,
+    // so the option lives behind its trigger (2026-09-18).
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-product-trigger')!, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
     await act(async () => {
       findAll(findByTestID(toJson(r), 'sale-form-product-option-pr0000000-0000-4000-8000-000000000001')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
     });
@@ -279,6 +335,9 @@ describe('SaleFormScreen — create (§S2)', () => {
     };
     const r = await create(<SaleFormScreen {...deps} />);
     await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-product-trigger')!, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
+    await act(async () => {
       findAll(findByTestID(toJson(r), 'sale-form-product-option-pr0000000-0000-4000-8000-000000000001')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
     });
 
@@ -301,6 +360,9 @@ describe('SaleFormScreen — create (§S2)', () => {
     // Confirm sale (primary): the confirmation step comes first, and the
     // copy names what confirming does — moves the balance.
     const r2 = await create(<SaleFormScreen {...deps} />);
+    await act(async () => {
+      findAll(findByTestID(toJson(r2), 'sale-form-product-trigger')!, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
     await act(async () => {
       findAll(findByTestID(toJson(r2), 'sale-form-product-option-pr0000000-0000-4000-8000-000000000001')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
     });
