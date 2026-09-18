@@ -345,6 +345,103 @@ describe('CompanyLedgerScreen (§S4)', () => {
     expect(allText(tree)).toContain('₹85,000');
   });
 
+  it('the ledger opens on All, and the tabs split the documents without dropping the balance', async () => {
+    const r = await create(<CompanyLedgerScreen {...ledgerProps()} />);
+    const tree = toJson(r);
+    // All is the default: both documents, interleaved.
+    expect(findByTestID(tree, 'ledger-tab-all')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-tab-sale')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-tab-payment')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')).toBeDefined();
+
+    // Sales only — and the running balance stays, because it is the
+    // account's truth as of each document, not a sum of this tab.
+    await act(async () => {
+      findByTestID(toJson(r), 'ledger-tab-sale')!.props.onPress?.();
+    });
+    const sales = toJson(r);
+    expect(findByTestID(sales, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
+    expect(findByTestID(sales, 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')).toBeUndefined();
+    expect(allText(findByTestID(sales, 'ledger-running-sale-s1000000-0000-4000-8000-000000000002')!)).toContain(
+      '₹1,25,000',
+    );
+
+    await act(async () => {
+      findByTestID(toJson(r), 'ledger-tab-payment')!.props.onPress?.();
+    });
+    const payments = toJson(r);
+    expect(findByTestID(payments, 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')).toBeDefined();
+    expect(findByTestID(payments, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeUndefined();
+
+    // …and back to the whole story.
+    await act(async () => {
+      findByTestID(toJson(r), 'ledger-tab-all')!.props.onPress?.();
+    });
+    expect(findByTestID(toJson(r), 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
+  });
+
+  it('the day filter narrows every tab to one day, and Any day gives the ledger back', async () => {
+    const r = await create(<CompanyLedgerScreen {...ledgerProps()} />);
+    // The chip opens the calendar sheet.
+    await act(async () => {
+      findByTestID(toJson(r), 'ledger-filter-day')!.props.onPress?.();
+    });
+    const sheet = toJson(r);
+    expect(findByTestID(sheet, 'ledger-day-sheet')).toBeDefined();
+    expect(findByTestID(sheet, 'ledger-day-calendar')).toBeDefined();
+    expect(findByTestID(sheet, 'ledger-day-any')).toBeDefined();
+
+    // The 2nd holds only the sale.
+    await act(async () => {
+      const dayCell = findByTestID(sheet, 'ledger-day-calendar-day-2026-09-02')!;
+      findAll(dayCell, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
+    let tree = toJson(r);
+    expect(findByTestID(tree, 'ledger-day-sheet')).toBeUndefined();
+    // The chip reads the day and offers the way back.
+    expect(allText(findByTestID(tree, 'ledger-filter-day')!).join(' ')).toContain('2 Sep');
+    expect(findByTestID(tree, 'ledger-filter-clear')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')).toBeUndefined();
+
+    // Sales tab + the day: the same one row.
+    await act(async () => {
+      findByTestID(tree, 'ledger-tab-sale')!.props.onPress?.();
+    });
+    tree = toJson(r);
+    expect(findByTestID(tree, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
+
+    // A day with nothing on it says so rather than an empty page.
+    await act(async () => {
+      findByTestID(tree, 'ledger-filter-day')!.props.onPress?.();
+    });
+    await act(async () => {
+      const dayCell = findByTestID(toJson(r), 'ledger-day-calendar-day-2026-09-06')!;
+      findAll(dayCell, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
+    tree = toJson(r);
+    expect(findByTestID(tree, 'ledger-empty')).toBeDefined();
+    expect(allText(findByTestID(tree, 'ledger-empty')!).join(' ')).toContain('Nothing on 6 Sep.');
+
+    // Any day clears it from the sheet too; the tab is still Sales, so
+    // back to All before expecting the whole ledger.
+    await act(async () => {
+      findByTestID(tree, 'ledger-filter-day')!.props.onPress?.();
+    });
+    await act(async () => {
+      findByTestID(toJson(r), 'ledger-day-any')!.props.onPress?.();
+    });
+    await act(async () => {
+      findByTestID(toJson(r), 'ledger-tab-all')!.props.onPress?.();
+    });
+    tree = toJson(r);
+    expect(findByTestID(tree, 'ledger-empty')).toBeUndefined();
+    expect(findByTestID(tree, 'ledger-filter-clear')).toBeUndefined();
+    expect(findByTestID(tree, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
+    expect(findByTestID(tree, 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')).toBeDefined();
+  });
+
   it('a ledger row opens the document it names — the sale its lines, the payment its own page', async () => {
     const opened: string[] = [];
     const r = await create(
