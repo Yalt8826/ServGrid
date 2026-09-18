@@ -21,6 +21,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed/003_products.sql   # dev + stagi
 | `001_owner.sql` | An owner account, `must_change_password`. **Run twice in production** — see below | all — first boot |
 | `002_services.sql` | `INSTALL`, `AMC`, `BATT-SWAP`, `SITE-SURVEY`, `REPAIR` | all |
 | `003_products.sql` | ~20 representative UPS/battery SKUs | dev, staging — **not production** (real price list enters production through the API) |
+| `004_demo_service_calls.sql` | Ten customers with a job completed six months ago, so the Calls tab's "Due now" list is full | **dev only, by hand** — demo dressing, never first boot (Yashas, 2026-09-19) |
 
 Every file is idempotent (`ON CONFLICT … DO NOTHING`) and prints the
 rows it ended with — a seed is not done until someone has looked at
