@@ -6,12 +6,17 @@
  * against rep-shaped deps, so a later role-specialisation cannot silently
  * break the rep:
  *
- * - name, role, `TrackingHealthChip`, permission ladder.
+ * - name, role, and — **behind three taps on the app version** — the
+ *   `TrackingHealthChip` and the permission ladder (2026-09-18, Yashas:
+ *   "remove the tracking permissions completely and show it when i click
+ *   on the app version thrice instead").
  * - **Logout is immediate** — the app is online-only; nothing is queued.
  * - **Not on this screen**: no commission, no targets, no comparison
  *   with the other rep.
  */
 import { describe, expect, it, vi } from 'vitest';
+
+import { act } from 'react';
 
 import type { TrackingHealth } from '@servgrid/shared';
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
@@ -57,19 +62,32 @@ function deps() {
 }
 
 describe('RepProfile — §S7 via the shared screen', () => {
-  it('renders name, Sales rep role, the tracking chip and the permission ladder', async () => {
+  it('the rep is tracked too — and the diagnostics are behind three taps on the app version', async () => {
     const r = await create(<ProfileScreen {...deps()} />);
     const tree = toJson(r);
     expect(findByTestID(tree, 'profile-name')).toBeDefined();
     expect(allText(findByTestID(tree, 'profile-name')!)).toContain(NAME);
     expect(allText(findByTestID(tree, 'profile-role')!).join(' | ')).toContain('Sales rep');
-    // Reps are tracked too — the chip is present and prominent.
-    expect(findByTestID(tree, 'profile-health-chip')).toBeDefined();
-    expect(findByTestID(tree, 'tracking-chip')).toBeDefined();
+    // On arrival: identity and this phone, no tracking UI at all.
+    expect(findByTestID(tree, 'profile-health-chip')).toBeUndefined();
+    expect(findByTestID(tree, 'tracking-chip')).toBeUndefined();
     for (const step of [1, 2, 3, 4]) {
-      expect(findByTestID(tree, `profile-ladder-row-${step}`)).toBeDefined();
+      expect(findByTestID(tree, `profile-ladder-row-${step}`)).toBeUndefined();
     }
     expect(findByTestID(tree, 'profile-pending-sync')).toBeUndefined(); // online-only: nothing waits
+
+    // Three taps on the app version, and the ladder is his as well.
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => {
+        findAll(findByTestID(toJson(r), 'profile-app-version')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
+      });
+    }
+    const revealed = toJson(r);
+    expect(findByTestID(revealed, 'profile-health-chip')).toBeDefined();
+    expect(findByTestID(revealed, 'tracking-chip')).toBeDefined();
+    for (const step of [1, 2, 3, 4]) {
+      expect(findByTestID(revealed, `profile-ladder-row-${step}`)).toBeDefined();
+    }
   });
 
   it('logout is immediate — there is no gate, because nothing is ever queued', async () => {
