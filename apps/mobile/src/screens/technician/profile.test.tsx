@@ -110,11 +110,48 @@ const STATES: Array<{ name: string; h: TrackingHealth; tone: 'good' | 'warn' | '
   },
 ];
 
+/**
+ * The tracking diagnostics are behind three taps on the app-version row
+ * (2026-09-18, Yashas) — every assertion about the chip or the ladder rows
+ * has to walk through the door first, which is the point of it.
+ */
+async function reveal(renderer: ReactTestRenderer): Promise<void> {
+  for (let i = 0; i < 3; i += 1) await press(renderer, 'profile-app-version');
+}
+
 describe('ProfileScreen (§T7)', () => {
+  it('a plain profile carries no tracking UI — it is behind three taps on the app version', async () => {
+    const { deps } = fakes({ loadHealth: async () => health({}) });
+    const r = await create(<ProfileScreen {...deps} />);
+
+    // Nothing tracking-shaped on arrival: not the chip, not the rows, not
+    // the word — this is the ask verbatim ("remove the tracking
+    // permissions completely").
+    const before = toJson(r);
+    expect(findByTestID(before, 'profile-health-chip')).toBeUndefined();
+    expect(findByTestID(before, 'tracking-chip')).toBeUndefined();
+    for (const step of [1, 2, 3, 4]) {
+      expect(findByTestID(before, `profile-ladder-row-${step}`)).toBeUndefined();
+    }
+    // `SectionHeader` uppercases its label, so the marker reads in caps.
+    expect(allText(before).join(' | ')).not.toContain('TRACKING PERMISSIONS');
+
+    // Two taps are not enough…
+    await press(r, 'profile-app-version');
+    await press(r, 'profile-app-version');
+    expect(findByTestID(toJson(r), 'tracking-chip')).toBeUndefined();
+
+    // …the third opens it, where it always was.
+    await press(r, 'profile-app-version');
+    expect(findByTestID(toJson(r), 'tracking-chip')).toBeDefined();
+    expect(allText(toJson(r)).join(' | ')).toContain('TRACKING PERMISSIONS');
+  });
+
   it('§ all four chip states render from the view data', async () => {
     for (const state of STATES) {
       const { deps } = fakes({ loadHealth: async () => state.h });
       const r = await create(<ProfileScreen {...deps} />);
+      await reveal(r);
       const chip = findByTestID(toJson(r), 'tracking-chip');
       expect(chip, state.name).toBeDefined();
       const texts = allText(chip ?? null);
@@ -128,6 +165,7 @@ describe('ProfileScreen (§T7)', () => {
     // Red, permission `foreground` → the failed step is 2 (background).
     const red = fakes({ loadHealth: async () => health({ health: 'permission_missing', locationPermission: 'foreground' }) });
     let r = await create(<ProfileScreen {...red.deps} />);
+    await reveal(r);
     expect(findByTestID(toJson(r), 'tracking-chip-fix')).toBeDefined();
     await press(r, 'tracking-chip-fix');
     expect(red.f.openLadder).toHaveBeenCalledWith(2);
@@ -135,24 +173,28 @@ describe('ProfileScreen (§T7)', () => {
     // Red, permission `none` → the failed step is 1.
     const none = fakes({ loadHealth: async () => health({ health: 'permission_missing', locationPermission: null }) });
     r = await create(<ProfileScreen {...none.deps} />);
+    await reveal(r);
     await press(r, 'tracking-chip-fix');
     expect(none.f.openLadder).toHaveBeenCalledWith(1);
 
     // Amber, alerts off → the notifications ask that follows the ladder.
     const alerts = fakes({ loadHealth: async () => health({ notificationsEnabled: false }) });
     r = await create(<ProfileScreen {...alerts.deps} />);
+    await reveal(r);
     await press(r, 'tracking-chip-fix');
     expect(alerts.f.openLadder).toHaveBeenCalledWith('notifications');
 
     // Amber, stale with background granted → step 3 (battery/autostart).
     const stale = fakes({ loadHealth: async () => health({ health: 'stale', minutesSince: 200 }) });
     r = await create(<ProfileScreen {...stale.deps} />);
+    await reveal(r);
     await press(r, 'tracking-chip-fix');
     expect(stale.f.openLadder).toHaveBeenCalledWith(3);
 
     // Green: nothing to fix, no tap target offered.
     const good = fakes();
     r = await create(<ProfileScreen {...good.deps} />);
+    await reveal(r);
     expect(findByTestID(toJson(r), 'tracking-chip-fix')).toBeUndefined();
     await press(r, 'tracking-chip-text');
     expect(good.f.openLadder).not.toHaveBeenCalled();
@@ -161,6 +203,7 @@ describe('ProfileScreen (§T7)', () => {
   it('§ the chip has no animation driver attached', async () => {
     const { deps } = fakes({ loadHealth: async () => health({ health: 'permission_missing', locationPermission: 'none' }) });
     const r = await create(<ProfileScreen {...deps} />);
+    await reveal(r);
     const chip = findByTestID(toJson(r), 'tracking-chip')!;
     // No animated node type anywhere in the chip's subtree.
     expect(findAll(chip, (n) => String(n.type).startsWith('Animated'))).toHaveLength(0);
@@ -197,6 +240,7 @@ describe('ProfileScreen (§T7)', () => {
     ];
     const { deps, f } = fakes({ loadLadderRows: async () => rows });
     const r = await create(<ProfileScreen {...deps} />);
+    await reveal(r);
     // Three resolved rows, one waiting with its Fix.
     expect(findAll(toJson(r), (n) => n.props.testID === 'ladder-row-check')).toHaveLength(3);
     expect(findByTestID(toJson(r), 'ladder-row-pending')).toBeDefined();
@@ -225,6 +269,7 @@ describe('ProfileScreen (§T7)', () => {
       },
     });
     const r = await create(<ProfileScreen {...deps} />);
+    await reveal(r);
     expect(findByTestID(toJson(r), 'ladder-row-pending')).toBeDefined();
 
     // He comes back from Settings having granted autostart; the

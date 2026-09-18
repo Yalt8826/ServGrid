@@ -4,9 +4,20 @@
  * moment: the owner has just asked why his location stopped updating at
  * 11:00.
  *
- * Anatomy: name, role, username · the `TrackingHealthChip`, prominent ·
- * the permission ladder as four rows with individual state · app
- * version, device model · *Change password* · *Log out*.
+ * Anatomy: name, role, username · app version, device model · *Change
+ * password* · *Log out*.
+ *
+ * **The tracking diagnostics are behind a gesture** (2026-09-18, Yashas:
+ * "on the profile screen for sales rep and technician can you remove the
+ * tracking permissions completely and show it when i click on the app
+ * version thrice instead"). The chip and the permission rows were the
+ * whole point of this screen per §T7 — "prove tracking works, and fix it
+ * when it does not" — and they are now revealed by **three taps on the
+ * app-version row**, the Android build-number convention. Two
+ * consequences, both deliberate and both his call: a healthy phone shows
+ * a plain profile, and a permission that breaks LATER is no longer
+ * announced here — the ladder is still walked at first login
+ * (`consent → ladder`), which is the path a fresh device takes.
  *
  * **Logout is one tap.** The app is online-only (decision 2026-09-15):
  * nothing is ever queued on the phone, so there is nothing to lose and no
@@ -28,12 +39,12 @@
  * does.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedStyle } from 'react-native-reanimated';
 
 import type { TrackingHealth } from '@servgrid/shared';
 import { DURATION, FRAME, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
-import { Button, SectionHeader } from '../../components/ui';
+import { Button, SectionHeader, haptic } from '../../components/ui';
 import { TrackingHealthChip, type LadderTarget } from '../../components/domain/TrackingHealthChip';
 import { textStyle } from '../../fonts/textStyle';
 import { useToggleProgress } from '../../components/ui/motion';
@@ -99,6 +110,11 @@ function RowCheck({ done }: { done: boolean }): React.ReactNode {
 }
 
 export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
+  // Three taps on the app version open the diagnostics; a burst window, so
+  // three unrelated taps across a minute do not.
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const versionTaps = useRef({ count: 0, at: 0 });
+
   const [health, setHealth] = useState<TrackingHealth | null>(null);
   const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [rows, setRows] = useState<LadderRowState[] | null>(null);
@@ -135,6 +151,20 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
 
   // Return from Settings: re-probe. A row flipping to done is what plays
   // the beat — RowCheck animates the change, not the initial paint.
+  /** Three taps in a burst reveal the tracking diagnostics. */
+  function tapVersion(): void {
+    const now = Date.now();
+    // A generous window (2.5s between taps): the gesture is deliberate but it
+    // must not need machine speed — a person tapping the version three times
+    // takes about a second each, and a tighter window silently ignores them.
+    const count = now - versionTaps.current.at <= 2_500 ? versionTaps.current.count + 1 : 1;
+    versionTaps.current = { count, at: now };
+    if (count < 3) return;
+    versionTaps.current = { count: 0, at: 0 };
+    haptic('pickerSelect');
+    setShowDiagnostics(true);
+  }
+
   const rowsLoader = useRef(() => {
     deps
       .loadLadderRows()
@@ -168,7 +198,9 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
       </View>
 
       <View style={styles.body}>
-        {/* Prominent, always visible (§T7). Never animated. */}
+        {/* Behind three taps on the app version (see the header). The chip
+            never animates. */}
+        {showDiagnostics ? (
         <View style={styles.chipBlock} testID="profile-health-chip">
           {health !== null ? (
             <TrackingHealthChip health={health} onFix={deps.openLadder} testID="tracking-chip" />
@@ -178,11 +210,13 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
             </Text>
           ) : null}
         </View>
+        ) : null}
 
         {/* The four checks, in a panel: the one place tracking can be
             judged and fixed, now that the dashboard no longer nags (§T7).
             The rows keep their resolving beat — a granted permission still
             plays the 140ms check — and nothing here animates at rest. */}
+        {showDiagnostics ? (
         <View style={styles.section}>
           <SectionHeader label="Tracking permissions" icon="shield" />
           <View style={styles.panel}>
@@ -211,14 +245,25 @@ export function ProfileScreen(deps: ProfileDeps): React.ReactNode {
             ))}
           </View>
         </View>
+        ) : null}
 
         <View style={styles.section}>
           <SectionHeader label="This phone" icon="phone" />
           <View style={styles.panel}>
-            <View style={styles.infoRow} testID="profile-app-version">
+            {/* The diagnostics door. Deliberately NOT a button to a
+                screen reader: it is a status row that happens to answer
+                three taps, the way Android's build number does — a control
+                that announced "reveals tracking diagnostics" would not be
+                out of the way at all. */}
+            <Pressable
+              onPress={tapVersion}
+              style={styles.infoRow}
+              testID="profile-app-version"
+              accessibilityLabel={`App version ${deps.appVersion}`}
+            >
               <Text style={styles.infoLabel}>App version</Text>
               <Text style={styles.infoValue}>{deps.appVersion}</Text>
-            </View>
+            </Pressable>
             <View style={styles.hairline} />
             <View style={styles.infoRow} testID="profile-device-model">
               <Text style={styles.infoLabel}>Device model</Text>
