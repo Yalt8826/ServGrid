@@ -88,9 +88,11 @@ function OwnerPaymentsRoute(): React.ReactNode {
           rows={payments.rows}
           error={payments.error}
           loading={payments.loading}
-          onVoid={(payment, reason) => {
-            void voidPayment(payment.id, reason).catch(() => {});
-          }}
+          // The promise is handed back, not swallowed: the void sheet
+          // awaits it and keeps itself open when the reversal is refused
+          // (2026-09-18). Swallowing here would close the sheet over a
+          // reversal that never happened.
+          onVoid={(payment, reason) => voidPayment(payment.id, reason)}
           voidBusy={voidBusy}
           voidError={voidError}
           onRetry={payments.reload}

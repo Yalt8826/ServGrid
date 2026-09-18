@@ -310,6 +310,9 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
         </Sheet>
       ) : null}
 
+      {/* The sheet closes itself once the payment is filed — this page
+          passed the route's raw `record`, which is why a collection made
+          from here used to leave the form open (2026-09-18). */}
       {sheetOpen && company !== null ? (
         <RecordPaymentSheet
           visible

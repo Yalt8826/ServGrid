@@ -46,7 +46,7 @@ function payment(overrides: Partial<OwnerPaymentRow>): OwnerPaymentRow {
 
 describe('Sales — void lives here, reason required (§O5)', () => {
   it('confirmed cards carry the Void action; the sheet refuses an empty reason', async () => {
-    const onVoid = vi.fn();
+    const onVoid = vi.fn(async () => {});
     const r = await create(
       <OwnerSalesScreen
         onLoadSale={async () => null}
@@ -88,7 +88,7 @@ describe('Sales — void lives here, reason required (§O5)', () => {
 
 describe('Payments — void lives here too, reason required (§O5)', () => {
   it('confirmed collections carry the Void action; the sheet gates on the reason', async () => {
-    const onVoid = vi.fn();
+    const onVoid = vi.fn(async () => {});
     const r = await create(
       <OwnerPaymentsScreen
         onLoadPaymentProof={async () => null}
@@ -132,12 +132,12 @@ describe('Running totals — confirmed documents only (§O5)', () => {
   it('both lists render the totals bar', async () => {
     const s = await create(
       <OwnerSalesScreen
-        onLoadSale={async () => null} rows={[sale({})]} error={null} loading={false} onVoid={() => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
+        onLoadSale={async () => null} rows={[sale({})]} error={null} loading={false} onVoid={async () => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
     );
     expect(findByTestID(toJson(s), 'owner-sales-running-total')).toBeDefined();
     const p = await create(
       <OwnerPaymentsScreen
-        onLoadPaymentProof={async () => null} rows={[payment({})]} error={null} loading={false} onVoid={() => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
+        onLoadPaymentProof={async () => null} rows={[payment({})]} error={null} loading={false} onVoid={async () => {}} voidBusy={false} voidError={null} onRetry={() => {}} />,
     );
     expect(findByTestID(toJson(p), 'owner-payments-running-total')).toBeDefined();
   });
@@ -152,7 +152,7 @@ describe('The screen rule — cards on a phone, a table on the desk (§O5)', () 
           rows={[sale({}), sale({ id: 's1000000-0000-4000-8000-000000000002', total: '5000', status: 'draft', saleNumber: null })]}
           error={null}
           loading={false}
-          onVoid={() => {}}
+          onVoid={async () => {}}
           voidBusy={false}
           voidError={null}
           onRetry={() => {}}
@@ -186,7 +186,7 @@ describe('the row IS the door to its document (owner, 2026-09-17)', () => {
           rows={[sale({})]}
           error={null}
           loading={false}
-          onVoid={() => {}}
+          onVoid={async () => {}}
           voidBusy={false}
           voidError={null}
           onRetry={() => {}}
@@ -218,7 +218,7 @@ describe('the row IS the door to its document (owner, 2026-09-17)', () => {
           rows={[payment({})]}
           error={null}
           loading={false}
-          onVoid={() => {}}
+          onVoid={async () => {}}
           voidBusy={false}
           voidError={null}
           onRetry={() => {}}
@@ -246,7 +246,7 @@ describe('the row IS the door to its document (owner, 2026-09-17)', () => {
           rows={[payment({})]}
           error={null}
           loading={false}
-          onVoid={() => {}}
+          onVoid={async () => {}}
           voidBusy={false}
           voidError={null}
           onRetry={() => {}}
@@ -272,7 +272,7 @@ describe('the row IS the door to its document (owner, 2026-09-17)', () => {
           rows={[sale({})]}
           error={null}
           loading={false}
-          onVoid={() => {}}
+          onVoid={async () => {}}
           voidBusy={false}
           voidError={null}
           onRetry={() => {}}

@@ -32,7 +32,7 @@ export interface OwnerSalesScreenProps {
   error: string | null;
   loading: boolean;
   /** Confirms the void with its reason — the route owns the POST. */
-  onVoid: (sale: OwnerSaleRow, reason: string) => void;
+  onVoid: (sale: OwnerSaleRow, reason: string) => Promise<void>;
   /** The running void: busy flag and error for the open sheet. */
   voidBusy: boolean;
   voidError: string | null;
@@ -195,8 +195,10 @@ export function OwnerSalesScreen(props: OwnerSalesScreenProps): React.ReactNode 
         amount={voidTarget === null ? null : voidTarget.total}
         busy={props.voidBusy}
         error={props.voidError}
-        onConfirm={(reason) => {
-          if (voidTarget !== null) props.onVoid(voidTarget, reason);
+        onConfirm={async (reason) => {
+          // Rejects on refusal, which keeps the sheet open (VoidReasonSheet
+          // owns its own dismissal on success).
+          if (voidTarget !== null) await props.onVoid(voidTarget, reason);
         }}
         onDismiss={() => setVoidTarget(null)}
         testID="owner-sale-void-sheet"

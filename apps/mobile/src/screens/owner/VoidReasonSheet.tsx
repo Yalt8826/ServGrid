@@ -23,7 +23,9 @@ export interface VoidReasonSheetProps {
   amount?: string | null;
   busy: boolean;
   error: string | null;
-  onConfirm: (reason: string) => void;
+  /** Must REJECT when the reversal is refused — the sheet keeps itself open
+   * so the owner can correct the reason, and closes itself when it lands. */
+  onConfirm: (reason: string) => Promise<void>;
   onDismiss: () => void;
   testID?: string;
 }
@@ -31,6 +33,26 @@ export interface VoidReasonSheetProps {
 export function VoidReasonSheet(props: VoidReasonSheetProps): React.ReactNode {
   const [reason, setReason] = useState('');
   const ready = reason.trim().length > 0 && !props.busy;
+
+  /**
+   * The reversal closes its own form once it lands (2026-09-18, Yashas:
+   * "after a record is done the form screen for any user closes
+   * automatically"). Leaving that to the caller is the same trap the
+   * payment form fell into — the owner's payments and sales screens both
+   * passed an `onConfirm` that fired the POST and changed nothing about the
+   * sheet, so a voided payment left the form sitting open over money that
+   * had already reversed. A refusal keeps it open, with the server's words.
+   */
+  async function submit(): Promise<void> {
+    if (!ready) return;
+    try {
+      await props.onConfirm(reason.trim());
+    } catch {
+      return;
+    }
+    props.onDismiss();
+  }
+
   return (
     <Sheet
       visible={props.visible}
@@ -44,7 +66,7 @@ export function VoidReasonSheet(props: VoidReasonSheetProps): React.ReactNode {
           disabled={!ready}
           disabledReason="A reason is required."
           loading={props.busy}
-          onPress={() => props.onConfirm(reason.trim())}
+          onPress={() => void submit()}
           fullwidth
           testID="void-confirm"
         />

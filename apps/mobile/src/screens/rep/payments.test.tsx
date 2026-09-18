@@ -260,6 +260,60 @@ describe('PaymentsScreen (§S3)', () => {
   });
 });
 
+describe('the form closes itself once the payment is filed (2026-09-18)', () => {
+  /**
+   * Yashas: "when i do a payment record from a company the payment form
+   * does not close after the payment is recorded … make sure that after a
+   * record is done the form screen for any user closes automatically."
+   *
+   * The dismissal used to be the CALLER's job, and one caller forgot: the
+   * payments list wrapped `record` to close its sheet, while the company
+   * ledger passed the route's raw `record` — so a collection filed from a
+   * company page left the form open over money that had already moved,
+   * inviting a second identical POST. These tests hold the ownership where
+   * it belongs: on the sheet, which is the only place that knows it
+   * succeeded.
+   */
+  function sheetProps(overrides: Partial<Parameters<typeof RecordPaymentSheet>[0]> = {}) {
+    return {
+      visible: true,
+      companies: [{ id: COMPANY_ID, name: 'Sterling Industries' }],
+      openSales: [],
+      initialCompanyId: COMPANY_ID,
+      busy: false,
+      error: null,
+      online: true,
+      record: vi.fn(async (_input: RecordPaymentInput) => {}),
+      onDismiss: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it('a filed payment dismisses the sheet — with no help from the caller', async () => {
+    const props = sheetProps();
+    const r = await create(<RecordPaymentSheet {...props} />);
+    await type(r, 'payment-sheet-amount', '5000');
+    await press(r, 'payment-sheet-submit');
+    expect((props.record as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    // The caller's `record` closed nothing — the sheet closed itself.
+    expect(props.onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refused payment keeps the form open and calls nothing off', async () => {
+    const props = sheetProps({
+      record: vi.fn(async () => {
+        throw new Error('The amount exceeds the balance.');
+      }),
+    });
+    const r = await create(<RecordPaymentSheet {...props} />);
+    await type(r, 'payment-sheet-amount', '999999');
+    await press(r, 'payment-sheet-submit');
+    await act(async () => {});
+    // The money did not move, so the form must not behave as if it had.
+    expect(props.onDismiss).not.toHaveBeenCalled();
+  });
+});
+
 describe('RecordPaymentSheet input shape', () => {
   it('an on-account payment carries no salesCardId — the absence IS the feature', async () => {
     let captured: RecordPaymentInput | null = null;
