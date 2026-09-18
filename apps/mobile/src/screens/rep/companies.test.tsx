@@ -80,6 +80,23 @@ describe('CompaniesScreen (§S4)', () => {
     // Last activity is the later of the sale day and the payment day.
     expect(lastActivityOf(rows[1]!)).toBe('2026-09-06');
 
+    // Near midnight the day is IST, not the timestamp's UTC date: 01:30 on
+    // the 7th in Kolkata is 20:00 on the 6th in UTC, and the old
+    // `.slice(0, 10)` dated this account's last activity a day early.
+    const lateNight = companiesRowsOf(
+      [company(STERLING, 'Sterling Industries', HIS_ID)],
+      [
+        {
+          companyId: STERLING,
+          name: 'Sterling Industries',
+          balance: '85000.00',
+          lastSaleDate: null,
+          lastPaymentAt: '2026-09-06T20:00:00.000Z',
+        },
+      ],
+    );
+    expect(lastActivityOf(lateNight[0]!)).toBe('2026-09-07');
+
     const r = await create(
       <CompaniesScreen
         rows={rows}
@@ -326,6 +343,44 @@ describe('CompanyLedgerScreen (§S4)', () => {
     expect(findByTestID(tree, 'ledger-running-payment-p1000000-0000-4000-8000-000000000001')).toBeDefined();
     expect(allText(tree)).toContain('₹1,25,000');
     expect(allText(tree)).toContain('₹85,000');
+  });
+
+  it('a ledger row opens the document it names — the sale its lines, the payment its own page', async () => {
+    const opened: string[] = [];
+    const r = await create(
+      <CompanyLedgerScreen
+        {...ledgerProps({
+          onOpenSale: (saleId: string) => opened.push(`sale:${saleId}`),
+          onOpenPayment: (paymentId: string) => opened.push(`payment:${paymentId}`),
+        })}
+      />,
+    );
+    // The row is a control, and says so — on a phone there is no cursor to
+    // advertise it.
+    const saleRow = findByTestID(toJson(r), 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')!;
+    expect(saleRow.type).toBe('Pressable');
+    expect(saleRow.props.accessibilityRole).toBe('button');
+
+    await act(async () => {
+      saleRow.props.onPress?.();
+    });
+    const paymentRow = findByTestID(toJson(r), 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')!;
+    await act(async () => {
+      paymentRow.props.onPress?.();
+    });
+    // Each row names its OWN document, and the right kind of it: a sale row
+    // must not open a payment.
+    expect(opened).toEqual([
+      'sale:s1000000-0000-4000-8000-000000000002',
+      'payment:p1000000-0000-4000-8000-000000000001',
+    ]);
+  });
+
+  it('without a router the rows stay inert — no dead affordance on a browse-only ledger', async () => {
+    const r = await create(<CompanyLedgerScreen {...ledgerProps()} />);
+    const row = findByTestID(toJson(r), 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')!;
+    expect(row.props.accessibilityRole).toBeUndefined();
+    expect(row.props.onPress).toBeUndefined();
   });
 
   it('the header balance is the largest figure and follows the Credit rule', async () => {

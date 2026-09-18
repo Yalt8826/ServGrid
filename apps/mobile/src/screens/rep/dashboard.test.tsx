@@ -12,7 +12,9 @@
  *   AMCs (decision 2026-09-15).
  * - Empty: "No sales yet this month."
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { act } from 'react';
 
 import type { CompanyBalance, PaymentRecord, SaleRecord } from '@servgrid/shared';
 import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
@@ -89,10 +91,20 @@ function baseProps(overrides: Partial<Parameters<typeof RepDashboardScreen>[0]> 
     companyNames: {},
     onNewSale: () => {},
     onOpenCompany: () => {},
+    onOpenPayment: () => {},
     onOpenPayments: () => {},
     onRetry: () => {},
     ...overrides,
   };
+}
+
+/** Press a control by testID — the card IS the Pressable, so this lands. */
+async function press(renderer: Awaited<ReturnType<typeof create>>, testID: string): Promise<void> {
+  const node = findByTestID(toJson(renderer), testID)!;
+  const pressable = node.type === 'Pressable' ? node : findAll(node, (n) => n.type === 'Pressable')[0]!;
+  await act(async () => {
+    pressable.props.onPress?.();
+  });
 }
 
 describe('RepDashboardScreen (§S1)', () => {
@@ -215,5 +227,42 @@ describe('RepDashboardScreen (§S1)', () => {
     expect(allText(toJson(r))).toContain('Sterling Industries');
     expect(allText(toJson(r)).join(' | ')).toContain('PM-2627-00042');
     expect(allText(toJson(r))).toContain('₹40,000');
+  });
+
+  it('each collected payment opens ITS OWN page, and the section keeps a way to the list', async () => {
+    const first = payment();
+    const second = payment({ id: 'p2000000-0000-4000-8000-000000000002', paymentNumber: 'PM-2627-00043' });
+    const asRow = (row: PaymentRecord) => ({
+      id: row.id,
+      paymentNumber: row.paymentNumber,
+      companyId: row.companyId,
+      companyName: 'Sterling Industries',
+      amount: row.amount,
+      mode: row.mode,
+      businessDate: row.businessDate,
+    });
+    const opened: string[] = [];
+    const listed = vi.fn();
+    const r = await create(
+      <RepDashboardScreen
+        {...baseProps({
+          recentPayments: [asRow(first), asRow(second)],
+          onOpenPayment: (id: string) => opened.push(id),
+          onOpenPayments: listed,
+        })}
+      />,
+    );
+
+    await press(r, `dashboard-payment-${first.id}`);
+    await press(r, `dashboard-payment-${second.id}`);
+    // The defect this replaced: every card called one handler, so five
+    // payments all led to the same list.
+    expect(opened).toEqual([first.id, second.id]);
+    expect(listed).not.toHaveBeenCalled();
+
+    // …and the list is still reachable, from the section's own door.
+    await press(r, 'dashboard-payments-all');
+    expect(listed).toHaveBeenCalledTimes(1);
+    expect(findByTestID(toJson(r), 'dashboard-payments-all')).toBeDefined();
   });
 });
