@@ -13,10 +13,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { act } from 'react';
+
 import type { Company, CompanyLedger } from '@servgrid/shared';
 import { SEMANTIC } from '@servgrid/shared';
-import { allText, create, findByTestID, toJson } from '../../components/ui/testing';
-import { CompaniesScreen } from './CompaniesScreen';
+import { allText, create, findAll, findByTestID, toJson } from '../../components/ui/testing';
+import { accountsMatching, CompaniesScreen } from './CompaniesScreen';
 import { CompanyLedgerScreen } from './CompanyLedgerScreen';
 import { companiesRowsOf, lastActivityOf } from './model';
 
@@ -121,6 +123,113 @@ describe('CompaniesScreen (§S4)', () => {
       expect(t).not.toContain('-');
       expect(t).not.toContain('−');
     }
+  });
+
+  it('the list filters by name as he types, and says how much of the book it is showing', async () => {
+    const rows = companiesRowsOf(
+      [
+        company(NANDI, 'Nandi Motors', HIS_ID),
+        company(STERLING, 'Sterling Industries', HIS_ID),
+        company(HOUSE, 'House Spares', null),
+      ],
+      [
+        { companyId: NANDI, name: 'Nandi Motors', balance: '42500.00', lastSaleDate: null, lastPaymentAt: null },
+        { companyId: STERLING, name: 'Sterling Industries', balance: '85000.00', lastSaleDate: null, lastPaymentAt: null },
+        { companyId: HOUSE, name: 'House Spares', balance: '0.00', lastSaleDate: null, lastPaymentAt: null },
+      ],
+    );
+    const r = await create(
+      <CompaniesScreen
+        rows={rows}
+        error={null}
+        loading={false}
+        onOpenCompany={() => {}}
+        onNewSale={() => {}}
+        onNewCompany={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+
+    // Unfiltered: every row, and the caption is the whole book.
+    expect(allText(findByTestID(toJson(r), 'companies-count')!)).toEqual(['3 accounts']);
+    for (const id of [NANDI, STERLING, HOUSE]) {
+      expect(findByTestID(toJson(r), `company-row-${id}`)).toBeDefined();
+    }
+
+    const type = async (text: string): Promise<void> => {
+      const field = findAll(findByTestID(toJson(r), 'companies-search')!, (n) => n.type === 'TextInput')[0]!;
+      await act(async () => {
+        field.props.onChangeText?.(text);
+      });
+    };
+
+    await type('nand');
+    expect(findByTestID(toJson(r), `company-row-${NANDI}`)).toBeDefined();
+    expect(findByTestID(toJson(r), `company-row-${STERLING}`)).toBeUndefined();
+    // "1 account of 3" — a bare "1 account" would read as the book having
+    // shrunk to one, which is a different and alarming fact.
+    expect(allText(findByTestID(toJson(r), 'companies-count')!)).toEqual(['1 account of 3']);
+
+    // Case does not matter to a rep typing with one thumb.
+    await type('STERLING');
+    expect(findByTestID(toJson(r), `company-row-${STERLING}`)).toBeDefined();
+    expect(findByTestID(toJson(r), `company-row-${NANDI}`)).toBeUndefined();
+
+    // A miss says so and offers the way back rather than a blank page.
+    await type('zzz');
+    expect(findByTestID(toJson(r), 'companies-no-match')).toBeDefined();
+    expect(allText(findByTestID(toJson(r), 'companies-no-match')!)).toContain('No account matches “zzz”.');
+    expect(findByTestID(toJson(r), `company-row-${NANDI}`)).toBeUndefined();
+
+    await act(async () => {
+      const action = findAll(findByTestID(toJson(r), 'companies-no-match')!, (n) => typeof n.props.onPress === 'function')[0]!;
+      action.props.onPress?.();
+    });
+    expect(findByTestID(toJson(r), 'companies-no-match')).toBeUndefined();
+    expect(allText(findByTestID(toJson(r), 'companies-count')!)).toEqual(['3 accounts']);
+  });
+
+  it('there is nothing to filter when the book is empty, so the field is not there', async () => {
+    const r = await create(
+      <CompaniesScreen
+        rows={[]}
+        error={null}
+        loading={false}
+        onOpenCompany={() => {}}
+        onNewSale={() => {}}
+        onNewCompany={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'companies-empty')).toBeDefined();
+    // An empty search box over "No accounts yet." invites a search of
+    // nothing.
+    expect(findByTestID(tree, 'companies-search')).toBeUndefined();
+  });
+
+  it('accountsMatching is the filter on its own — name only, trimmed, case-blind', () => {
+    const rows = companiesRowsOf(
+      [company(NANDI, 'Nandi Motors', HIS_ID), company(STERLING, 'Sterling Industries', HIS_ID)],
+      [
+        { companyId: NANDI, name: 'Nandi Motors', balance: '42500.00', lastSaleDate: null, lastPaymentAt: null },
+        { companyId: STERLING, name: 'Sterling Industries', balance: '85000.00', lastSaleDate: null, lastPaymentAt: null },
+      ],
+    );
+    // The fixture's own order is balance descending: Sterling, then Nandi.
+    expect(rows.map((r) => r.name)).toEqual(['Sterling Industries', 'Nandi Motors']);
+
+    expect(accountsMatching(rows, '').map((r) => r.name)).toEqual(['Sterling Industries', 'Nandi Motors']);
+    expect(accountsMatching(rows, '   ').map((r) => r.name)).toEqual(['Sterling Industries', 'Nandi Motors']);
+    expect(accountsMatching(rows, '  nandi ').map((r) => r.name)).toEqual(['Nandi Motors']);
+    expect(accountsMatching(rows, 'INDUSTR').map((r) => r.name)).toEqual(['Sterling Industries']);
+    // A phrase that spans two words of a name does not match: this is a
+    // substring filter, not a token search, and pretending otherwise would
+    // hide rows a rep can see on screen.
+    expect(accountsMatching(rows, 'motors ltd')).toEqual([]);
+    // The surviving order is the LIST's (balance descending), never the
+    // order the rows happened to match in.
+    expect(accountsMatching(rows, 'i').map((r) => r.name)).toEqual(['Sterling Industries', 'Nandi Motors']);
   });
 
   it('the rendered tree contains no reference to the other rep accounts at any depth', async () => {
