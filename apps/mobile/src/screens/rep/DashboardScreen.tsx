@@ -19,7 +19,7 @@
  */
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 
-import { formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
+import { alpha, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
 import { Button, EmptyState, SectionHeader } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
@@ -79,6 +79,13 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
         ) : props.figures === null ? null : (
           <View style={styles.figuresRow}>
             <View style={styles.figureCell}>
+              {/* The icon tints with the figure: success when the month has
+                  sales, the frame's muted ink when it does not — the same
+                  "colour only when non-zero" rule the other dashboards run
+                  on their dark-ground inks. */}
+              <View style={[styles.figureMark, { backgroundColor: alpha(props.salesOff ? FRAME.text : props.figures.soldThisMonth === '0' ? FRAME.text : FRAME.success, TINT.band) }]}>
+                <Icon name="trending" size={ICON.sm} color={props.salesOff || props.figures.soldThisMonth === '0' ? FRAME.textMuted : FRAME.success} />
+              </View>
               {props.salesOff ? (
                 <Text style={styles.offLine} testID="dashboard-figure-sold-off">
                   Turned off right now.
@@ -94,6 +101,9 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             </View>
             <View style={styles.figureDivider} />
             <View style={styles.figureCell}>
+              <View style={[styles.figureMark, { backgroundColor: alpha(props.paymentsOff || props.figures.outstanding === '0' ? FRAME.text : FRAME.warning, TINT.band) }]}>
+                <Icon name="wallet" size={ICON.sm} color={props.paymentsOff || props.figures.outstanding === '0' ? FRAME.textMuted : FRAME.warning} />
+              </View>
               {props.paymentsOff ? (
                 <Text style={styles.offLine} testID="dashboard-figure-outstanding-off">
                   Turned off right now.
@@ -111,7 +121,9 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
         )}
       </View>
 
-      <SectionHeader label="Owes the most" icon="wallet" />
+      <View style={styles.section}>
+        <SectionHeader label="Owes the most" icon="wallet" />
+      </View>
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-owed-off">
           Payments are turned off right now.
@@ -131,6 +143,9 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
               style={styles.card}
               testID={`dashboard-owed-${row.companyId}`}
             >
+              {/* The 4pt rail, the job card's own mark: a debt is the thing
+                  this row wants acted on. */}
+              <View style={styles.rail} />
               <View style={styles.cardBody}>
                 <Text style={styles.rowPrimary}>{owedRowText(row.name, row.balance)}</Text>
                 <View style={styles.rowEnd}>
@@ -146,7 +161,9 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
         })
       )}
 
-      <SectionHeader label="Recent payments" icon="wallet" />
+      <View style={styles.section}>
+        <SectionHeader label="Recent payments" icon="wallet" />
+      </View>
       {props.paymentsOff ? (
         <Text style={styles.offLine} testID="dashboard-payments-off">
           Payments are turned off right now.
@@ -168,6 +185,7 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             style={styles.card}
             testID={`dashboard-payment-${row.id}`}
           >
+            <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.success }]} />
             <View style={styles.cardBody}>
               <Text style={styles.rowPrimary}>{props.companyNames[row.companyId] ?? row.companyName}</Text>
               <Text style={styles.rowSecondary}>{`${row.paymentNumber} · ${row.mode} · ${formatDateEnIN(
@@ -196,10 +214,14 @@ const styles = StyleSheet.create({
     paddingTop: SPACE[2],
     paddingHorizontal: SPACE[4],
   },
-  /** The frame: who, the month's two figures, and the one action. */
+  /** The frame: who, the month's two figures, and the one action. The
+   * negative margins bleed it to ALL screen edges — the strip of white
+   * above it was the content's top padding showing (reported on the
+   * handset, 2026-09-18). */
   frame: {
     backgroundColor: FRAME.bg,
-    marginHorizontal: SPACE[4] * -1, // full bleed to the screen's edges
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
     paddingHorizontal: SPACE[4],
     paddingTop: SPACE[4],
     paddingBottom: SPACE[4],
@@ -228,21 +250,34 @@ const styles = StyleSheet.create({
     ...textStyle('caption'),
     color: FRAME.textMuted,
   },
-  /** A row is a card: air between, hairline round, room to tap. */
+  /** A row is a card: air between, hairline round, a 4pt rail leading. */
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: SPACE[3],
     marginTop: SPACE[2],
-    paddingHorizontal: SPACE[3],
+    paddingRight: SPACE[3],
     paddingVertical: SPACE[3],
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
     borderRadius: RADII.control,
     backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
   },
+  rail: { alignSelf: 'stretch', width: 4 },
   cardBody: { flex: 1, gap: 2 },
+  /** A section's air below the frame and between the two lists. */
+  section: { marginTop: SPACE[5] },
+  /** The figure's icon tile, tinted with the figure's own ink. */
+  figureMark: {
+    width: 28,
+    height: 28,
+    borderRadius: RADII.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACE[2],
+  },
   rowPrimary: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
