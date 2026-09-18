@@ -141,27 +141,6 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
               {company.gstin}
             </Text>
           ) : null}
-          {/* The three views as tabs on the frame — the service-call
-              screen's control. All is first: the interleaved story. */}
-          <View accessibilityRole="tablist" style={styles.tabs}>
-            {TABS.map((entry) => {
-              const selected = entry.key === tab;
-              return (
-                <Pressable
-                  key={entry.key}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected }}
-                  onPress={() => setTab(entry.key)}
-                  style={[styles.tab, { width: tabWidth }, selected ? styles.tabSelected : null]}
-                  testID={`ledger-tab-${entry.key}`}
-                >
-                  <Text style={[styles.tabLabel, selected ? styles.tabLabelSelected : null]}>
-                    {entry.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
         </View>
       ) : null}
 
@@ -182,6 +161,32 @@ export function CompanyLedgerScreen(props: CompanyLedgerScreenProps): React.Reac
           <Button label="Record payment" icon="wallet" onPress={() => setSheetOpen(true)} fullwidth testID="company-record-payment" />
         </View>
       </View>
+
+      {/* The three views as tabs on the page ground (2026-09-18: Yashas
+          saw them on the navy as an extra strip — the identity frame ends
+          at the contact lines, and the tabs belong to the list below, not
+          to the header). All is first: the interleaved story. */}
+      {company !== null ? (
+        <View accessibilityRole="tablist" style={styles.tabs}>
+          {TABS.map((entry) => {
+            const selected = entry.key === tab;
+            return (
+              <Pressable
+                key={entry.key}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                onPress={() => setTab(entry.key)}
+                style={[styles.tab, { width: tabWidth }, selected ? styles.tabSelected : null]}
+                testID={`ledger-tab-${entry.key}`}
+              >
+                <Text style={[styles.tabLabel, selected ? styles.tabLabelSelected : null]}>
+                  {entry.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       {/* The day filter: one control, the calendar behind it, and a way
           back to every day — the Sales page's chip, on this account. */}
@@ -343,19 +348,28 @@ const styles = StyleSheet.create({
   frameTitle: { ...textStyle('h1'), color: FRAME.text },
   /** The page's gutter, once the frame has taken the edges. */
   body: { paddingHorizontal: SPACE[4] },
-  /** The three views as tabs on the frame's lower edge — the service-call
-   * screen's control, sized from the frame's content box. */
-  tabs: { alignSelf: 'stretch', flexDirection: 'row', marginTop: SPACE[3] },
+  /** The three views as tabs on the page ground, above the list they
+   * control. A hairline runs under the row and the selected tab's accent
+   * underline covers it (marginBottom -1 = the overlap). */
+  tabs: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    marginTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
+    borderBottomWidth: 1,
+    borderBottomColor: SEMANTIC.line.default,
+  },
   tab: {
     minHeight: TAP.min,
     alignItems: 'center',
     justifyContent: 'center',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
+    marginBottom: -1,
   },
   tabSelected: { borderBottomColor: COLORS.accent },
-  tabLabel: { ...textStyle('label'), color: FRAME.textMuted },
-  tabLabelSelected: { color: FRAME.text },
+  tabLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary },
+  tabLabelSelected: { color: SEMANTIC.text.primary },
   /** The day filter: one control in the page's gutter, the calendar behind
    * it, and a clear when a day is on (the Sales page's bar). */
   filterBar: { flexDirection: 'row', alignItems: 'center', gap: SPACE[1], marginTop: SPACE[3] },
