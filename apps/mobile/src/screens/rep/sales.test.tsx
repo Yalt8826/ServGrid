@@ -231,6 +231,42 @@ describe('SaleFormScreen — create (§S2)', () => {
     expect(findByTestID(toJson(r), 'sale-form-date-sheet')).toBeUndefined();
   });
 
+  it('the account dropdown filters as he types, and the locality is searchable too', async () => {
+    const OTHER = 'c2000000-0000-4000-8000-000000000002';
+    const deps = {
+      companies: [
+        { id: COMPANY_ID, name: 'Sterling Industries', city: 'Whitefield' },
+        { id: OTHER, name: 'Ganesh Electricals', city: 'Jayanagar' },
+      ],
+      products: [],
+      today: TODAY,
+      online: true,
+      createDraft: vi.fn(async () => ({ id: 's1000000-0000-4000-8000-000000000012' })),
+      confirmSale: vi.fn(async () => ({})),
+      onDone: vi.fn(),
+    };
+    const r = await create(<SaleFormScreen {...deps} />);
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-company-trigger')!, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
+
+    // Two rows is far under the threshold that turns the field on by itself
+    // — the form asks for it, because the list grows.
+    const search = findByTestID(toJson(r), 'sale-form-company-search');
+    expect(search).toBeDefined();
+    // The row names where the account is, so "whitefield" is a search term.
+    expect(allText(findByTestID(toJson(r), `sale-form-company-option-${COMPANY_ID}`)!)).toEqual([
+      'Sterling Industries',
+      'Whitefield',
+    ]);
+
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-company-search')!, (n) => n.type === 'TextInput')[0]!.props.onChangeText?.('jaya');
+    });
+    expect(findByTestID(toJson(r), `sale-form-company-option-${COMPANY_ID}`)).toBeUndefined();
+    expect(findByTestID(toJson(r), `sale-form-company-option-${OTHER}`)).toBeDefined();
+  });
+
   it('the discount is the invoice’s, not the line’s — and it moves the total and the payload', async () => {
     const createDraft = vi.fn(async (_input: unknown) => ({ id: 's1000000-0000-4000-8000-000000000011' }));
     const deps = {

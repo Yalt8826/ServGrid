@@ -48,7 +48,7 @@ function RepSaleFormRoute(): React.ReactNode {
       ]);
       if (!alive) return;
       if (companiesR.status === 'fulfilled') {
-        setCompanies(companiesR.value.items.map((c) => ({ id: c.id, name: c.name })));
+        setCompanies(companiesR.value.items.map((c) => ({ id: c.id, name: c.name, city: c.city })));
       }
       if (productsR.status === 'fulfilled') {
         setProducts(

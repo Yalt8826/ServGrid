@@ -20,7 +20,11 @@
  *
  * **A long list gets a filter field** (over `SEARCH_THRESHOLD` options):
  * eight technicians are a list, sixty customers are a search, and the
- * dispatcher should not have to know which one he is looking at.
+ * dispatcher should not have to know which one he is looking at. A caller
+ * that knows its list grows can force the field on (`searchable`,
+ * 2026-09-18): the rep's accounts and catalogue start short and will not
+ * stay that way, and a rep hunting for one account mid-call should not
+ * have to type into the wrong control first.
  *
  * The trigger keeps its old anatomy — label above, the chosen option as
  * the summary (never a placeholder once chosen), helper or error caption
@@ -59,6 +63,11 @@ export interface SelectProps {
   onSelect: (value: string) => void;
   /** The summary when nothing is chosen. Defaults to "Select". */
   placeholder?: string;
+  /**
+   * Force the filter field on (or off). Left out, the field appears once
+   * the list passes `SEARCH_THRESHOLD` — the list's own length deciding.
+   */
+  searchable?: boolean;
   helperText?: string;
   errorText?: string;
   disabled?: boolean;
@@ -76,6 +85,7 @@ export function Select({
   options,
   onSelect,
   placeholder = 'Select',
+  searchable: searchableProp,
   helperText,
   errorText,
   disabled = false,
@@ -93,7 +103,7 @@ export function Select({
 
   const height = rowHeightFor(density);
   const selected = options.find((o) => o.value === value) ?? null;
-  const searchable = options.length > SEARCH_THRESHOLD;
+  const searchable = searchableProp ?? options.length > SEARCH_THRESHOLD;
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();

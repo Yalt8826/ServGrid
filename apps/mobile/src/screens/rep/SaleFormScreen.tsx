@@ -32,6 +32,9 @@ import { sumMoney } from './money';
 export interface PickerCompany {
   id: string;
   name: string;
+  /** The account's premises. Shown on the row and searched: a rep on the
+   * phone hunts by where the account is as often as by its name. */
+  city?: string | null;
 }
 
 export interface PickerProduct {
@@ -238,7 +241,12 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
   );
 
   const companyOptions = useMemo(
-    () => deps.companies.map((c) => ({ value: c.id, label: c.name })),
+    () =>
+      deps.companies.map((c) =>
+        c.city === undefined || c.city === null || c.city === ''
+          ? { value: c.id, label: c.name }
+          : { value: c.id, label: c.name, caption: c.city },
+      ),
     [deps.companies],
   );
   const productOptions = useMemo(
@@ -336,6 +344,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
           value={companyId}
           options={companyOptions}
           placeholder="Search his accounts and house"
+          searchable
           onSelect={(value: string) => setCompanyId(value)}
           testID="sale-form-company"
         />
@@ -415,6 +424,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         value={null}
         options={productOptions}
         placeholder="Search products by name or SKU"
+        searchable
         onSelect={(value: string) => {
           const picked = deps.products.find((p) => p.id === value);
           if (picked !== undefined) addProduct(picked);
