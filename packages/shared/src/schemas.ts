@@ -143,13 +143,15 @@ export const jobCompleteSchema = z
     completedAt: isoDateTime,
     workSummary: z.string().min(1),
     /**
-     * The catalogue row the work was (2026-09-16). Optional because
-     * completions filed before migration 022 have none and the amend path
-     * never rewrites one; the sheet always sends it. The API validates it
+     * The catalogue rows the work was (2026-09-16; multiple since
+     * 2026-09-18 — Yashas: the technician "can choose multiple service
+     * … and the price is summed up"). Optional because completions filed
+     * before migration 022 have none and the amend path never rewrites
+     * one; the sheet always sends at least one. Every id is validated
      * against `services` — an unknown id is a 422, not a dangling FK
      * error at insert time.
      */
-    serviceId: uuid.optional(),
+    serviceIds: z.array(uuid).max(10).optional(),
     /** Absent/zero only; the DB constraint and service rule carry the discount rule. */
     cost: moneyString.optional(),
     discountAmount: moneyString.optional(),
@@ -413,11 +415,20 @@ export const JobCompletionDetailSchema = z
     completedAt: isoDateTime,
     workSummary: z.string(),
     /**
-     * The service performed, by name (2026-09-16). Null for every
-     * completion filed before the column existed — the read says "we do
-     * not know" rather than inventing a catalogue entry for old work.
+     * The services performed, in the order he added them, each with the
+     * charge it carried at completion (2026-09-18 — several services on
+     * one visit; before 024 there was one, and before 022 none — the
+     * empty list says "we do not know" for old work rather than
+     * inventing a catalogue entry).
      */
-    serviceName: z.string().nullable(),
+    services: z.array(
+      z
+        .object({
+          name: z.string(),
+          charge: moneyString.nullable(),
+        })
+        .strict(),
+    ),
     cost: moneyString.nullable(),
     discountAmount: moneyString.nullable(),
     discountReason: z.string().nullable(),

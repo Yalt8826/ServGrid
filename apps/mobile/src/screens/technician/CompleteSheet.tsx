@@ -70,24 +70,7 @@ import { textStyle } from '../../fonts/textStyle';
 import { messageOfWriteError } from '../../lib/intentWrite';
 import type { JobView } from './jobView';
 import { detailContractChipOf } from './jobDetail';
-import {
-  chargeApplies,
-  inWarranty,
-  partLineOf,
-  payloadOf,
-  submitBlockerOf,
-  warrantyConfirmMessageOf,
-  AMC_SEGMENTS,
-  DEFAULT_AMC_CHOICE,
-  isAmcJob,
-  isFreeUnderAmc,
-  PAYMENT_SEGMENTS,
-  type AmcChoice,
-  type CollectionMode,
-  type CompleteSheetPayload,
-  type PartLine,
-  type PartProduct,
-} from './completeSheet';
+import { AMC_SEGMENTS, DEFAULT_AMC_CHOICE, PAYMENT_SEGMENTS, chargeApplies, inWarranty, isAmcJob, isFreeUnderAmc, partLineOf, payloadOf, submitBlockerOf, sumServiceCharges, type AmcChoice, type CollectionMode, type CompleteSheetPayload, type PartLine, type PartProduct, warrantyConfirmMessageOf } from './completeSheet';
 
 /** What must stay visible above the sheet: the docket header AND the
  * StatusStepper (~140pt; 03-COMPONENTS.md `Sheet`). */
@@ -115,6 +98,14 @@ export interface CompleteSheetDeps {
   takePhoto?: () => Promise<string | null>;
   choosePhoto?: () => Promise<string | null>;
   uploadPhoto?: (fileUri: string) => Promise<{ id: string }>;
+  /**
+   * The one-shot GPS fix (2026-09-17), offered to the technician ONLY when
+   * the customer has no pin stored (2026-09-18, Yashas: ask him "if he is
+   * present at the customer location so we can register that location
+   * which makes it easier next time we go there"). A dep seam like the
+   * camera: optional, so the sheet renders and tests without a device.
+   */
+  captureSiteFix?: () => Promise<{ latitude: number; longitude: number } | null>;
   /** The session actor's role — the MoneyGate reads it. */
   role: Role;
   /** Injectable clock — the warranty chip and the stack's installed-on. */
@@ -153,9 +144,19 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   const amcJob = isAmcJob(view);
   const [amcChoice, setAmcChoice] = useState<AmcChoice>(DEFAULT_AMC_CHOICE);
 
-  // The service is the sheet's first answer, and the cost follows from it.
-  const [serviceId, setServiceId] = useState<string | null>(null);
+  // The services are the sheet's first answer, and the cost follows from
+  // them (2026-09-18: several, summed — the amount stays editable, the way
+  // one charge always was).
+  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [amount, setAmount] = useState('');
+  // The customer's location question (2026-09-18). Asked ONLY when the
+  // customer has no pin stored; 'here' captures one fix, on the spot, and
+  // the fix rides the payload. The capture happens the moment he says yes —
+  // the answer to "are you here?" is true now, not at submit time.
+  const [siteAnswer, setSiteAnswer] = useState<'unanswered' | 'here' | 'away'>('unanswered');
+  const [siteFix, setSiteFix] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [siteBusy, setSiteBusy] = useState(false);
+  const [siteNote, setSiteNote] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TakenPhoto[]>([]);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -180,13 +181,15 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   // can never block a free completion (§T4 blockers are validation facts
   // about what will be SENT, and a free visit sends nothing).
   const free = isFreeUnderAmc(view, amcChoice);
-  const chosenService = serviceId === null ? null : (deps.services.find((s) => s.id === serviceId) ?? null);
+  const chosenServices = serviceIds
+    .map((id) => deps.services.find((service) => service.id === id) ?? null)
+    .filter((service): service is NonNullable<typeof service> => service !== null);
   // Narrowed once so the guards below cannot be defeated by a re-render.
   const take = deps.takePhoto;
   const choose = deps.choosePhoto;
   const upload = deps.uploadPhoto;
   const blocker = submitBlockerOf({
-    serviceId,
+    serviceCount: serviceIds.length,
     amount: free ? '' : amount,
     lines,
   });
@@ -245,8 +248,11 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
         await deps.onSubmit(
           payloadOf({
             view,
-            workSummary: chosenService?.name ?? '',
-            serviceId: serviceId ?? '',
+            workSummary:
+              chosenServices.length === 0
+                ? ''
+                : chosenServices.map((service) => service.name).join(', '),
+            serviceIds,
             amount,
             selectedMode,
             amcChoice,
@@ -254,6 +260,7 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
             customerConfirmed,
             now: deps.now,
             completedAt,
+            siteFix: siteAnswer === 'here' ? siteFix : null,
           }),
         );
         haptic('completionSynced');
@@ -278,7 +285,7 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
   }
 
   const hasUnsavedInput =
-    serviceId !== null || amount !== '' || lines.length > 0 || photos.length > 0 || customerConfirmed;
+    serviceIds.length > 0 || amount !== '' || lines.length > 0 || photos.length > 0 || customerConfirmed;
 
   // The strip reserves room for the job's own header above the sheet, and
   // `flex: 1` bounds the sheet to the screen below it: this is the longest
@@ -303,35 +310,64 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
           />
         }
       >
-        {/* Which service was done — the sheet's first question, and the
+        {/* Which services were done — the sheet's first question, and the
             one the cost follows from (2026-09-16, Yashas: "work done will
             have a dropdown menu and a list of services they can choose
-            from and the cost is calculated from that"). It replaced a free
-            text field: the office could read what he typed but could not
-            count it, price it or reconcile it, and the price of a visit
-            was whatever a technician in a stairwell decided to type.
-            Choosing a service fills the amount from the catalogue's
-            `default_charge` — and leaves it editable, because a visit
-            sometimes needs something the catalogue did not foresee. */}
+            from and the cost is calculated from that"; several per visit
+            since 2026-09-18 — "the technician can choose multiple service
+            … and the price is summed up"). One Select that ADDS: each pick
+            joins the list below (picking it again does nothing), every row
+            is removable, and the amount re-fills from the summed
+            `default_charge`s — still editable, because a visit sometimes
+            needs something the catalogue did not foresee. */}
         <Select
           label="Service"
-          value={serviceId ?? ''}
+          value=""
           options={deps.services.map((service) => ({
             value: service.id,
             label: service.name,
             ...(service.defaultCharge === null ? { caption: 'No price set' } : { caption: `₹ ${service.defaultCharge}` }),
           }))}
-          placeholder="Which service did you do?"
-          helperText="The amount below comes from the service's own charge."
+          placeholder="Add a service"
+          helperText="Add each service you did — the amount is their charges added up."
           onSelect={(id) => {
             const service = deps.services.find((candidate) => candidate.id === id) ?? null;
-            setServiceId(service?.id ?? null);
-            // The catalogue's charge, or nothing to pre-fill — a service
-            // without one leaves whatever he typed standing.
-            if (service?.defaultCharge != null) setAmount(service.defaultCharge);
+            if (service === null || serviceIds.includes(service.id)) return;
+            const next = [...serviceIds, service.id];
+            setServiceIds(next);
+            const charges = next.map(
+              (chosenId) => deps.services.find((candidate) => candidate.id === chosenId)?.defaultCharge ?? null,
+            );
+            setAmount(sumServiceCharges(charges));
           }}
           testID="complete-service"
         />
+        {chosenServices.map((service) => (
+          <View key={service.id} style={styles.serviceRow} testID={`complete-service-row-${service.id}`}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.serviceName}>{service.name}</Text>
+              <Text style={styles.serviceCharge}>
+                {service.defaultCharge === null ? 'No price set' : `₹ ${service.defaultCharge}`}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${service.name}`}
+              onPress={() => {
+                const next = serviceIds.filter((id) => id !== service.id);
+                setServiceIds(next);
+                const charges = next.map(
+                  (chosenId) => deps.services.find((candidate) => candidate.id === chosenId)?.defaultCharge ?? null,
+                );
+                setAmount(sumServiceCharges(charges));
+              }}
+              style={styles.serviceRemove}
+              testID={`complete-service-remove-${service.id}`}
+            >
+              <Icon name="close" size={ICON.sm} color={SEMANTIC.text.secondary} />
+            </Pressable>
+          </View>
+        ))}
 
         {/* The money half lives behind the gate whose action is spelled
             out — create, the write-once cell the technician holds. On an
@@ -641,6 +677,75 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
           ) : null}
         </View>
 
+        {/* The customer's location (2026-09-18, Yashas): asked ONLY when
+            this customer has no pin stored — "if the customer does not
+            have a location stored … it can ask the technician if he is
+            present at the customer location so we can register that
+            location which makes it easier next time we go there". Yes
+            captures one fix on the spot — the answer is true now, not at
+            submit time — and the server registers it only because the
+            customer has none: a stored pin is the office's data. A
+            customer who already has a location is never asked at all. */}
+        {view.coordinates === null && deps.captureSiteFix !== undefined ? (
+          <View style={styles.block}>
+            <SectionHeader label="Customer's location" icon="location" />
+            <Text style={styles.siteLede}>
+              This customer has no location saved. Are you at their location right now?
+            </Text>
+            <View style={styles.siteRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: siteAnswer === 'here' }}
+                onPress={() => {
+                  setSiteAnswer('here');
+                  if (siteFix !== null || siteBusy) return;
+                  setSiteBusy(true);
+                  setSiteNote(null);
+                  void (async () => {
+                    try {
+                      const fix = await deps.captureSiteFix!();
+                      setSiteFix(fix);
+                      setSiteNote(
+                        fix === null
+                          ? 'Could not get a location. Check GPS and press Yes again.'
+                          : 'Location captured — saved for this customer when you submit.',
+                      );
+                    } finally {
+                      setSiteBusy(false);
+                    }
+                  })();
+                }}
+                style={[styles.siteButton, siteAnswer === 'here' ? styles.siteButtonOn : null]}
+                testID="complete-site-yes"
+              >
+                <Text style={[styles.siteButtonLabel, siteAnswer === 'here' ? styles.siteButtonLabelOn : null]}>
+                  {siteBusy ? 'Locating…' : 'Yes, I’m here'}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: siteAnswer === 'away' }}
+                onPress={() => {
+                  setSiteAnswer('away');
+                  setSiteFix(null);
+                  setSiteNote('No location will be saved.');
+                }}
+                style={[styles.siteButton, siteAnswer === 'away' ? styles.siteButtonOn : null]}
+                testID="complete-site-no"
+              >
+                <Text style={[styles.siteButtonLabel, siteAnswer === 'away' ? styles.siteButtonLabelOn : null]}>
+                  Not here
+                </Text>
+              </Pressable>
+            </View>
+            {siteNote !== null ? (
+              <Text style={styles.siteNote} testID="complete-site-note">
+                {siteNote}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* Customer confirmed the work — the sheet's last question before
             the submit bar. */}
         <Pressable
@@ -684,6 +789,38 @@ export function CompleteSheet(deps: CompleteSheetDeps): React.ReactNode {
 }
 
 const styles = StyleSheet.create({
+  /** One added service: name over charge, remove beside (024). */
+  serviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[2],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+  },
+  serviceName: { ...textStyle('body'), color: SEMANTIC.text.primary },
+  serviceCharge: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  serviceRemove: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  /** The location question. */
+  siteLede: { ...textStyle('body'), color: SEMANTIC.text.secondary },
+  siteRow: { flexDirection: 'row', gap: SPACE[2] },
+  siteButton: {
+    flex: 1,
+    minHeight: TAP.min,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+  },
+  siteButtonOn: { backgroundColor: SEMANTIC.bg.dark, borderColor: SEMANTIC.bg.dark },
+  siteButtonLabel: { ...textStyle('label'), color: SEMANTIC.text.primary },
+  siteButtonLabelOn: { color: SEMANTIC.text.onDark },
+  siteNote: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   block: { alignSelf: 'stretch', gap: SPACE[3], marginTop: SPACE[5] },
   /** A label under a section marker (the marker names the section, this
    * names the control). */

@@ -224,8 +224,6 @@ export async function listTimelineEvents(db: Db, jobId: string): Promise<Timelin
 export interface CompletionDetailRow {
   completed_at: Date;
   work_summary: string;
-  /** The service's name, read through the FK; null for pre-022 rows. */
-  service_name: string | null;
   cost: string | null;
   discount_amount: string | null;
   discount_reason: string | null;
@@ -236,11 +234,10 @@ export interface CompletionDetailRow {
 /** The filed completion's own columns — the owner's detail and amend sheet read these. */
 export async function findCompletionDetail(db: Db, jobId: string): Promise<CompletionDetailRow | null> {
   const r = await db.query<CompletionDetailRow>(
-    `SELECT c.completed_at, c.work_summary, s.name AS service_name, c.cost::text AS cost,
+    `SELECT c.completed_at, c.work_summary, c.cost::text AS cost,
             c.discount_amount::text AS discount_amount, c.discount_reason,
             c.amount_collected::text AS amount_collected, c.collection_mode
        FROM job_completions c
-       LEFT JOIN services s ON s.id = c.service_id
       WHERE c.job_card_id = $1`,
     [jobId],
   );
@@ -302,9 +299,6 @@ export interface CompletionInsert {
   /** The client's completedAt, already clamped by the service (§6.2). */
   completedAt: string;
   workSummary: string;
-  /** The catalogue service performed; null for pre-022 rows and for a job
-   * closed without one (the sheet requires it, the column does not). */
-  serviceId: string | null;
   cost: string;
   discountAmount: string;
   discountReason: string | null;
@@ -326,16 +320,15 @@ export interface CompletionInsert {
 export async function insertCompletion(db: Db, c: CompletionInsert): Promise<void> {
   await db.query(
     `INSERT INTO job_completions
-       (job_card_id, completed_by, completed_at, work_summary, service_id, cost,
+       (job_card_id, completed_by, completed_at, work_summary, cost,
         discount_amount, discount_reason, collection_mode, payment_reference, customer_signed,
         latitude, longitude)
-     VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8, $9, $10, $11, $12, $13)`,
+     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12)`,
     [
       c.jobCardId,
       c.completedBy,
       c.completedAt,
       c.workSummary,
-      c.serviceId,
       c.cost,
       c.discountAmount,
       c.discountReason,
@@ -731,9 +724,60 @@ export async function insertJobCard(db: Db, s: JobCardInsert): Promise<string> {
 // ── create (§6.3 POST /v1/jobs) ─────────────────────────────────────────────
 
 /** The active service the form named — the title the card carries is its name. */
-export async function findActiveService(db: Db, serviceId: string): Promise<{ id: string; name: string } | null> {
-  const r = await db.query<{ id: string; name: string }>(
-    'SELECT id, name FROM services WHERE id = $1 AND is_active',
+/** One line of the completion's services (migration 024); the charge is the
+ * catalogue's default AT COMPLETION — the catalogue's price moves, the
+ * record of what the visit was quoted does not. */
+export interface CompletionServiceInsert {
+  lineNo: number;
+  serviceId: string;
+  charge: string | null;
+}
+
+export interface CompletionServiceRow {
+  /** Catalogue name at read time; the line's charge is the snapshot. */
+  name: string;
+  charge: string | null;
+}
+
+/** The services behind one completion, line order — the owner's detail read. */
+export async function listCompletionServices(db: Db, jobId: string): Promise<CompletionServiceRow[]> {
+  const r = await db.query<CompletionServiceRow>(
+    `SELECT s.name, lcs.charge::text AS charge
+       FROM job_completion_services lcs
+       JOIN services s ON s.id = lcs.service_id
+      WHERE lcs.job_card_id = $1
+      ORDER BY lcs.line_no ASC`,
+    [jobId],
+  );
+  return r.rows;
+}
+
+/** The lines themselves, inside the completion's transaction (024). */
+export async function insertCompletionServices(
+  db: Db,
+  jobId: string,
+  lines: readonly CompletionServiceInsert[],
+): Promise<void> {
+  if (lines.length === 0) return;
+  const values: unknown[] = [jobId];
+  const rows = lines.map((line, index) => {
+    values.push(line.lineNo, line.serviceId, line.charge);
+    const base = index * 3;
+    return `($1, $${base + 2}::int, $${base + 3}, $${base + 4}::numeric)`;
+  });
+  await db.query(
+    `INSERT INTO job_completion_services (job_card_id, line_no, service_id, charge)
+     VALUES ${rows.join(', ')}`,
+    values,
+  );
+}
+
+export async function findActiveService(
+  db: Db,
+  serviceId: string,
+): Promise<{ id: string; name: string; default_charge: string | null } | null> {
+  const r = await db.query<{ id: string; name: string; default_charge: string | null }>(
+    'SELECT id, name, default_charge::text AS default_charge FROM services WHERE id = $1 AND is_active',
     [serviceId],
   );
   return r.rows[0] ?? null;
