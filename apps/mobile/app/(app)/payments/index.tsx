@@ -13,7 +13,7 @@ import { Text, View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME, SEMANTIC } from '@servgrid/shared';
 import { DeskListShell } from '../../../src/components/ui';
 import { PaymentsScreen } from '../../../src/screens/rep/PaymentsScreen';
 import { useOnline, useRecordPayment, useRepFlags, useRepPayments } from '../../../src/screens/rep/useRepData';
@@ -45,7 +45,8 @@ function RepPaymentsRoute(): React.ReactNode {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the shell's.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <PaymentsScreen
         owed={payments.owed}
         collected={payments.collected}

@@ -8,6 +8,14 @@
  * Empty state: "No company owes you anything." Collected lists actual
  * payments.
  *
+ * The house dress (2026-09-18, the last screen in the rep's app without
+ * it): the navy frame runs to the status bar and carries the tab pair —
+ * the service-call screen's control, and the same two words. Owed rows
+ * are cards with the danger rail (money to collect, the dashboard's own
+ * reading), collected cards the success rail with the chevron that says
+ * the row opens its payment — drawn only when the route passed a handler,
+ * so a caller without a router renders no affordance that leads nowhere.
+ *
  * The record-payment sheet (§S3):
  * - **Mode as segments on two rows** — `Cash` `UPI` `Cheque` /
  *   `Bank` `Card`, each 52 tall. Five across 360dp truncates "Bank
@@ -30,12 +38,13 @@
  * Pure UI over injected deps; `useRepPayments` owns the reads.
  */
 import { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import type { PaymentMode } from '@servgrid/shared';
-import { formatMoneyEnIN, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { COLORS, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
 import { Banner, Button, EmptyState, MoneyField, Select, Sheet } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { CASH_HANDOVER_REMINDER, MODE_ROWS, OWED_EMPTY_MESSAGE } from './model';
 import type { OwedRow, PaymentRow, SaleRow } from './model';
@@ -291,11 +300,23 @@ export interface PaymentsScreenProps {
  * this list in order. */
 export type PaymentsTab = 'owed' | 'collected';
 
+/** The two views, in the rep's own order — owed first, because a rep's
+ * day is this list in order. */
+const TABS: readonly { key: PaymentsTab; label: string }[] = [
+  { key: 'owed', label: 'Owed' },
+  { key: 'collected', label: 'Collected' },
+];
+
 export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
   const [tab, setTab] = useState<PaymentsTab>('owed');
   const [sheetOpen, setSheetOpen] = useState(props.startWithSheetOpen ?? false);
   const [sheetCompany, setSheetCompany] = useState<string | null>(props.sheetCompanyId ?? null);
   const nowYear = new Date().getFullYear();
+  // The frame's CONTENT box, not the window — a tab row sized off the
+  // window overflows by exactly the frame's own padding (the lesson the
+  // service-call screen paid for).
+  const { width } = useWindowDimensions();
+  const tabWidth = (width - SPACE[4] * 2) / TABS.length;
 
   function openSheet(companyId: string | null): void {
     setSheetCompany(companyId);
@@ -320,27 +341,31 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'rep-payments'}>
-      <View style={styles.tabRow}>
-        {/* The labels are the point (§S3): Owed, never "Pending". */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: tab === 'owed' }}
-          onPress={() => setTab('owed')}
-          style={[styles.tab, tab === 'owed' ? styles.tabSelected : null]}
-          testID="payments-tab-owed"
-        >
-          <Text style={[styles.tabLabel, tab === 'owed' ? styles.tabLabelSelected : null]}>Owed</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ selected: tab === 'collected' }}
-          onPress={() => setTab('collected')}
-          style={[styles.tab, tab === 'collected' ? styles.tabSelected : null]}
-          testID="payments-tab-collected"
-        >
-          <Text style={[styles.tabLabel, tab === 'collected' ? styles.tabLabelSelected : null]}>Collected</Text>
-        </Pressable>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'rep-payments'}>
+      {/* The frame: what this page is, how much is in each view, and the
+          tab pair — the labels are the point (§S3): Owed, never "Pending". */}
+      <View style={styles.frame}>
+        <Text style={styles.frameTitle}>Payments</Text>
+        <Text style={styles.frameCaption}>
+          {`${props.owed.length} owed · ${props.collected.length} collected`}
+        </Text>
+        <View accessibilityRole="tablist" style={styles.tabs}>
+          {TABS.map((entry) => {
+            const selected = entry.key === tab;
+            return (
+              <Pressable
+                key={entry.key}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                onPress={() => setTab(entry.key)}
+                style={[styles.tab, { width: tabWidth }, selected ? styles.tabSelected : null]}
+                testID={`payments-tab-${entry.key}`}
+              >
+                <Text style={[styles.tabLabel, selected ? styles.tabLabelSelected : null]}>{entry.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       {props.error !== null ? (
@@ -353,6 +378,9 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
         ) : (
           props.owed.map((row) => (
             <View key={row.companyId} style={styles.owedRow} testID={`payments-owed-${row.companyId}`}>
+              {/* Money to collect: the dashboard's owed rail, the same
+                  reading on the same sentence. */}
+              <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.danger }]} />
               <Text style={styles.owedText}>{`${row.name} · owes ₹${formatMoneyEnIN(row.balance)}`}</Text>
               <Button label="Record payment" variant="secondary" onPress={() => openSheet(row.companyId)} testID={`payments-record-${row.companyId}`} />
             </View>
@@ -369,6 +397,9 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
             style={styles.collectedRow}
             testID={`payments-collected-${row.id}`}
           >
+            {/* Money that landed: the success rail, and the chevron only
+                when the row actually opens its payment. */}
+            <View style={[styles.rail, { backgroundColor: SEMANTIC.feedback.success }]} />
             <View style={styles.collectedMain}>
               <Text style={styles.collectedPrimary}>{row.companyName}</Text>
               <Text style={styles.collectedSecondary}>
@@ -376,6 +407,9 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
               </Text>
             </View>
             <Text style={styles.collectedAmount}>{`₹${formatMoneyEnIN(row.amount)}`}</Text>
+            {props.onOpenPayment === undefined ? null : (
+              <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
+            )}
           </Pressable>
         ))
       )}
@@ -401,46 +435,57 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
     paddingBottom: SPACE[8],
     gap: SPACE[2],
   },
-  tabRow: {
-    flexDirection: 'row',
-    gap: SPACE[2],
-    marginBottom: SPACE[2],
+  /** The navy frame, bleeding to the screen's edges — the route paints the
+   * same slate behind the status bar. */
+  frame: {
+    alignSelf: 'stretch',
+    backgroundColor: FRAME.bg,
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[2],
+    gap: 2,
   },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** The two views as tabs on the frame — the service-call screen's
+   * control, sized from the frame's content box. */
+  tabs: { alignSelf: 'stretch', flexDirection: 'row', marginTop: SPACE[2] },
   tab: {
     minHeight: TAP.min,
-    paddingHorizontal: SPACE[4],
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: SEMANTIC.line.default,
     alignItems: 'center',
     justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  tabSelected: {
-    backgroundColor: SEMANTIC.bg.dark,
-    borderColor: SEMANTIC.bg.dark,
-  },
-  tabLabel: {
-    ...textStyle('label'),
-    color: SEMANTIC.text.primary,
-  },
-  tabLabelSelected: {
-    color: SEMANTIC.text.onDark,
-  },
+  tabSelected: { borderBottomColor: COLORS.accent },
+  tabLabel: { ...textStyle('label'), color: FRAME.textMuted },
+  tabLabelSelected: { color: FRAME.text },
+  /** A row is a card: hairline round, raised ground, the rail leading. */
   owedRow: {
     minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
+    paddingRight: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
     gap: SPACE[3],
+    marginTop: SPACE[1],
   },
+  rail: { alignSelf: 'stretch', width: 4 },
   owedText: {
     ...textStyle('body'),
     color: SEMANTIC.text.primary,
@@ -451,9 +496,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
+    paddingRight: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
     gap: SPACE[3],
+    marginTop: SPACE[1],
   },
   collectedMain: {
     flex: 1,
