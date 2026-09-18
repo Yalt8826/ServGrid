@@ -113,7 +113,16 @@ export interface DispatcherSummaryCounts {
  * - `overdue` IS the view's `is_overdue` column, un-coalesced — the same
  *   predicate the `?overdue=true` list filter runs, so the figure and
  *   the rows under it cannot disagree (an open job with no date was
- *   never promised, so it counts in neither).
+ *   never promised, so it is never late).
+ * - `today` is today's scheduled work **plus an open job with no date**
+ *   (2026-09-19). `scheduled_date` is generated from `scheduled_for`, so
+ *   an undated job used to count in NEITHER figure — a dispatcher who
+ *   raised a job and left the time as "No time" (a real choice the form
+ *   offers) watched the dashboard report zero work while the job stood
+ *   open. The app's own technician side has always counted it as
+ *   actionable now (`bucketOf`: "actionable now; sorts last"), and this
+ *   figure now agrees with that rule. The status guard keeps a
+ *   long-closed undated job out of it.
  * - `done_today` mirrors `v_technician_load`'s `done_today` word for
  *   word (`completed` AND its `closed_at` is today's business date), so
  *   the dashboard figure is exactly the sum of the load bars' days.
@@ -126,7 +135,9 @@ export async function summarizeDispatcherJobs(db: Db): Promise<DispatcherSummary
     `SELECT
        count(*) FILTER (WHERE v.is_overdue)                                            AS overdue,
        count(*) FILTER (WHERE v.status = 'unassigned')                                 AS unassigned,
-       count(*) FILTER (WHERE v.scheduled_date = business_date(now()))                 AS today,
+       count(*) FILTER (WHERE v.scheduled_date = business_date(now())
+                          OR (v.scheduled_date IS NULL
+                              AND v.status NOT IN ('completed', 'cancelled')))        AS today,
        count(*) FILTER (WHERE v.status = 'completed'
                           AND business_date(v.closed_at) = business_date(now()))       AS done_today
      FROM v_job_cards_dispatcher v`,

@@ -275,6 +275,35 @@ describe('GET /v1/jobs?overdue=true — overdue is a filter, not a state', () =>
     expect(byNumber.get(JOB.cancelledPast)?.isOverdue).toBe(false);
   });
 
+  it('an open job with no date counts as today’s work, and is never overdue (2026-09-19)', async () => {
+    // The figures ride `dispatch.console` — the dispatcher dashboard's own
+    // T0 rollback — so the suite switches it on for this probe, the way the
+    // matrix suite rides its flag-gated ones.
+    await db.query(
+      `INSERT INTO employee_flag_overrides (employee_id, flag, enabled)
+       VALUES ($1, 'dispatch.console', true)
+       ON CONFLICT (employee_id, flag) DO UPDATE SET enabled = true`,
+      [DISPATCHER.id],
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs/summary',
+      headers: bearer(),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json<{ overdue: number; unassigned: number; today: number; doneToday: number }>();
+
+    // The undated open job (`JOB.undated`) is actionable now — the same rule
+    // the technician's own Today tab uses — so it is today's work; the job
+    // promised for today is the other. Two, not one.
+    expect(body.today).toBe(2);
+    // …and it is NOT overdue: a job that was never promised is never late.
+    // The two overdue jobs are the ones whose promised day has passed.
+    expect(body.overdue).toBe(2);
+    // Every fixture job is assigned, so nothing waits for a dispatcher.
+    expect(body.unassigned).toBe(0);
+  });
+
   it('overdue=false reads the same list as no filter at all', async () => {
     const filtered = await listJobs('overdue=false&limit=200');
     expect(filtered.map((j) => j.jobNumber).sort()).toEqual(
