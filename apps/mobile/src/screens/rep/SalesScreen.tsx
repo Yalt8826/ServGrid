@@ -13,9 +13,10 @@
  */
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
+import { alpha, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
 import { Banner, Button, EmptyState } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import type { SaleRow } from './model';
 
@@ -50,23 +51,57 @@ export function DraftChip({ testID }: { testID?: string }): React.ReactNode {
 
 const draftChipStyles = StyleSheet.create({
   shell: {
-    borderRadius: 4,
+    borderRadius: RADII.control,
     borderWidth: 1,
-    borderColor: SEMANTIC.feedback.warning,
+    borderColor: alpha(SEMANTIC.feedback.warning, TINT.chipLine),
+    backgroundColor: alpha(SEMANTIC.feedback.warning, TINT.chip),
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
   label: {
     ...textStyle('label'),
-    color: SEMANTIC.feedback.warning,
+    color: SEMANTIC.text.primary,
   },
 });
+
+/**
+ * The status as the app's chip: dot in the status ink, word in slate.900, on
+ * a ground tinted from the colour. The word is the fact; the colour carries
+ * it (2026-09-18 — it was a bare coloured word, which is the one thing the
+ * vocabulary never does).
+ */
+function StatusChip({ status, testID }: { status: SaleRow['status']; testID: string }): React.ReactNode {
+  const { label, color } = SALE_STATUS_PILL[status];
+  return (
+    <View
+      style={[
+        styles.statusChip,
+        { borderColor: alpha(color, TINT.chipLine), backgroundColor: alpha(color, TINT.chip) },
+      ]}
+    >
+      <View style={[styles.statusDot, { backgroundColor: color }]} />
+      <Text style={styles.statusWord} testID={testID}>
+        {label}
+      </Text>
+    </View>
+  );
+}
 
 export function SalesScreen(props: SalesScreenProps): React.ReactNode {
   const nowYear = new Date().getFullYear();
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'rep-sales'}>
-      <Button label="+ New sale" onPress={props.onNewSale} testID="sales-new" />
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'rep-sales'}>
+      {/* The frame (2026-09-18): what this list is, how many are in it, and
+          the one action — the other screens' shape. */}
+      <View style={styles.frame}>
+        <View style={styles.frameBody}>
+          <Text style={styles.frameTitle}>Sales</Text>
+          <Text style={styles.frameCaption}>
+            {`${props.rows.length} ${props.rows.length === 1 ? 'sale' : 'sales'}`}
+          </Text>
+        </View>
+        <Button label="New sale" icon="plus" variant="primary" onPress={props.onNewSale} testID="sales-new" />
+      </View>
 
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="sales-error" />
@@ -87,9 +122,12 @@ export function SalesScreen(props: SalesScreenProps): React.ReactNode {
               key={row.id}
               accessibilityRole="button"
               onPress={() => props.onOpenSale(row.id)}
-              style={styles.row}
+              style={styles.card}
               testID={`sale-row-${row.id}`}
             >
+              {/* The rail carries the row's state, the job card's own
+                  language; the chip beside it says the same in words. */}
+              <View style={[styles.rail, { backgroundColor: pill.color }]} />
               <View style={styles.main}>
                 <View style={styles.numberRow}>
                   <Text style={styles.number} testID={`sale-number-${row.id}`}>
@@ -99,10 +137,11 @@ export function SalesScreen(props: SalesScreenProps): React.ReactNode {
                 </View>
                 <Text style={styles.secondary}>{`${row.companyName} · ${formatDateEnIN(row.saleDate, nowYear)}`}</Text>
               </View>
-              <Text style={styles.total}>{`₹${formatMoneyEnIN(row.total)}`}</Text>
-              <Text style={[styles.pill, { color: pill.color }]} testID={`sale-status-${row.id}`}>
-                {pill.label}
-              </Text>
+              <View style={styles.rowEnd}>
+                <Text style={styles.total}>{`₹${formatMoneyEnIN(row.total)}`}</Text>
+                <StatusChip status={row.status} testID={`sale-status-${row.id}`} />
+              </View>
+              <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
             </Pressable>
           );
         })
@@ -112,20 +151,56 @@ export function SalesScreen(props: SalesScreenProps): React.ReactNode {
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
     paddingBottom: SPACE[8],
-    gap: SPACE[2],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
   },
-  row: {
+  frame: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 52,
-    paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
+    justifyContent: 'space-between',
     gap: SPACE[3],
+    backgroundColor: FRAME.bg,
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+    marginBottom: SPACE[4],
   },
+  frameBody: { gap: 2 },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** A row is a card: air between, hairline round, the rail leading. */
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    marginTop: SPACE[2],
+    paddingRight: SPACE[3],
+    paddingVertical: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
+  },
+  rail: { alignSelf: 'stretch', width: 4 },
+  rowEnd: { alignItems: 'flex-end', gap: SPACE[1] },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 2,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusWord: { ...textStyle('caption'), color: SEMANTIC.text.primary },
   main: {
     flex: 1,
     gap: 2,
@@ -148,8 +223,5 @@ const styles = StyleSheet.create({
     ...textStyle('mono'),
     color: SEMANTIC.text.primary,
     fontVariant: ['tabular-nums'],
-  },
-  pill: {
-    ...textStyle('label'),
   },
 });

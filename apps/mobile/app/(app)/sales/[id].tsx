@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 
 import type { Company, SaleRecord } from '@servgrid/shared';
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME } from '@servgrid/shared';
 import { apiGet } from '../../../src/screens/rep/useRepData';
 import { SaleDetailScreen } from '../../../src/screens/rep/SaleDetailScreen';
 import { useSessionStore } from '../../../src/state/sessionStore';
@@ -53,7 +53,8 @@ function RepSaleDetailRoute(): React.ReactNode {
   }, [saleId, tick]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the shell's.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <SaleDetailScreen
         sale={sale}
         companyName={companyName}

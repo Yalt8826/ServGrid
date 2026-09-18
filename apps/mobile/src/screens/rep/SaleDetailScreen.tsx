@@ -8,7 +8,8 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import type { SaleRecord } from '@servgrid/shared';
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
+import { alpha, formatMoneyEnIN, FRAME, RADII, SEMANTIC, SPACE, TINT } from '@servgrid/shared';
+import { SectionHeader } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { formatDateEnIN } from '../../components/ui';
 
@@ -56,25 +57,38 @@ export function SaleDetailScreen(props: SaleDetailScreenProps): React.ReactNode 
   const pill = SALE_DETAIL_STATUS[sale.status];
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'sale-detail'}>
-      <Text style={styles.heading} testID="sale-detail-title">
-        {sale.saleNumber ?? 'Draft sale'}
-      </Text>
-      <Text style={[styles.statusPill, { color: pill.color }]} testID="sale-detail-status">
-        {pill.label}
-      </Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'sale-detail'}>
+      {/* The navy bar: the sale's own number, and its state as the chip the
+          list uses (2026-09-18). */}
+      <View style={styles.frame}>
+        <View style={styles.frameBody}>
+          <Text style={styles.frameTitle} testID="sale-detail-title">
+            {sale.saleNumber ?? 'Draft sale'}
+          </Text>
+          <Text style={styles.frameCaption}>{`Sale date ${formatDateEnIN(sale.saleDate, new Date().getFullYear())}`}</Text>
+        </View>
+        <View style={[styles.statusChip, { borderColor: alpha(pill.color, TINT.chipLine), backgroundColor: FRAME.text }]}>
+          <View style={[styles.statusDot, { backgroundColor: pill.color }]} />
+          <Text style={styles.statusWord} testID="sale-detail-status">
+            {pill.label}
+          </Text>
+        </View>
+      </View>
 
-      <View style={styles.block}>
-        <Text style={styles.fieldLabel}>Company</Text>
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="Company" icon="business" />
+      </View>
+      <View style={styles.panel} testID="sale-detail-company">
         <Text style={styles.primary}>{props.companyName ?? '—'}</Text>
-        <Text style={styles.secondary}>{`Sale date ${formatDateEnIN(sale.saleDate, new Date().getFullYear())}`}</Text>
         {sale.confirmedAt !== null ? <Text style={styles.secondary}>Confirmed on record</Text> : null}
         {sale.voidReason !== null ? (
           <Text style={[styles.secondary, { color: SEMANTIC.feedback.danger }]}>{`Voided — ${sale.voidReason}`}</Text>
         ) : null}
       </View>
 
-      <Text style={styles.sectionLabel}>ITEMS</Text>
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="Items" icon="cube" count={sale.items.length} />
+      </View>
       {sale.items.map((item) => (
         <View key={item.lineNo} style={styles.line} testID={`sale-detail-line-${item.lineNo}`}>
           <View style={styles.lineHead}>
@@ -95,31 +109,75 @@ export function SaleDetailScreen(props: SaleDetailScreenProps): React.ReactNode 
         <Text style={styles.totalValue}>{`₹${formatMoneyEnIN(sale.total)}`}</Text>
       </View>
 
-      {sale.notes !== null ? (
-        <View style={styles.block}>
-          <Text style={styles.fieldLabel}>Notes</Text>
-          <Text style={styles.secondary}>{sale.notes}</Text>
-        </View>
-      ) : null}
+      {sale.notes === null ? null : (
+        <>
+          <View style={styles.sectionWrap}>
+            <SectionHeader label="Notes" icon="document" />
+          </View>
+          <View style={styles.panel}>
+            <Text style={styles.secondary}>{sale.notes}</Text>
+          </View>
+        </>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: SEMANTIC.bg.app },
-  content: { padding: SPACE[4], gap: SPACE[3], backgroundColor: SEMANTIC.bg.app },
-  heading: { ...textStyle('h1'), color: SEMANTIC.text.primary },
-  statusPill: { ...textStyle('label'), alignSelf: 'flex-start' },
-  sectionLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary, marginTop: SPACE[2] },
-  fieldLabel: { ...textStyle('label'), color: SEMANTIC.text.secondary, marginBottom: 2 },
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { backgroundColor: SEMANTIC.bg.app },
+  content: { paddingBottom: SPACE[8] },
+  /** The navy bar: the sale's number, the date, and the state chip. */
+  frame: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACE[3],
+    backgroundColor: FRAME.bg,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+    marginBottom: SPACE[4],
+  },
+  frameBody: { flex: 1, gap: 2 },
+  frameTitle: { ...textStyle('h2'), color: FRAME.text, fontVariant: ['tabular-nums'] },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** The chip on the frame takes the frame's solid light ground. */
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[2],
+    paddingVertical: 3,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusWord: { ...textStyle('label'), color: SEMANTIC.text.primary },
+  /** A section's panel, inside the page's gutters. */
+  panel: {
+    marginHorizontal: SPACE[4],
+    marginTop: SPACE[3],
+    padding: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    gap: 2,
+  },
+  /** Every marker sits inside the page's gutters, not on its edge. */
+  sectionWrap: { paddingHorizontal: SPACE[4] },
   primary: { ...textStyle('body'), color: SEMANTIC.text.primary },
   secondary: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
   amount: { ...textStyle('body'), color: SEMANTIC.text.primary, fontVariant: ['tabular-nums'] },
-  block: { gap: 2 },
   line: {
+    marginHorizontal: SPACE[4],
+    marginTop: SPACE[3],
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
-    borderRadius: 8,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
     padding: SPACE[3],
     gap: 2,
   },
@@ -127,8 +185,10 @@ const styles = StyleSheet.create({
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginHorizontal: SPACE[4],
     borderTopWidth: 1,
     borderTopColor: SEMANTIC.line.default,
+    marginTop: SPACE[4],
     paddingTop: SPACE[3],
   },
   totalLabel: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
