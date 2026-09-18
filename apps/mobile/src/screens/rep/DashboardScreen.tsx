@@ -68,15 +68,17 @@ export function RepDashboardScreen(props: RepDashboardScreenProps): React.ReactN
             header shape, judged by the injected clock, never the phone's
             timezone. */}
         <Text style={styles.greeting} testID="dashboard-greeting">
-          {`${istGreeting(props.now)}, ${props.name}`}
+          {`${istGreeting(props.now)}, `}
+          {/* The name rides inside the greeting — it was said twice, once
+              here and once on its own line under it (2026-09-18). The
+              inner Text keeps `dashboard-name` for the screen's own
+              "who is this" hook. */}
+          <Text testID="dashboard-name">{props.name}</Text>
         </Text>
         <Text style={styles.dateLine} testID="dashboard-date">
           {istDayLabel(props.now)}
         </Text>
         <View style={styles.frameHead}>
-          <Text style={styles.frameTitle} testID="dashboard-name">
-            {props.name}
-          </Text>
           {/* THE action of the screen — the accent, like every other
               dashboard's primary. */}
           <Button label="New sale" icon="plus" variant="primary" onPress={props.onNewSale} testID="dashboard-new-sale" />
@@ -246,15 +248,14 @@ const styles = StyleSheet.create({
     color: FRAME.textMuted,
     marginBottom: SPACE[4],
   },
+  /** The frame's action line — New sale alone now that the name is said
+   * once, in the greeting above it. */
   frameHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: SPACE[3],
+    justifyContent: 'flex-end',
     marginBottom: SPACE[4],
   },
-  /** The username line, quieter under the greeting (no h3 in the ramp). */
-  frameTitle: { ...textStyle('label'), color: FRAME.textMuted },
   frameRule: { height: 1, backgroundColor: FRAME.divider, marginBottom: SPACE[4] },
   figuresRow: {
     flexDirection: 'row',
