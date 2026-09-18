@@ -9,6 +9,8 @@ import { createApiClient, type ApiClient } from './apiClient';
 import { cachedAuthMe, resetAuthMe, setAuthMe } from '../state/authMe';
 import type { StoredSession, TokenStore } from './tokenStore';
 import type { Role } from './types';
+import { defaultFeatureFlags } from '@servgrid/shared';
+import { cachedFeatureFlags, explicitFlagState, setFeatureFlags } from '../state/featureFlags';
 
 const SESSION: StoredSession = {
   accessToken: 'at-old',
@@ -178,6 +180,35 @@ describe('apiClient — 401 contract', () => {
     expect(f.calls).toHaveLength(1); // no refresh attempt at all
     expect(store.session).toBeNull();
     expect(store.clearCount).toBe(1);
+  });
+
+  it('EVERY path that ends a session drops the cached flags and /auth/me (2026-09-18)', async () => {
+    // The bug this pins, reported as "the tech1 login is not working
+    // again": a refused refresh cleared the session but kept the flags
+    // cache, so the NEXT sign-in read the previous user's role profile —
+    // after a rep's session, tech1's screens stayed dark because that
+    // payload has no `tech.jobs`, and only killing the app cured it.
+    //
+    // Both terminal paths are asserted, because only the logout path used
+    // to remember.
+    for (const script of [
+      [UNAUTHENTICATED_401, TOKEN_REUSED_401], // refresh refused
+      [TOKEN_REUSED_401],                      // reuse straight away
+    ]) {
+      setFeatureFlags({ ...defaultFeatureFlags(), 'tech.jobs': true });
+      expect(cachedFeatureFlags()?.['tech.jobs']).toBe(true);
+
+      const f = scriptedFetch(script);
+      const result = await api(f.impl, store).request('GET', '/v1/jobs');
+      expect(result.refreshOutcome).toBe('logged-out');
+
+      // The next user must not inherit them…
+      expect(cachedFeatureFlags()).toBeNull();
+      // …and the unknown/off distinction survives: nothing is published in
+      // their place (publishing the defaults would tell the location task
+      // `tech.location` is explicitly off).
+      expect(explicitFlagState('tech.location')).toBeNull();
+    }
   });
 
   it('a 429 on refresh is retryable, not a logout', async () => {
