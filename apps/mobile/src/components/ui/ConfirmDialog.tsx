@@ -7,7 +7,7 @@
  */
 import { Modal, Pressable, Text, View } from 'react-native';
 
-import { RADII, SEMANTIC, SPACE } from '@servgrid/shared';
+import { alpha, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { textStyle } from '../../fonts/textStyle';
 import { haptic } from './haptics';
 import { Button } from './Button';
@@ -36,11 +36,21 @@ export function ConfirmDialog({
   if (!visible) return null;
   return (
     <Modal transparent visible={visible} onRequestClose={onCancel}>
-      <View testID={testID} style={{ flex: 1, backgroundColor: SEMANTIC.bg.dark, opacity: 0.45, justifyContent: 'flex-end' }}>
+      <View testID={testID} style={{ flex: 1, justifyContent: 'flex-end' }}>
+        {/*
+          * The dimming layer — and the tap-anywhere-to-cancel target under
+          * it. **Its translucency must live here, on the layer itself.**
+          * It used to sit on the parent as `opacity: 0.45`, which dimmed the
+          * PANEL too: the form behind showed straight through the dialog and
+          * the dialog's own words washed out (2026-09-18, Yashas on the sale
+          * form's confirm: "too transparent i have the screen on right now").
+          * `alpha()` on the backdrop keeps the panel opaque, which is what a
+          * dialog is for.
+          */}
         <Pressable
           accessibilityLabel="Cancel"
           onPress={onCancel}
-          style={{ position: 'absolute', inset: 0 }}
+          style={{ position: 'absolute', inset: 0, backgroundColor: alpha(SEMANTIC.bg.dark, 0.45) }}
         />
         <View
           style={{
