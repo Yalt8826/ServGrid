@@ -21,9 +21,9 @@
  * (draft create, then confirm — the number arrives from the confirm).
  */
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { COLORS, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { alpha, COLORS, formatMoneyEnIN, FRAME, ICON, RADII, SEMANTIC, SPACE, TAP, TINT } from '@servgrid/shared';
 import { Button, CalendarGrid, ConfirmDialog, DatePicker, SectionHeader, Select, Sheet, haptic, TextField } from '../../components/ui';
 import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
@@ -102,9 +102,9 @@ export function nextLineKey(): string {
 /** The wire-format money string for quantity × unit price, rounded to
  * paise — what the server's generated `line_total` will hold. */
 export function lineTotalOf(quantity: string, unitPrice: string): string {
-  const q = Number(quantity);
+  const q = quantityValueOf(quantity);
   const p = Number(unitPrice);
-  if (!Number.isFinite(q) || !Number.isFinite(p) || quantity === '' || unitPrice === '') return '0';
+  if (!Number.isFinite(q) || !Number.isFinite(p) || unitPrice === '') return '0';
   const paise = Math.round(q * p * 100);
   const abs = Math.abs(paise);
   const int = String(Math.floor(abs / 100));
@@ -117,7 +117,21 @@ const MONEY_PATTERN = /^\d+(\.\d{1,2})?$/;
 const QUANTITY_PATTERN = /^\d+(\.\d{1,2})?$/;
 const DISCOUNT_PATTERN = /^\d{1,3}(\.\d{1,2})?$/;
 
+/**
+ * The quantity a line actually carries. **A blank field means one** — the
+ * field opens empty showing a grey `1` (Yashas, 2026-09-18: "it should
+ * have a placeholder of 1 but when something is typed that should be
+ * overwritten"), so blank is not "nothing", it is the placeholder read as
+ * a value. `0` stays invalid: a line of no units is a line to remove.
+ */
+export function quantityValueOf(raw: string): number {
+  const trimmed = raw.trim();
+  return trimmed === '' ? 1 : Number(trimmed);
+}
+
+/** A typed quantity must be a positive number; blank is the placeholder's 1. */
 export function isValidQuantity(raw: string): boolean {
+  if (raw.trim() === '') return true;
   const n = Number(raw);
   return QUANTITY_PATTERN.test(raw) && n > 0;
 }
@@ -212,7 +226,7 @@ export function itemsOf(lines: readonly SaleFormLine[], discountPct = ''): Array
       ...(line.productId !== null ? { productId: line.productId } : {}),
       productName: line.productName,
       ...(line.productSku !== null ? { productSku: line.productSku } : {}),
-      quantity: Number(line.quantity),
+      quantity: quantityValueOf(line.quantity),
       listPrice: line.unitPrice,
       discountPct: discountPct === '' ? '0' : discountPct,
       ...(serials.length > 0 ? { serialNumbers: serials } : {}),
@@ -229,6 +243,10 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
   // calendar instead, floored far back: a rep often files a sale the day
   // after he made it.
   const [pickingDate, setPickingDate] = useState(false);
+  // The + door's own state: a sheet with a search field, because the
+  // catalogue is long enough that scrolling for a name is not a lookup.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [productQuery, setProductQuery] = useState('');
   const [lines, setLines] = useState<SaleFormLine[]>([]);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
@@ -249,10 +267,6 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
       ),
     [deps.companies],
   );
-  const productOptions = useMemo(
-    () => deps.products.map((p) => ({ value: p.id, label: `${p.name} · ${p.sku}`, caption: `₹${formatMoneyEnIN(p.defaultPrice)}` })),
-    [deps.products],
-  );
 
   /** One discount for the whole sale (Yashas, 2026-09-18): the discount is
    * negotiated on the invoice, not product by product. Each line is priced
@@ -265,6 +279,13 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
   );
   const total = useMemo(() => invoiceTotalOf(lines, invoiceDiscount), [lines, invoiceDiscount]);
   const complete = formComplete(companyId, lines, invoiceDiscount);
+  const productMatches = useMemo(() => {
+    const needle = productQuery.trim().toLowerCase();
+    if (needle === '') return deps.products;
+    return deps.products.filter(
+      (product) => product.name.toLowerCase().includes(needle) || product.sku.toLowerCase().includes(needle),
+    );
+  }, [deps.products, productQuery]);
 
   function addProduct(product: PickerProduct): void {
     // The snapshot is taken HERE, at add time: name, SKU, price.
@@ -275,7 +296,9 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         productId: product.id,
         productName: product.name,
         productSku: product.sku,
-        quantity: '1',
+        // Blank, not '1': the field shows the placeholder, so typing
+        // OVERWRITES the suggestion instead of needing it deleted first.
+        quantity: '',
         unitPrice: product.defaultPrice,
         serialsOpen: false,
         serials: '',
@@ -358,7 +381,28 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
       </View>
 
       <View style={styles.sectionWrap}>
-        <SectionHeader label="Line items" icon="cube" count={lines.length} />
+        {/* "Products", and the door to add one is a + on the marker itself
+            (Yashas, 2026-09-18: "change the add a product to a + button so
+            it is easier") — one target instead of a label plus a field. */}
+        <SectionHeader
+          label="Products"
+          icon="cube"
+          count={lines.length}
+          action={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add a product"
+              onPress={() => {
+                haptic('pickerSelect');
+                setPickerOpen(true);
+              }}
+              style={styles.addButton}
+              testID="sale-form-product-trigger"
+            >
+              <Icon name="plus" size={ICON.md} color={SEMANTIC.text.onAccent} />
+            </Pressable>
+          }
+        />
       </View>
       {lines.map((line) => (
         <View key={line.key} style={styles.line} testID={`sale-form-line-${line.key}`}>
@@ -382,6 +426,8 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
                 label="Qty"
                 value={line.quantity}
                 onChangeText={(t) => patchLine(line.key, { quantity: t })}
+                placeholder="1"
+                keyboardType="numeric"
                 testID={`sale-form-line-qty-${line.key}`}
               />
             </View>
@@ -417,26 +463,17 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         </View>
       ))}
 
-      {/* The same dropdown shape for the product: choosing one ADDS a line,
-          so the field is a door, not a value — it keeps its placeholder. */}
-      <Select
-        label="Add a product"
-        value={null}
-        options={productOptions}
-        placeholder="Search products by name or SKU"
-        searchable
-        onSelect={(value: string) => {
-          const picked = deps.products.find((p) => p.id === value);
-          if (picked !== undefined) addProduct(picked);
-        }}
-        testID="sale-form-product"
-      />
+
 
       {/* The invoice's own arithmetic: what the lines come to, the discount
           negotiated for the sale, and the figure that follows. */}
       <View style={styles.invoicePanel} testID="sale-form-invoice">
-        <View style={styles.invoiceRow}>
-          <Text style={styles.invoiceLabel}>Subtotal</Text>
+        {/* The subtotal as the one accented figure on the page (Yashas,
+            2026-09-18: "a safety yellow border box with a little tint of the
+            same color") — the sale's own money before the discount, which is
+            what the rep and the customer agree on. */}
+        <View style={styles.subtotalBox} testID="sale-form-subtotal-box">
+          <Text style={styles.subtotalLabel}>Subtotal</Text>
           <Text style={styles.invoiceValue} testID="sale-form-subtotal">
             {`₹${formatMoneyEnIN(subtotal)}`}
           </Text>
@@ -448,6 +485,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
               value={invoiceDiscount}
               onChangeText={setInvoiceDiscount}
               placeholder="0"
+              keyboardType="numeric"
               errorText={isValidInvoiceDiscount(invoiceDiscount) ? undefined : 'A discount is 0 to 100.'}
               testID="sale-form-discount"
             />
@@ -508,6 +546,51 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
           testID="sale-form-confirm"
         />
       </View>
+
+      {pickerOpen ? (
+        <Sheet visible title="Add a product" onDismiss={() => setPickerOpen(false)} testID="sale-form-product-picker">
+          <TextField
+            label="Product"
+            value={productQuery}
+            onChangeText={setProductQuery}
+            placeholder="Search by name or SKU"
+            testID="sale-form-product-search"
+          />
+          <ScrollView style={styles.pickerList} keyboardShouldPersistTaps="handled">
+            {productMatches.length === 0 ? (
+              <Text style={styles.pickerEmpty} testID="sale-form-product-empty">
+                No product matches.
+              </Text>
+            ) : (
+              productMatches.map((product) => (
+                <Pressable
+                  key={product.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${product.name}`}
+                  onPress={() => {
+                    haptic('pickerSelect');
+                    addProduct(product);
+                    setPickerOpen(false);
+                    setProductQuery('');
+                  }}
+                  style={styles.pickerRow}
+                  testID={`sale-form-product-option-${product.id}`}
+                >
+                  <View style={styles.lineMark}>
+                    <Icon name="cube" size={ICON.sm} color={SEMANTIC.text.primary} />
+                  </View>
+                  <View style={styles.pickerMain}>
+                    <Text style={styles.rowPrimary}>{product.name}</Text>
+                    <Text style={styles.snapshot}>
+                      {`${product.sku} · ₹${formatMoneyEnIN(product.defaultPrice)}`}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))
+            )}
+          </ScrollView>
+        </Sheet>
+      ) : null}
 
       {pickingDate ? (
         <Sheet visible title="Which day" onDismiss={() => setPickingDate(false)} testID="sale-form-date-sheet">
@@ -581,6 +664,42 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   /** The invoice's arithmetic, on the raised ground with the accent rail. */
+  /** The + door on the PRODUCTS marker: a square accent target, the one
+   * filled control outside the buttons. */
+  addButton: {
+    width: 32,
+    height: 32,
+    borderRadius: RADII.control,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The subtotal box: the accent border and a wash of the same colour —
+   * tint, never ink (the figure keeps the text colour). */
+  subtotalBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    backgroundColor: alpha(COLORS.accent, TINT.band),
+    borderRadius: RADII.control,
+    paddingHorizontal: SPACE[3],
+    paddingVertical: SPACE[2],
+  },
+  subtotalLabel: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
+  /** The picker's list under its search field. */
+  pickerList: { maxHeight: 360, alignSelf: 'stretch' },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    paddingVertical: SPACE[2],
+    borderBottomWidth: 1,
+    borderBottomColor: SEMANTIC.line.default,
+  },
+  pickerMain: { flex: 1, gap: 2 },
+  pickerEmpty: { ...textStyle('body'), color: SEMANTIC.text.secondary, paddingVertical: SPACE[3] },
   invoicePanel: {
     marginTop: SPACE[4],
     padding: SPACE[3],
