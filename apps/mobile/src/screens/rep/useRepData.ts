@@ -119,22 +119,31 @@ export interface RepFlags {
  */
 export function useRepFlags(): RepFlags {
   const [flags, setFlagsState] = useState<FeatureFlagState | null>(cachedFeatureFlags());
+  // Bumped to ask `/auth/me` again after a failed read (2026-09-18).
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (flags !== null) return;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
       const res = await api.request<AuthMeResponse>('GET', '/v1/auth/me');
-      const next: FeatureFlagState = {
-        ...defaultFeatureFlags(),
-        ...(res.ok && res.data !== null ? res.data.featureFlags : {}),
-      };
+      if (!alive) return;
+      // A failed read is not an answer — publishing defaults here would
+      // cache "everything off" into the shared store (and tell the
+      // location task tech.location is explicitly false). Retry instead.
+      if (!res.ok || res.data === null) {
+        timer = setTimeout(() => setAttempt((n) => n + 1), 3_000);
+        return;
+      }
+      const next: FeatureFlagState = { ...defaultFeatureFlags(), ...res.data.featureFlags };
       setFeatureFlags(next);
-      if (alive) setFlagsState(next);
+      setFlagsState(next);
     })();
     return () => {
       alive = false;
+      if (timer !== null) clearTimeout(timer);
     };
-  }, [flags]);
+  }, [flags, attempt]);
   return {
     ready: flags !== null,
     cards: flags?.['sales.cards'] ?? false,
