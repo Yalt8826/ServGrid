@@ -25,7 +25,7 @@ export interface OwnerPaymentsScreenProps {
   rows: OwnerPaymentRow[];
   error: string | null;
   loading: boolean;
-  onVoid: (payment: OwnerPaymentRow, reason: string) => void;
+  onVoid: (payment: OwnerPaymentRow, reason: string) => Promise<void>;
   voidBusy: boolean;
   voidError: string | null;
   onRetry: () => void;
@@ -193,8 +193,10 @@ export function OwnerPaymentsScreen(props: OwnerPaymentsScreenProps): React.Reac
         amount={voidTarget === null ? null : voidTarget.amount}
         busy={props.voidBusy}
         error={props.voidError}
-        onConfirm={(reason) => {
-          if (voidTarget !== null) props.onVoid(voidTarget, reason);
+        onConfirm={async (reason) => {
+          // Rejects on refusal, which keeps the sheet open (VoidReasonSheet
+          // owns its own dismissal on success).
+          if (voidTarget !== null) await props.onVoid(voidTarget, reason);
         }}
         onDismiss={() => setVoidTarget(null)}
         testID="owner-payment-void-sheet"

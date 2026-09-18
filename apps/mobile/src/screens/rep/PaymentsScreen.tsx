@@ -148,8 +148,22 @@ export function RecordPaymentSheet(props: RecordPaymentSheetProps): React.ReactN
       });
     } catch {
       // The screen owns the error surface (its banner) and has already
-      // rolled the optimistic row back — nothing to add here.
+      // rolled the optimistic row back — nothing to add here. The sheet
+      // stays open with everything typed: the money did not move.
+      return;
     }
+    /**
+     * **A recorded payment closes its own form** (2026-09-18, Yashas:
+     * "after a record is done the form screen for any user closes
+     * automatically"). This used to be the CALLER's job, and one caller
+     * forgot: `PaymentsScreen` wrapped `record` so its sheet closed, while
+     * the company ledger passed the route's raw `record` — so a payment
+     * filed from a company page left the form sitting open over money that
+     * had already moved, inviting a second identical POST.
+     *
+     * Ownership belongs HERE, where success is known rather than inferred.
+     */
+    props.onDismiss();
   }
 
   return (
@@ -337,7 +351,9 @@ export function PaymentsScreen(props: PaymentsScreenProps): React.ReactNode {
       props.applyOptimisticPayment(input.companyId, `-${input.amount}`);
       throw e;
     }
-    setSheetOpen(false);
+    // The sheet dismisses itself on success (see its `submit`) — closing
+    // here too was how the company page came to be the one caller that
+    // forgot to.
   }
 
   return (

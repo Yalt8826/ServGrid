@@ -11,7 +11,7 @@
  * - House accounts carry a small `Shared` chip; rows sort by balance
  *   descending; the ledger interleaves with the server's running balance.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { act } from 'react';
 
@@ -440,6 +440,36 @@ describe('CompanyLedgerScreen (§S4)', () => {
     expect(findByTestID(tree, 'ledger-filter-clear')).toBeUndefined();
     expect(findByTestID(tree, 'ledger-row-sale-s1000000-0000-4000-8000-000000000002')).toBeDefined();
     expect(findByTestID(tree, 'ledger-row-payment-p1000000-0000-4000-8000-000000000001')).toBeDefined();
+  });
+
+  it('recording a payment FROM THE COMPANY PAGE closes the form (2026-09-18)', async () => {
+    // The reported bug, held here: this page passes the route's raw
+    // `record`, so nothing but the sheet itself could have dismissed it.
+    const record = vi.fn(async (_input: { companyId: string; amount: string }) => {});
+    const r = await create(<CompanyLedgerScreen {...ledgerProps({ record })} />);
+
+    // Open the record-payment sheet from the account's own button.
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'company-record-payment')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
+    });
+    expect(findByTestID(toJson(r), 'payment-sheet')).toBeDefined();
+
+    // Type the amount and file it.
+    const amount = findAll(findByTestID(toJson(r), 'payment-sheet-amount')!, (n) => n.type === 'TextInput')[0]!;
+    await act(async () => {
+      amount.props.onChangeText?.('5000');
+    });
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'payment-sheet-submit')!, (n) => n.type === 'Pressable')[0]!.props.onPress?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(record).toHaveBeenCalledTimes(1);
+    // …and the form is gone, rather than sitting open over a payment that
+    // has already been filed.
+    expect(findByTestID(toJson(r), 'payment-sheet')).toBeUndefined();
   });
 
   it('a ledger row opens the document it names — the sale its lines, the payment its own page', async () => {

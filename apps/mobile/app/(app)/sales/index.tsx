@@ -88,9 +88,11 @@ function OwnerSalesRoute(): React.ReactNode {
           rows={sales.rows}
           error={sales.error}
           loading={sales.loading}
-          onVoid={(sale, reason) => {
-            void voidSale(sale.id, reason).catch(() => {});
-          }}
+          // The promise is handed back, not swallowed: the void sheet
+          // awaits it and keeps itself open when the reversal is refused
+          // (2026-09-18). Swallowing here would close the sheet over a
+          // reversal that never happened.
+          onVoid={(sale, reason) => voidSale(sale.id, reason)}
           voidBusy={voidBusy}
           voidError={voidError}
           onRetry={sales.reload}
