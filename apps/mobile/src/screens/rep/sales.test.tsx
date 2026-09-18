@@ -194,6 +194,39 @@ describe('SaleFormScreen — create (§S2)', () => {
     expect(formComplete(null, lines)).toBe(false);
   });
 
+  it('the sale date can actually be moved — the tappable field was a stub', async () => {
+    const deps = {
+      companies: [{ id: COMPANY_ID, name: 'Sterling Industries' }],
+      products: [],
+      today: TODAY,
+      online: true,
+      initialCompanyId: COMPANY_ID,
+      createDraft: vi.fn(async () => ({ id: 's1000000-0000-4000-8000-000000000010' })),
+      confirmSale: vi.fn(async () => ({})),
+      onDone: vi.fn(),
+    };
+    const r = await create(<SaleFormScreen {...deps} />);
+    // The field shows today (the fixture's day)…
+    expect(allText(findByTestID(toJson(r), 'sale-form-date')!)).toContain('11 Sep');
+
+    // …and its trigger opens the app's month calendar rather than re-emitting
+    // the date it already held (the stub's old behaviour).
+    await act(async () => {
+      findAll(findByTestID(toJson(r), 'sale-form-date')!, (n) => typeof n.props.onPress === 'function')[0]!.props.onPress?.();
+    });
+    const open = toJson(r);
+    expect(findByTestID(open, 'sale-form-date-calendar')).toBeDefined();
+    // A day already past is pickable: a rep files the sale the morning after.
+    const earlier = findAll(findByTestID(open, 'sale-form-date-calendar-day-2026-09-08')!, (n) => typeof n.props.onPress === 'function')[0]!;
+    expect((earlier.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+
+    await act(async () => {
+      earlier.props.onPress?.();
+    });
+    expect(allText(findByTestID(toJson(r), 'sale-form-date')!)).toContain('8 Sep');
+    expect(findByTestID(toJson(r), 'sale-form-date-sheet')).toBeUndefined();
+  });
+
   it('serial numbers are optional per line and collapsed until opened', async () => {
     const deps = {
       companies: [{ id: COMPANY_ID, name: 'Sterling Industries' }],

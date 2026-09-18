@@ -23,8 +23,8 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoneyEnIN, SEMANTIC, SPACE } from '@servgrid/shared';
-import { Button, ConfirmDialog, DatePicker, haptic, TextField } from '../../components/ui';
+import { formatMoneyEnIN, FRAME, RADII, SEMANTIC, SPACE, TAP } from '@servgrid/shared';
+import { Button, CalendarGrid, ConfirmDialog, DatePicker, SectionHeader, Sheet, haptic, TextField } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 import { sumMoney } from './money';
 
@@ -39,6 +39,10 @@ export interface PickerProduct {
   sku: string;
   defaultPrice: string;
 }
+
+/** How far back a sale's date may reach. Not today: a rep often files the
+ * sale the morning after, and no sale predates the product. */
+export const SALE_HISTORY_FLOOR = '2020-01-01';
 
 /** One line, as the form holds it: the snapshot taken at add time. */
 export interface SaleFormLine {
@@ -190,6 +194,12 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
   const [companyId, setCompanyId] = useState<string | null>(deps.initialCompanyId ?? null);
   const [companySearchOpen, setCompanySearchOpen] = useState(deps.initialCompanyId == null);
   const [saleDate, setSaleDate] = useState(deps.today);
+  // The day picker (2026-09-18): `DatePicker` is a field with a trigger and
+  // no choosing UI of its own — its tap re-emits the date it holds, so a
+  // sale's date could be read but never moved. This opens the app's month
+  // calendar instead, floored far back: a rep often files a sale the day
+  // after he made it.
+  const [pickingDate, setPickingDate] = useState(false);
   const [lines, setLines] = useState<SaleFormLine[]>([]);
   const [productQuery, setProductQuery] = useState('');
   const [notes, setNotes] = useState('');
@@ -271,10 +281,14 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={deps.testID ?? 'sale-form'}>
-      <Text style={styles.heading} testID="sale-form-title">
-        New sale
-      </Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={deps.testID ?? 'sale-form'}>
+      {/* The navy frame: what is being raised. */}
+      <View style={styles.frame}>
+        <Text style={styles.frameTitle} testID="sale-form-title">
+          New sale
+        </Text>
+        <Text style={styles.frameCaption}>A sale, its lines and its serials.</Text>
+      </View>
 
       {error !== null ? (
         <Text style={styles.errorText} testID="sale-form-error">
@@ -282,8 +296,10 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         </Text>
       ) : null}
 
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="Company" icon="business" />
+      </View>
       <View style={styles.block}>
-        <Text style={styles.fieldLabel}>Company</Text>
         {companyName !== null && !companySearchOpen ? (
           <Pressable
             accessibilityRole="button"
@@ -322,11 +338,16 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         )}
       </View>
 
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="Date" icon="calendar" />
+      </View>
       <View style={styles.block}>
-        <DatePicker label="Date" value={saleDate} onChange={setSaleDate} testID="sale-form-date" />
+        <DatePicker label="Date" value={saleDate} onChange={() => setPickingDate(true)} testID="sale-form-date" />
       </View>
 
-      <Text style={styles.sectionLabel}>LINE ITEMS</Text>
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="Line items" icon="cube" count={lines.length} />
+      </View>
       {lines.map((line) => (
         <View key={line.key} style={styles.line} testID={`sale-form-line-${line.key}`}>
           <View style={styles.lineHead}>
@@ -381,7 +402,7 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         </View>
       ))}
 
-      <Text style={styles.fieldLabel}>Add a product</Text>
+      <Text style={styles.addLabel}>Add a product</Text>
       <TextField
         label="Search products"
         value={productQuery}
@@ -452,6 +473,22 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
         />
       </View>
 
+      {pickingDate ? (
+        <Sheet visible title="Which day" onDismiss={() => setPickingDate(false)} testID="sale-form-date-sheet">
+          <CalendarGrid
+            value={saleDate}
+            todayIso={deps.today}
+            minIso={SALE_HISTORY_FLOOR}
+            onSelect={(iso) => {
+              haptic('pickerSelect');
+              setSaleDate(iso);
+              setPickingDate(false);
+            }}
+            testID="sale-form-date-calendar"
+          />
+        </Sheet>
+      ) : null}
+
       <ConfirmDialog
         visible={confirming}
         title="Confirm sale"
@@ -471,18 +508,33 @@ export function SaleFormScreen(deps: SaleFormDeps): React.ReactNode {
 }
 
 const styles = StyleSheet.create({
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
     paddingBottom: SPACE[8],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
     gap: SPACE[3],
   },
-  heading: {
-    ...textStyle('h1'),
-    color: SEMANTIC.text.primary,
+  /** The navy frame: what is being raised. */
+  frame: {
+    backgroundColor: FRAME.bg,
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+    gap: 2,
   },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** Every marker sits inside the page's gutters, not on its edge. */
+  sectionWrap: { marginTop: SPACE[5] },
   block: {
     gap: SPACE[2],
   },
+  /** "Add a product" is an instruction, not a field label. */
+  addLabel: { ...textStyle('bodyStrong'), color: SEMANTIC.text.primary },
   searchBlock: {
     gap: SPACE[1],
   },
@@ -499,22 +551,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 52,
-    paddingVertical: SPACE[2],
+    gap: SPACE[3],
+    minHeight: TAP.min,
+    paddingHorizontal: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
   },
+  /** A pickable row: bordered, so it reads as a thing to press. */
   pickRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 52,
-    paddingHorizontal: SPACE[2],
-    borderRadius: 4,
+    minHeight: TAP.min,
+    paddingHorizontal: SPACE[3],
+    marginTop: SPACE[2],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
     gap: SPACE[3],
   },
   line: {
     borderWidth: 1,
     borderColor: SEMANTIC.line.default,
-    borderRadius: 4,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
     padding: SPACE[3],
     gap: SPACE[2],
   },
