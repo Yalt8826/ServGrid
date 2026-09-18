@@ -9,8 +9,8 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { SEMANTIC, SPACE } from '@servgrid/shared';
-import { Banner, Button, TextField } from '../../components/ui';
+import { FRAME, SEMANTIC, SPACE } from '@servgrid/shared';
+import { SectionHeader, Banner, Button, TextField } from '../../components/ui';
 import { textStyle } from '../../fonts/textStyle';
 
 export interface CompanyFormScreenProps {
@@ -56,14 +56,22 @@ export function CompanyFormScreen(props: CompanyFormScreenProps): React.ReactNod
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'company-form'}>
-      <Text style={styles.heading} testID="company-form-title">
-        New account
-      </Text>
-      <Text style={styles.sub}>The account is yours to collect from the moment it is created.</Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'company-form'}>
+      {/* The navy frame: what is being created, and whose it is. */}
+      <View style={styles.frame}>
+        <Text style={styles.frameTitle} testID="company-form-title">
+          New account
+        </Text>
+        <Text style={styles.frameCaption}>
+          The account is yours to collect from the moment it is created.
+        </Text>
+      </View>
 
       {error !== null ? <Banner tone="danger" message={error} testID="company-form-error" /> : null}
 
+      <View style={styles.sectionWrap}>
+        <SectionHeader label="The account" icon="business" />
+      </View>
       <View style={styles.block}>
         <TextField label="Company name" value={name} onChangeText={setName} placeholder="Trading name" testID="company-form-name" />
         <TextField
@@ -88,6 +96,7 @@ export function CompanyFormScreen(props: CompanyFormScreenProps): React.ReactNod
 
       <Button
         label="Create account"
+        icon="check"
         onPress={() => void submit()}
         loading={busy}
         disabled={!canCreate}
@@ -104,8 +113,25 @@ export function CompanyFormScreen(props: CompanyFormScreenProps): React.ReactNod
 }
 
 const styles = StyleSheet.create({
-  content: { padding: SPACE[4], gap: SPACE[3], backgroundColor: SEMANTIC.bg.app },
-  heading: { ...textStyle('h1'), color: SEMANTIC.text.primary },
-  sub: { ...textStyle('caption'), color: SEMANTIC.text.secondary },
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
+  content: {
+    paddingBottom: SPACE[8],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
+    gap: SPACE[3],
+  },
+  frame: {
+    backgroundColor: FRAME.bg,
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+    gap: 2,
+  },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  sectionWrap: { marginTop: SPACE[3] },
   block: { gap: SPACE[3] },
 });

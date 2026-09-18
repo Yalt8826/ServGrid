@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import type { Company, Product, SaleRecord } from '@servgrid/shared';
-import { SEMANTIC } from '@servgrid/shared';
+import { FRAME } from '@servgrid/shared';
 import { uuid } from '../../../src/lib/uuid';
 import { SaleFormScreen, type PickerCompany, type PickerProduct } from '../../../src/screens/rep/SaleFormScreen';
 import { apiGet, apiSend, useOnline, useRepFlags } from '../../../src/screens/rep/useRepData';
@@ -48,7 +48,7 @@ function RepSaleFormRoute(): React.ReactNode {
       ]);
       if (!alive) return;
       if (companiesR.status === 'fulfilled') {
-        setCompanies(companiesR.value.items.map((c) => ({ id: c.id, name: c.name })));
+        setCompanies(companiesR.value.items.map((c) => ({ id: c.id, name: c.name, city: c.city })));
       }
       if (productsR.status === 'fulfilled') {
         setProducts(
@@ -78,7 +78,8 @@ function RepSaleFormRoute(): React.ReactNode {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: SEMANTIC.bg.app }} edges={['top', 'left', 'right', 'bottom']}>
+    // The frame reaches the status bar; the bottom inset is the shell's.
+    <SafeAreaView style={{ flex: 1, backgroundColor: FRAME.bg }} edges={['top', 'left', 'right']}>
       <SaleFormScreen
         companies={companies}
         products={products}

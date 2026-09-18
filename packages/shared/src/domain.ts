@@ -46,6 +46,15 @@ export interface Company {
   contactPerson: string | null;
   phone: string | null;
   email: string | null;
+  /** The premises. `GET /v1/companies` has always sent these — the
+   * service maps every row through `CompanySchema` — and the rep's sale
+   * form reads `city` off the list to caption an account with where it
+   * is, so a search can find it by the locality. */
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
   gstin: string | null;
   notes: string | null;
   /** NULL = house account, visible to every rep (PLAN-GAPS.md G3). */

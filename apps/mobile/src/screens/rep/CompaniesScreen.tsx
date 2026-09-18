@@ -17,9 +17,10 @@
  */
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { SEMANTIC, SPACE } from '@servgrid/shared';
+import { FRAME, ICON, RADII, SEMANTIC, SPACE } from '@servgrid/shared';
 import { Banner, Button, EmptyState } from '../../components/ui';
 import { formatDateEnIN } from '../../components/ui';
+import { Icon } from '../../components/ui/icons';
 import { textStyle } from '../../fonts/textStyle';
 import { creditView } from './money';
 import { lastActivityOf, type CompanyRow } from './model';
@@ -47,9 +48,10 @@ export function SharedChip({ testID }: { testID?: string }): React.ReactNode {
 
 const chipStyles = StyleSheet.create({
   shell: {
-    borderRadius: 4,
+    borderRadius: RADII.control,
     borderWidth: 1,
-    borderColor: SEMANTIC.line.strong,
+    borderColor: SEMANTIC.line.default,
+    backgroundColor: SEMANTIC.bg.app,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
@@ -62,7 +64,28 @@ const chipStyles = StyleSheet.create({
 export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
   const nowYear = new Date().getFullYear();
   return (
-    <ScrollView contentContainerStyle={styles.content} testID={props.testID ?? 'rep-companies'}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} testID={props.testID ?? 'rep-companies'}>
+      {/* The frame (2026-09-18): what this is, how many accounts, and the
+          two doors — a new account, or a sale against one of them. */}
+      <View style={styles.frame}>
+        <View style={styles.frameHead}>
+          <View style={styles.frameBody}>
+            <Text style={styles.frameTitle}>Companies</Text>
+            <Text style={styles.frameCaption}>
+              {`${props.rows.length} ${props.rows.length === 1 ? 'account' : 'accounts'}`}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.frameActions}>
+          <View style={styles.frameAction}>
+            <Button label="New sale" icon="plus" variant="secondary" onPress={props.onNewSale} fullwidth testID="companies-new-sale" />
+          </View>
+          <View style={styles.frameAction}>
+            <Button label="New account" icon="plus" variant="primary" onPress={props.onNewCompany} fullwidth testID="companies-new-company" />
+          </View>
+        </View>
+      </View>
+
       {props.error !== null ? (
         <Banner tone="danger" message={props.error} onDismiss={props.onRetry} testID="companies-error" />
       ) : null}
@@ -78,9 +101,28 @@ export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
               key={row.companyId}
               accessibilityRole="button"
               onPress={() => props.onOpenCompany(row.companyId)}
-              style={styles.row}
+              style={styles.card}
               testID={`company-row-${row.companyId}`}
             >
+              {/* The rail says the account's state the way the dashboard's
+                  owed cards do: money to collect is danger, money held is
+                  success, an account with no history is neutral. The balance
+                  TEXT keeps `creditView`'s own rule (a credit is coloured,
+                  a debt is plain) — the rail is the glance, the text is the
+                  figure (2026-09-18). */}
+              <View
+                style={[
+                  styles.rail,
+                  {
+                    backgroundColor:
+                      row.balance === null
+                        ? SEMANTIC.line.strong
+                        : Number(row.balance) > 0
+                          ? SEMANTIC.feedback.danger
+                          : SEMANTIC.feedback.success,
+                  },
+                ]}
+              />
               <View style={styles.main}>
                 <View style={styles.nameRow}>
                   <Text style={styles.name}>{row.name}</Text>
@@ -95,38 +137,56 @@ export function CompaniesScreen(props: CompaniesScreenProps): React.ReactNode {
                   {balance.text}
                 </Text>
               ) : null}
+              <Icon name="chevronRight" size={ICON.sm} color={SEMANTIC.text.secondary} />
             </Pressable>
           );
         })
       )}
 
-      <View style={styles.actions}>
-        <Button label="+ New account" onPress={props.onNewCompany} testID="companies-new-company" />
-        <Button label="+ New sale" variant="secondary" onPress={props.onNewSale} testID="companies-new-sale" />
-      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  actions: {
-    gap: SPACE[2],
-    marginBottom: SPACE[3],
-  },
+  /** The page's own ground on the scroll itself, under the frame. */
+  screen: { flex: 1, backgroundColor: SEMANTIC.bg.app },
   content: {
-    padding: SPACE[4],
     paddingBottom: SPACE[8],
-    gap: SPACE[2],
+    paddingTop: SPACE[2],
+    paddingHorizontal: SPACE[4],
   },
-  row: {
-    minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: SPACE[2],
-    borderBottomWidth: 1,
-    borderBottomColor: SEMANTIC.line.default,
+  frame: {
+    backgroundColor: FRAME.bg,
+    marginTop: SPACE[2] * -1,
+    marginHorizontal: SPACE[4] * -1,
+    paddingHorizontal: SPACE[4],
+    paddingTop: SPACE[4],
+    paddingBottom: SPACE[4],
+    marginBottom: SPACE[4],
     gap: SPACE[3],
   },
+  frameHead: { flexDirection: 'row', alignItems: 'center', gap: SPACE[3] },
+  frameBody: { flex: 1, gap: 2 },
+  frameTitle: { ...textStyle('h1'), color: FRAME.text },
+  frameCaption: { ...textStyle('caption'), color: FRAME.textMuted },
+  /** The two create doors share the frame's second line. */
+  frameActions: { flexDirection: 'row', gap: SPACE[2] },
+  frameAction: { flex: 1 },
+  /** A row is a card: air between, hairline round, the rail leading. */
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE[3],
+    marginTop: SPACE[2],
+    paddingRight: SPACE[3],
+    paddingVertical: SPACE[3],
+    borderWidth: 1,
+    borderColor: SEMANTIC.line.default,
+    borderRadius: RADII.control,
+    backgroundColor: SEMANTIC.bg.raised,
+    overflow: 'hidden',
+  },
+  rail: { alignSelf: 'stretch', width: 4 },
   main: {
     flex: 1,
     gap: 2,

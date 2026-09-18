@@ -114,6 +114,24 @@ describe('Select — the menu opens, filters, chooses and closes', () => {
     expect(findByTestID(toJson(long), 'who-search')).toBeDefined();
   });
 
+  // The rep's accounts and catalogue are five rows today and will not stay
+  // that way. The caller knows that; the list's own length never will.
+  it('a caller can force the filter field on a short list, or off a long one', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ value: `t${i}`, label: `Technician ${i}` }));
+
+    const forcedOn = await mount(
+      <Select label="Customer" value={null} options={opts} onSelect={() => {}} searchable testID="on" />,
+    );
+    await press(findByTestID(toJson(forcedOn), 'on-trigger'));
+    expect(findByTestID(toJson(forcedOn), 'on-search')).toBeDefined();
+
+    const forcedOff = await mount(
+      <Select label="Who" value={null} options={many} onSelect={() => {}} searchable={false} testID="off" />,
+    );
+    await press(findByTestID(toJson(forcedOff), 'off-trigger'));
+    expect(findByTestID(toJson(forcedOff), 'off-search')).toBeUndefined();
+  });
+
   it('typing filters the rows, and nothing matching says so', async () => {
     const many = Array.from({ length: 12 }, (_, i) => ({ value: `t${i}`, label: `Technician ${i}` }));
     const r = await mount(<Select label="Who" value={null} options={many} onSelect={() => {}} testID="who" />);
