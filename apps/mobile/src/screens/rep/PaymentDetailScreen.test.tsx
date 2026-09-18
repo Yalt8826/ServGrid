@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { act } from 'react';
 
 import type { PaymentRecord } from '@servgrid/shared';
 import { allText, create, findByTestID, toJson } from '../../components/ui/testing';
@@ -50,6 +52,86 @@ describe('PaymentDetailScreen (§S3 read side)', () => {
       <PaymentDetailScreen payment={onAccount} companyName="Sri Venkateswara Traders" againstSaleNumber={null} loading={false} error={null} onRetry={() => {}} />,
     );
     expect(allText(toJson(r)).join('\n')).toContain('On account');
+  });
+
+  it('shows the proof photo captured when the payment was recorded', async () => {
+    const loadProof = vi.fn(async () => 'https://minio.local/proof.png?sig=abc');
+    const r = await create(
+      <PaymentDetailScreen
+        payment={PAYMENT}
+        companyName="Sri Venkateswara Traders"
+        againstSaleNumber={null}
+        loading={false}
+        error={null}
+        loadProof={loadProof}
+        onRetry={() => {}}
+      />,
+    );
+    await act(async () => {});
+    expect(loadProof).toHaveBeenCalledTimes(1);
+    const image = findByTestID(toJson(r), 'payment-detail-proof')!;
+    // The photo renders from the store's own signed URL — the bytes are
+    // never proxied (§9).
+    expect((image.props.source as { uri: string }).uri).toBe('https://minio.local/proof.png?sig=abc');
+    expect(findByTestID(toJson(r), 'payment-detail-proof-none')).toBeUndefined();
+  });
+
+  it('a payment with no photo says so plainly instead of an empty frame', async () => {
+    const r = await create(
+      <PaymentDetailScreen
+        payment={PAYMENT}
+        companyName="Sri Venkateswara Traders"
+        againstSaleNumber={null}
+        loading={false}
+        error={null}
+        loadProof={async () => null}
+        onRetry={() => {}}
+      />,
+    );
+    await act(async () => {});
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'payment-detail-proof')).toBeUndefined();
+    expect(allText(findByTestID(tree, 'payment-detail-proof-none')!)).toEqual([
+      'No proof photo was attached to this payment.',
+    ]);
+  });
+
+  it('a proof that cannot be read surfaces the server’s words, not a broken image', async () => {
+    const r = await create(
+      <PaymentDetailScreen
+        payment={PAYMENT}
+        companyName="Sri Venkateswara Traders"
+        againstSaleNumber={null}
+        loading={false}
+        error={null}
+        loadProof={async () => {
+          throw new Error('The photo could not be read.');
+        }}
+        onRetry={() => {}}
+      />,
+    );
+    await act(async () => {});
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'payment-detail-proof')).toBeUndefined();
+    expect(allText(findByTestID(tree, 'payment-detail-proof-error')!)).toContain('The photo could not be read.');
+  });
+
+  it('no loader, no proof section — the screen stays renderable without a route', async () => {
+    const r = await create(
+      <PaymentDetailScreen
+        payment={PAYMENT}
+        companyName="Sri Venkateswara Traders"
+        againstSaleNumber={null}
+        loading={false}
+        error={null}
+        onRetry={() => {}}
+      />,
+    );
+    await act(async () => {});
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'payment-detail-proof')).toBeUndefined();
+    expect(findByTestID(tree, 'payment-detail-proof-none')).toBeUndefined();
+    expect(allText(tree).join(' ')).not.toContain('Proof photo');
   });
 
   it('the collected moment is IST — the handset’s zone does not decide it', async () => {
