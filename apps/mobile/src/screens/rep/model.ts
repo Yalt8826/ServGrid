@@ -121,6 +121,75 @@ export function sortSalesRows(rows: readonly SaleRow[]): SaleRow[] {
   ];
 }
 
+// ── the list's day sections and its day filter (2026-09-18) ───────────────
+
+/** `YYYY-MM-DD` ± `days`, on plain calendar days via UTC — no timezone to
+ * be wrong in, the same trick the rest of the app's day arithmetic uses. */
+export function addDaysIso(iso: string, days: number): string {
+  const [y = 1970, m = 1, d = 1] = iso.split('-').map(Number);
+  const shifted = new Date(Date.UTC(y, m - 1, d));
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
+}
+
+/** The app's own short forms — the same words `formatDateEnIN` prints, so
+ * a heading and the row under it never disagree about September ("Sep",
+ * never ICU's "Sept"). */
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/**
+ * A section's heading for a day: `Today`, `Yesterday`, else `Mon 14 Sep`
+ * — with the year when it is not the current one, because a rep scrolling
+ * back needs to know which September he is looking at.
+ */
+export function dayLabelFor(day: string, todayIso: string): string {
+  if (day === todayIso) return 'Today';
+  if (day === addDaysIso(todayIso, -1)) return 'Yesterday';
+  const [y = 1970, m = 1, d = 1] = day.split('-').map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d));
+  const label = `${WEEKDAYS[at.getUTCDay()]} ${d} ${MONTHS[m - 1]}`;
+  return todayIso.slice(0, 4) === day.slice(0, 4) ? label : `${label} ${y}`;
+}
+
+export interface SalesDaySection {
+  /** The day itself, `YYYY-MM-DD`. */
+  day: string;
+  /** `Today` / `Yesterday` / `Mon 14 Sep` — the heading. */
+  label: string;
+  rows: SaleRow[];
+  /** What he sold that day, all statuses: the section's own figure. */
+  total: string;
+}
+
+/**
+ * The list divided by the day it was sold (§S2, 2026-09-18): one section
+ * per sale date, newest day first, drafts leading inside their own day
+ * (`sortSalesRows`) — a sale belongs to the day it was raised, so the
+ * grouping decides the order and the draft rule applies within it.
+ */
+export function salesDaySections(rows: readonly SaleRow[], todayIso: string): SalesDaySection[] {
+  const byDay = new Map<string, SaleRow[]>();
+  for (const row of rows) {
+    const bucket = byDay.get(row.saleDate);
+    if (bucket === undefined) byDay.set(row.saleDate, [row]);
+    else bucket.push(row);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0)) // newest day first
+    .map(([day, dayRows]) => ({
+      day,
+      label: dayLabelFor(day, todayIso),
+      rows: sortSalesRows(dayRows),
+      total: sumMoney(dayRows.map((r) => r.total)),
+    }));
+}
+
+/** The list narrowed to one day — `null` is every day, the resting state. */
+export function filterSalesByDay(rows: readonly SaleRow[], day: string | null): SaleRow[] {
+  return day === null ? [...rows] : rows.filter((row) => row.saleDate === day);
+}
+
 /** His accounts plus house accounts, balance descending, nulls last. */
 export function companiesRowsOf(
   companies: readonly Company[],

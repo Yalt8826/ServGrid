@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { FRAME, SEMANTIC } from '@servgrid/shared';
+import { istBusinessDateKey } from '../../../src/screens/dispatcher/jobLogsFilters';
 import { DeskListShell } from '../../../src/components/ui';
 import { SalesScreen } from '../../../src/screens/rep/SalesScreen';
 import { useRepFlags, useRepSales } from '../../../src/screens/rep/useRepData';
@@ -56,6 +57,7 @@ function RepSalesRoute(): React.ReactNode {
         rows={sales.rows}
         error={sales.error}
         loading={sales.loading}
+        todayIso={istBusinessDateKey(new Date())}
         onNewSale={() => router.push('/sales/new')}
         onOpenSale={(saleId) => router.push(`/sales/${saleId}`)}
         onRetry={sales.reload}

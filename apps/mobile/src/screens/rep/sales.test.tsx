@@ -23,7 +23,7 @@ import {
   SaleFormScreen,
   type SaleFormLine,
 } from './SaleFormScreen';
-import { sortSalesRows, type SaleRow } from './model';
+import { dayLabelFor, filterSalesByDay, salesDaySections, sortSalesRows, type SaleRow } from './model';
 
 const COMPANY_ID = 'c1000000-0000-4000-8000-000000000001';
 const TODAY = '2026-09-11';
@@ -56,6 +56,84 @@ function line(overrides: Partial<SaleFormLine> = {}): SaleFormLine {
   };
 }
 
+describe('the list\u2019s day sections (§S2, 2026-09-18)', () => {
+  it('a heading names the day: today, yesterday, then the date', () => {
+    expect(dayLabelFor('2026-09-14', '2026-09-14')).toBe('Today');
+    expect(dayLabelFor('2026-09-13', '2026-09-14')).toBe('Yesterday');
+    expect(dayLabelFor('2026-09-08', '2026-09-14')).toBe('Tue 8 Sep');
+    // A different year says so — a rep scrolling back must know which one.
+    expect(dayLabelFor('2025-09-08', '2026-09-14')).toBe('Mon 8 Sep 2025');
+  });
+
+  it('the list divides by the day it was sold, newest day first, drafts first inside their own', () => {
+    const sections = salesDaySections(
+      [
+        row({ id: 'a', status: 'confirmed', saleDate: '2026-09-08', total: '1000' }),
+        row({ id: 'b', status: 'draft', saleDate: '2026-09-14', total: '2000' }),
+        row({ id: 'c', status: 'confirmed', saleDate: '2026-09-14', total: '3000' }),
+        row({ id: 'd', status: 'draft', saleDate: '2026-09-08', total: '500' }),
+      ],
+      '2026-09-14',
+    );
+    expect(sections.map((s) => s.label)).toEqual(['Today', 'Tue 8 Sep']);
+    // A sale belongs to the day it was raised, so the day decides the section
+    // and the draft rule applies within it.
+    expect(sections[0]!.rows.map((r) => r.id)).toEqual(['b', 'c']);
+    expect(sections[1]!.rows.map((r) => r.id)).toEqual(['d', 'a']);
+    // Each day carries what he sold that day.
+    expect(sections[0]!.total).toBe('5000');
+    expect(sections[1]!.total).toBe('1500');
+  });
+
+  it('the day filter reaches backwards — today is not its floor', async () => {
+    const early = row({ id: 's1000000-0000-4000-8000-0000000000e1', status: 'confirmed', saleDate: '2026-09-08', saleNumber: 'SL-2627-00001' });
+    const late = row({ id: 's1000000-0000-4000-8000-0000000000e2', status: 'confirmed', saleDate: '2026-09-14', saleNumber: 'SL-2627-00002' });
+    const r = await create(
+      <SalesScreen
+        rows={[early, late]}
+        error={null}
+        loading={false}
+        todayIso="2026-09-14"
+        onNewSale={() => {}}
+        onOpenSale={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    await act(async () => {
+      findByTestID(toJson(r), 'sales-filter-day')!.props.onPress?.();
+    });
+    const tree = toJson(r);
+    expect(findByTestID(tree, 'sales-day-sheet')).toBeDefined();
+    // A day already sold must be pickable: the filter looks back.
+    const past = findByTestID(tree, 'sales-day-calendar-day-2026-09-08')!;
+    expect((past.props.accessibilityState as { disabled: boolean }).disabled).toBe(false);
+    // Picking it narrows the list, and the frame says which day is on.
+    await act(async () => {
+      past.props.onPress?.();
+    });
+    const narrowed = toJson(r);
+    expect(findByTestID(narrowed, 'sales-day-2026-09-08')).toBeDefined();
+    expect(findByTestID(narrowed, 'sales-day-2026-09-14')).toBeUndefined();
+    expect(allText(findByTestID(narrowed, 'sales-filter-day')!)).toContain('Tue 8 Sep');
+    // …and "Any day" in the sheet, or the ✕, puts every day back.
+    await act(async () => {
+      findByTestID(narrowed, 'sales-filter-clear')!.props.onPress?.();
+    });
+    expect(findByTestID(toJson(r), 'sales-day-2026-09-14')).toBeDefined();
+    expect(findByTestID(toJson(r), 'sales-day-2026-09-08')).toBeDefined();
+  });
+
+  it('the filter narrows to one day, and null is every day', () => {
+    const rows = [
+      row({ id: 'a', saleDate: '2026-09-08' }),
+      row({ id: 'b', saleDate: '2026-09-14' }),
+    ];
+    expect(filterSalesByDay(rows, null).map((r) => r.id)).toEqual(['a', 'b']);
+    expect(filterSalesByDay(rows, '2026-09-14').map((r) => r.id)).toEqual(['b']);
+    expect(filterSalesByDay(rows, '2026-09-01')).toEqual([]);
+  });
+});
+
 describe('SalesScreen — the list (§S2)', () => {
   it('drafts sort first, then sale date newest first', () => {
     const sorted = sortSalesRows([
@@ -80,6 +158,7 @@ describe('SalesScreen — the list (§S2)', () => {
         rows={[draft, confirmed]}
         error={null}
         loading={false}
+        todayIso="2026-09-14"
         onNewSale={() => {}}
         onOpenSale={() => {}}
         onRetry={() => {}}
