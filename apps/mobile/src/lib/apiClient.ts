@@ -166,6 +166,20 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
     return deviceId;
   }
 
+  /**
+   * End the session — and drop everything cached ABOUT that session, here,
+   * once. The flags and the `/auth/me` answer are the SERVER's words about
+   * the user who is leaving.
+   *
+   * **Two of the three callers used to keep them.** A refused refresh and
+   * a reused token both cleared the session and left the cache standing,
+   * so the next sign-in read the PREVIOUS user's role profile: after a
+   * rep's session, tech1's screens stayed dark because the cached payload
+   * had no `tech.jobs` — reported as "the tech1 login is not working
+   * again" and only cured by killing the app (2026-09-18). Ownership
+   * belongs on the one function every path already calls, which is how the
+   * third path came to be the only one that remembered.
+   */
   function clearSession(): Promise<void> {
     if (clearInFlight === null) {
       // Rethrows when the keystore/localStorage write fails: a failed
@@ -173,6 +187,8 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
       // survive.
       clearInFlight = store.clear().finally(() => {
         clearInFlight = null;
+        resetFeatureFlags();
+        resetAuthMe();
       });
     }
     return clearInFlight;
@@ -444,16 +460,12 @@ export function createApiClient(store: TokenStore, options: ApiClientOptions = {
           undefined,
         );
       }
+      // `clearSession` drops the cached flags and /auth/me with the
+      // credentials — see its own note. Keeping them would show the next
+      // user another role's flag profile (seen on device: tech1's sales
+      // flags darkened rep1's sale form after a user switch), and the
+      // cached `/auth/me` answer carries the leaver's name.
       await clearSession();
-      // The cached flags are the SERVER's answer for the user who just
-      // left. Keeping them shows the NEXT user another role's flag
-      // profile (seen on device: tech1's sales flags darkened rep1's
-      // sale form after a user switch), and every rep route reads this
-      // cache first — so it must die with the session. The cached
-      // `/auth/me` answer dies with it for the same reason: it carries
-      // the leaver's name, and the dashboard greets by it.
-      resetFeatureFlags();
-      resetAuthMe();
     },
   };
 }
